@@ -1195,6 +1195,30 @@ int main(void) {
   turn_text(&a, last_turn, py_text, sizeof(py_text));
   assert(strstr(py_text, "42") != NULL);
 
+  cbor_item_t *mods = NULL;
+  assert(request(&a, a.next_id++, "module.list", wd_map(0), &mods, NULL) == 0);
+  cbor_item_t *mod_items = wd_get(mods, "modules");
+  assert(mod_items != NULL && cbor_array_size(mod_items) >= 8);
+  cbor_item_t *first_mod = cbor_array_get(mod_items, 0);
+  assert(wd_get(first_mod, "name") != NULL);
+  char *first_version = wd_text_copy(wd_get(first_mod, "version"));
+  assert(first_version != NULL && first_version[0] != '\0');
+  free(first_version);
+  bool first_valid = false;
+  assert(wd_bool_of(wd_get(first_mod, "valid"), &first_valid));
+  assert(first_valid);
+  cbor_decref(&first_mod);
+  wd_free(mods);
+
+  cbor_item_t *reload = NULL;
+  assert(request(&a, a.next_id++, "module.reload", wd_map(0), &reload, NULL) ==
+         0);
+  cbor_item_t *reload_updated = wd_get(reload, "updated");
+  cbor_item_t *reload_refused = wd_get(reload, "refused");
+  assert(reload_updated != NULL && cbor_array_size(reload_updated) == 0);
+  assert(reload_refused != NULL && cbor_array_size(reload_refused) == 0);
+  wd_free(reload);
+
   free(session);
   close(b.fd);
   close(a.fd);

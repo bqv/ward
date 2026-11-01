@@ -676,6 +676,17 @@ reporting zero changes, a corrupted v2 marked invalid with its error, and resolu
 back to v1. The daemon side — `module.list` and `module.reload` on top of this — is the next
 slice, and its gate will point a second daemon at a copied module directory, never at `out/`.
 
+Sixtieth: module.list and module.reload. The daemon scans its module directory at start-up and
+serves the registry: `module.list` answers `{name, version, size, hash, changed, valid}` per
+entry, and `module.reload` rescans, validates whatever changed, and answers `{updated, refused}`
+— a refused name with its version and the reason. Both arrays are allocated at their final size
+after a growing pointer array, because `wd_array(0)` plus `cbor_array_push` is the trap this
+repository has paid for twice.
+
+The gate checks the shape and a clean reload on an unchanged tree; the corrupt-and-refuse path
+belongs to a gate with its own copied module directory, which is the next slice. Under ASan the
+first attempt leaked `module_dir`, which is exactly what the sanitizer is for.
+
 ## M3: started, with one finding worth keeping
 
 The first M3 attempt replaced the daemon's single `wd_turn` with a pool keyed by session, so

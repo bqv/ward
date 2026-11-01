@@ -30,6 +30,7 @@
 #include "core/labels.h"
 #include "core/models.h"
 #include "core/pty.h"
+#include "core/registry.h"
 #include "core/schedule.h"
 #include "core/session.h"
 #include "core/util.h"
@@ -152,6 +153,8 @@ typedef struct {
   wd_scheduler *scheduler;
   wd_sched *schedules;
   wd_queue *queue;
+  wd_registry registry;
+  char *module_dir;
   size_t max_runs;
   char *default_model;
   char *quic_endpoint;
@@ -1378,6 +1381,87 @@ static void handle_terminal_close(wd_server *srv, wd_conn *conn, uint64_t id,
   conn_arm(srv, conn);
 }
 
+static void handle_module_list(wd_server *srv, wd_conn *conn, uint64_t id) {
+  cbor_item_t *items = wd_array(srv->registry.len);
+  for (size_t i = 0; i < srv->registry.len; i++) {
+    const wd_module_info *info = &srv->registry.items[i];
+    cbor_item_t *entry = wd_map(6);
+    wd_put(entry, "name", wd_text(info->name));
+    wd_put(entry, "version", wd_text(info->version));
+    wd_put(entry, "size", wd_uint((uint64_t)info->size));
+    wd_put(entry, "hash", wd_uint(info->hash));
+    wd_put(entry, "changed", cbor_build_bool(info->changed));
+    wd_put(entry, "valid", cbor_build_bool(info->valid));
+    bool pushed = cbor_array_push(items, entry);
+    cbor_decref(&entry);
+    if (!pushed) break;
+  }
+  cbor_item_t *result = wd_map(1);
+  wd_put(result, "modules", items);
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
+static void handle_module_reload(wd_server *srv, wd_conn *conn, uint64_t id) {
+  char **updated = NULL;
+  size_t updated_len = 0;
+  cbor_item_t **refused = NULL;
+  size_t refused_len = 0;
+  for (size_t i = 0; i < srv->registry.len; i++)
+    srv->registry.items[i].changed = false;
+  (void)wd_registry_scan(&srv->registry, srv->module_dir);
+  for (size_t i = 0; i < srv->registry.len; i++) {
+    wd_module_info *info = &srv->registry.items[i];
+    if (!info->changed) continue;
+    char *err = NULL;
+    if (wd_registry_validate(srv->module_dir, info->name, info->version, &err) ==
+        0) {
+      char **grown = realloc(updated, (updated_len + 1) * sizeof(*grown));
+      if (grown == NULL) break;
+      updated = grown;
+      updated[updated_len] = strdup(info->name);
+      if (updated[updated_len] != NULL) updated_len++;
+      info->changed = false;
+      free(err);
+    } else {
+      cbor_item_t **grown = realloc(refused, (refused_len + 1) * sizeof(*grown));
+      if (grown == NULL) break;
+      refused = grown;
+      cbor_item_t *entry = wd_map(3);
+      wd_put(entry, "name", wd_text(info->name));
+      wd_put(entry, "version", wd_text(info->version));
+      wd_put(entry, "error", wd_text(err != NULL ? err : "cannot load"));
+      refused[refused_len] = entry;
+      refused_len++;
+      info->valid = false;
+      snprintf(info->error, sizeof(info->error), "%s",
+               err != NULL ? err : "cannot load");
+      free(err);
+    }
+  }
+  cbor_item_t *updated_items = wd_array(updated_len);
+  for (size_t i = 0; i < updated_len; i++) {
+    cbor_item_t *name = wd_text(updated[i]);
+    bool pushed = cbor_array_push(updated_items, name);
+    cbor_decref(&name);
+    if (!pushed) break;
+    free(updated[i]);
+  }
+  free(updated);
+  cbor_item_t *refused_items = wd_array(refused_len);
+  for (size_t i = 0; i < refused_len; i++) {
+    bool pushed = cbor_array_push(refused_items, refused[i]);
+    cbor_decref(&refused[i]);
+    if (!pushed) break;
+  }
+  free(refused);
+  cbor_item_t *result = wd_map(2);
+  wd_put(result, "updated", updated_items);
+  wd_put(result, "refused", refused_items);
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
 static void handle_attachment_add(wd_server *srv, wd_conn *conn, uint64_t id,
                                  cbor_item_t *params) {
   char *session_id = wd_text_copy(wd_get(params, "id"));
@@ -2325,6 +2409,10 @@ static void handle_request(wd_server *srv, wd_conn *conn, uint64_t id,
     handle_subagent_interrupt(srv, conn, id, params);
   } else if (strcmp(method, "session.cancel") == 0) {
     handle_session_cancel(srv, conn, id, params);
+  } else if (strcmp(method, "module.list") == 0) {
+    handle_module_list(srv, conn, id);
+  } else if (strcmp(method, "module.reload") == 0) {
+    handle_module_reload(srv, conn, id);
   } else if (strcmp(method, "attachment.add") == 0) {
     handle_attachment_add(srv, conn, id, params);
   } else if (strcmp(method, "attachment.list") == 0) {
@@ -2873,6 +2961,9 @@ int wd_up_run(const wd_up_config *cfg) {
     snprintf(module_path, sizeof(module_path), "%s/modules", srv.state_dir);
     module_dir = module_path;
   }
+  srv.module_dir = strdup(module_dir);
+  wd_registry_init(&srv.registry);
+  (void)wd_registry_scan(&srv.registry, module_dir);
   if (srv.engine != NULL) {
     char *sched_err = NULL;
     srv.scheduler = wd_scheduler_new(srv.engine, module_dir, &sched_err);
@@ -3053,6 +3144,7 @@ cleanup:
   wd_labels_free(srv.labels);
   free(srv.default_model);
   free(srv.quic_endpoint);
+  free(srv.module_dir);
   wd_store_close(&srv.store);
   free(srv.socket_path);
   free(srv.state_dir);
