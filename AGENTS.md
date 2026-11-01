@@ -126,8 +126,16 @@ Selecting sets the default for new sessions; setting a session's model appends a
 `session.model` event, and the loader replays the log so the choice survives a restart.
 `ward model list`, `ward model select` and `ward session set-model` are the client side.
 
-What is left of M1 is the worker: a per-session process that owns long-lived children and
-the sandbox, which is also what lets the provider call leave the daemon's loop.
+Tenth: the worker. `src/core/worker.c` forks one supervisor per tool root on first use: the
+child calls `setsid`, sets `PR_SET_PDEATHSIG` so core death takes it and its children, and
+serves a small binary request protocol — argv, timeout, byte cap — running each command as
+its own process group and replying with the wait status, flags and output. A worker that has
+died is replaced by the next call, which is the containment the design asks for; exec no
+longer runs as a direct child of the daemon.
+
+What is still missing from M1 is the asynchronous half: a tool call and the provider request
+both still block the daemon's loop while they run, so the worker is isolation and lifetime,
+not yet a second thread of execution.
 
 M0's acceptance is 1,000 round-trips/s over UDS and a fuzz-clean decoder. A
 gate that is not measured is not met.

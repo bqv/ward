@@ -15,6 +15,7 @@
 #include <unistd.h>
 
 #include "core/proc.h"
+#include "core/worker.h"
 #include "core/util.h"
 #include "net/http.h"
 #include "proto/codec.h"
@@ -36,6 +37,8 @@ struct wd_turn {
   wd_instance *provider;
   wd_instance *eng;
   wd_instance *tools;
+  wd_worker *worker;
+  char *worker_root;
   wd_instance *policy;
   cbor_item_t *parked;
   uint64_t park_call;
@@ -49,6 +52,8 @@ static const wd_limits TURN_LIMITS = {.fuel = WD_TURN_FUEL,
                                       .max_instances = 6};
 
 #define WD_TOOL_MAX (64u * 1024u)
+
+static wd_worker *worker_for(wd_turn *turn);
 
 static uint8_t *read_file(const char *path, size_t *len) {
   FILE *f = fopen(path, "rb");
@@ -474,7 +479,14 @@ static int exec_run(wd_turn *turn, const uint8_t *in, size_t in_len,
   if (timeout == 0 || timeout > 600000) timeout = 600000;
   wd_proc_result result;
   char *err = NULL;
-  int rc = wd_proc_run(argv, turn->root, timeout, WD_TOOL_MAX, &result, &err);
+  wd_worker *worker = worker_for(turn);
+  int rc = wd_worker_run(worker, argv, timeout, WD_TOOL_MAX, &result, &err);
+  if (rc != 0) {
+    free(err);
+    err = NULL;
+    worker = worker_for(turn);
+    rc = wd_worker_run(worker, argv, timeout, WD_TOOL_MAX, &result, &err);
+  }
   free(copy);
   if (rc != 0) {
     char message[256];
@@ -643,6 +655,8 @@ void wd_turn_set_root(wd_turn *turn, const char *root) {
 
 void wd_turn_free(wd_turn *turn) {
   if (turn == NULL) return;
+  wd_worker_free(turn->worker);
+  free(turn->worker_root);
   wd_instance_free(turn->driver);
   wd_instance_free(turn->provider);
   wd_instance_free(turn->tools);
@@ -658,6 +672,23 @@ void wd_turn_free(wd_turn *turn) {
   free(turn->root);
   free(turn->endpoint);
   free(turn);
+}
+
+static wd_worker *worker_for(wd_turn *turn) {
+  if (turn->worker != NULL && wd_worker_alive(turn->worker) &&
+      turn->worker_root != NULL && turn->root != NULL &&
+      strcmp(turn->worker_root, turn->root) == 0)
+    return turn->worker;
+  wd_worker_free(turn->worker);
+  turn->worker = NULL;
+  free(turn->worker_root);
+  turn->worker_root = NULL;
+  char *err = NULL;
+  turn->worker = wd_worker_new(turn->root, &err);
+  free(err);
+  if (turn->worker != NULL && turn->root != NULL)
+    turn->worker_root = strdup(turn->root);
+  return turn->worker;
 }
 
 static wd_instance *instance_for(wd_turn *turn, const char *module,

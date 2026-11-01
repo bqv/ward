@@ -45,6 +45,7 @@ CORE_SRC := \
   src/core/approval.c \
   src/core/turn.c \
   src/core/models.c \
+  src/core/worker.c \
   src/core/proc.c \
   src/wasm/host.c \
   src/net/http.c \
