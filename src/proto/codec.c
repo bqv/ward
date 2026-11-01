@@ -23,6 +23,13 @@ static const char *const error_names[] = {
     [WD_ERR_CANCELLED] = "cancelled",
     [WD_ERR_LIMIT] = "limit",
     [WD_ERR_PERMISSION_DENIED] = "permission_denied",
+    [WD_ERR_PROVIDER_UNAVAILABLE] = "provider_unavailable",
+    [WD_ERR_MODEL_LIMIT] = "model_limit",
+    [WD_ERR_ENDPOINT_UNSUPPORTED] = "endpoint_unsupported",
+    [WD_ERR_CONTEXT_EXCEEDED] = "context_exceeded",
+    [WD_ERR_PROVIDER_TIMEOUT] = "provider_timeout",
+    [WD_ERR_PROVIDER_REJECTED] = "provider_rejected",
+    [WD_ERR_TOOL_PARSE] = "tool_parse",
 };
 
 const char *wd_error_name(wd_error err) {
