@@ -54,6 +54,9 @@ int wd_instance_state_export(wd_instance *instance, uint8_t **out,
                              size_t *out_len, char **err);
 int wd_instance_state_import(wd_instance *instance, const uint8_t *in,
                              size_t in_len, char **err);
+int wd_instance_state_migrate(wd_instance *instance, uint32_t from_schema,
+                              const uint8_t *in, size_t in_len, uint8_t **out,
+                              size_t *out_len, char **err);
 
 const uint8_t *wd_instance_output(const wd_instance *instance, size_t *len);
 void wd_instance_clear_output(wd_instance *instance);

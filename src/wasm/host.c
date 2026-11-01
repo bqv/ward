@@ -38,6 +38,8 @@ struct wd_instance {
   bool has_state_export;
   wasmtime_func_t state_import;
   bool has_state_import;
+  wasmtime_func_t state_migrate;
+  bool has_state_migrate;
   const char *caps[WD_MAX_CAPABILITIES];
   size_t ncap;
   wd_capability_handler handler;
@@ -454,6 +456,8 @@ static bool bind_exports(wd_instance *inst) {
       func_export(inst, "ward_state_export", &inst->state_export);
   inst->has_state_import =
       func_export(inst, "ward_state_import", &inst->state_import);
+  inst->has_state_migrate =
+      func_export(inst, "ward_state_migrate", &inst->state_migrate);
   return alloc;
 }
 
@@ -659,6 +663,58 @@ int wd_instance_state_export(wd_instance *instance, uint8_t **out,
     }
     memcpy(copy, base + at, len);
   }
+  *out = copy;
+  *out_len = len;
+  return 0;
+}
+
+int wd_instance_state_migrate(wd_instance *instance, uint32_t from_schema,
+                              const uint8_t *in, size_t in_len, uint8_t **out,
+                              size_t *out_len, char **err) {
+  if (!instance->has_state_migrate) {
+    set_err(err, "module does not migrate state");
+    return -1;
+  }
+  if (in_len > UINT32_MAX) {
+    set_err(err, "state too large");
+    return -1;
+  }
+  uint32_t at = 0;
+  if (alloc_guest(instance, in_len, &at, err) != 0) return -1;
+  uint8_t *base = NULL;
+  if (!memory_span(instance, at, in_len, &base)) {
+    set_err(err, "state out of bounds");
+    return -1;
+  }
+  if (in_len > 0) memcpy(base + at, in, in_len);
+  uint32_t desc = 0;
+  if (alloc_guest(instance, 8, &desc, err) != 0) return -1;
+  wasmtime_val_t args[4];
+  args[0].kind = WASMTIME_I32;
+  args[0].of.i32 = (int32_t)from_schema;
+  args[1].kind = WASMTIME_I32;
+  args[1].of.i32 = (int32_t)at;
+  args[2].kind = WASMTIME_I32;
+  args[2].of.i32 = (int32_t)in_len;
+  args[3].kind = WASMTIME_I32;
+  args[3].of.i32 = (int32_t)desc;
+  wasmtime_val_t res[1];
+  if (call_func(instance, &instance->state_migrate, args, 4, res, 0, err) != 0)
+    return -1;
+  uint32_t ptr = 0;
+  uint32_t len = 0;
+  if (read_pair(instance, desc, &ptr, &len, err) != 0) return -1;
+  uint8_t *span = NULL;
+  if (!memory_span(instance, ptr, len, &span)) {
+    set_err(err, "migrated state out of bounds");
+    return -1;
+  }
+  uint8_t *copy = malloc(len == 0 ? 1 : len);
+  if (copy == NULL) {
+    set_err(err, "out of memory");
+    return -1;
+  }
+  if (len > 0) memcpy(copy, span + ptr, len);
   *out = copy;
   *out_len = len;
   return 0;

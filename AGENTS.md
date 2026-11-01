@@ -687,6 +687,20 @@ The gate checks the shape and a clean reload on an unchanged tree; the corrupt-a
 belongs to a gate with its own copied module directory, which is the next slice. Under ASan the
 first attempt leaked `module_dir`, which is exactly what the sanitizer is for.
 
+Sixty-first: `ward_state_migrate`, the hole in the upgrade order. The host now binds the optional
+export `ward_state_migrate(schema, ptr, len, out)` the ABI document froze but the host never
+bound, calls it with a schema number and a blob in guest memory, and reads back a
+`{ptr, len}` pair — the same descriptor dance `state_export` uses.
+
+`tests/guest/echo.c` grew the export: it prefixes the incoming blob with the schema it came from
+plus one, which is how the test proves the migration function actually ran rather than a
+pass-through having happened. `tests/wasm_test` drives it end to end: export from one instance,
+import into a second, migrate the same bytes into a third and check the prefix and the payload.
+
+The binding is optional, like export and import, so no existing guest changes. The daemon does
+not use it yet — that comes with pinning and `session.upgrade`, where an instance has a version
+to move from.
+
 ## M3: started, with one finding worth keeping
 
 The first M3 attempt replaced the daemon's single `wd_turn` with a pool keyed by session, so

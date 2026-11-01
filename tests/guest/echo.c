@@ -101,6 +101,17 @@ void ward_state_export(uint32_t out) {
   reply((uint8_t *)(uintptr_t)out, state, state_len);
 }
 
+__attribute__((export_name("ward_state_migrate")))
+void ward_state_migrate(uint32_t schema, uint32_t at, uint32_t len,
+                        uint32_t out) {
+  if (len >= sizeof(state)) len = sizeof(state) - 1;
+  state[0] = (uint8_t)(schema + 1);
+  copy(state + 1, (const uint8_t *)(uintptr_t)at, len);
+  state_len = len + 1;
+  put32((uint8_t *)(uintptr_t)out, (uint32_t)(uintptr_t)state);
+  put32((uint8_t *)(uintptr_t)out + 4, state_len);
+}
+
 __attribute__((export_name("ward_state_import")))
 uint32_t ward_state_import(uint32_t at, uint32_t len) {
   if (len > sizeof(state)) return 1;

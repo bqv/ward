@@ -149,9 +149,20 @@ static void test_state(void) {
   wd_instance *b = instantiate(module, GRANTED, 1, &calls, &err);
   assert(b != NULL);
   assert(wd_instance_state_import(b, state, state_len, &err) == 0);
-  free(state);
   static const uint8_t get[] = {5};
   expect_call(b, get, 1, (const uint8_t *)"state", 5);
+  wd_instance *m = instantiate(module, GRANTED, 1, &calls, &err);
+  assert(m != NULL);
+  uint8_t *migrated = NULL;
+  size_t migrated_len = 0;
+  assert(wd_instance_state_migrate(m, 1, state, state_len, &migrated,
+                                   &migrated_len, &err) == 0);
+  assert(migrated_len == state_len + 1);
+  assert(migrated[0] == 2);
+  assert(memcmp(migrated + 1, "state", 5) == 0);
+  free(migrated);
+  wd_instance_free(m);
+  free(state);
   wd_instance_free(a);
   wd_instance_free(b);
   wd_module_free(module);
