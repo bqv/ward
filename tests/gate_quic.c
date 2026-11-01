@@ -14,6 +14,7 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/wait.h>
+#include <sys/prctl.h>
 #include <unistd.h>
 
 #include <openssl/pem.h>
@@ -272,6 +273,7 @@ int main(void) {
     dup2(ready[1], 1);
     close(ready[1]);
     setenv("WARD_QUIC_BIND", "127.0.0.1:0", 1);
+    prctl(PR_SET_PDEATHSIG, SIGTERM);
     execl(bin, "ward", "up", "--socket", sock, "--state", state_dir,
           (char *)NULL);
     _exit(127);

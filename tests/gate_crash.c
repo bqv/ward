@@ -13,6 +13,7 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/wait.h>
+#include <sys/prctl.h>
 #include <unistd.h>
 
 #include "core/util.h"
@@ -152,6 +153,7 @@ static pid_t start_daemon(const char *bin, const char *sock, const char *state) 
   pid_t pid = fork();
   assert(pid >= 0);
   if (pid == 0) {
+    prctl(PR_SET_PDEATHSIG, SIGTERM);
     execl(bin, "ward", "up", "--socket", sock, "--state", state, (char *)NULL);
     _exit(127);
   }

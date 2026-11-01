@@ -15,6 +15,7 @@
 #include <sys/un.h>
 #include <sys/wait.h>
 #include <time.h>
+#include <sys/prctl.h>
 #include <unistd.h>
 
 #include "proto/codec.h"
@@ -148,6 +149,7 @@ int main(void) {
     close(ready[0]);
     dup2(ready[1], 1);
     close(ready[1]);
+    prctl(PR_SET_PDEATHSIG, SIGTERM);
     execl(bin, "ward", "up", "--socket", sock, "--state", state,
           (char *)NULL);
     _exit(127);

@@ -14,6 +14,7 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/wait.h>
+#include <sys/prctl.h>
 #include <unistd.h>
 
 #include "core/util.h"
@@ -341,6 +342,7 @@ int main(void) {
     setenv("WARD_MODULE_DIR", modules, 1);
     setenv("WARD_TOOL_ROOT", root, 1);
     setenv("WARD_QUIC_BIND", "off", 1);
+    prctl(PR_SET_PDEATHSIG, SIGTERM);
     execl(bin, "ward", "up", "--socket", sock, "--state", state, (char *)NULL);
     _exit(127);
   }

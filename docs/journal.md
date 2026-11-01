@@ -1366,3 +1366,16 @@ The investigation also found something about the harness rather than the product
 earlier gate runs were still holding sockets and state directories, and a stale one made a live turn look wedged.
 The suite leaves daemons behind when a gate fails part-way. That is a test-lifecycle bug and the next thing to
 fix, because a leak that makes the *product* look broken is worse than the failure that caused it.
+
+Hundred-and-third: a gate's daemon now dies with the gate. Each gate sets `PR_SET_PDEATHSIG` in the child
+before exec, so a gate killed by an assertion, a timeout or a signal cannot leave a `ward up` holding a socket
+and a state directory. The kernel does the cleanup; no atexit handler can be skipped by `abort()`, which is
+exactly how the leak survived.
+
+Verified the way the leak was found: start `gate_tool`, abort it mid-run with SIGABRT, and count — three daemons
+before, one after, and the survivor is the user service. The suite leaves nothing behind in debug, ASan or
+UBSan.
+
+That is worth as much as a feature. Five stale daemons made a live turn look wedged for several minutes, and the
+wrong hypothesis (a stuck provider) was only abandoned because `ps` disagreed with it. A test that fails must
+leave the machine as it found it, or it costs the next person the same minutes.
