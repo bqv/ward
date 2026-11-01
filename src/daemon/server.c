@@ -319,22 +319,6 @@ static void handle_model_select(wd_server *srv, wd_conn *conn, uint64_t id,
   conn_arm(srv, conn);
 }
 
-static void handle_session_cancel(wd_server *srv, wd_conn *conn, uint64_t id,
-                                  cbor_item_t *params) {
-  char *session_id = wd_text_copy(wd_get(params, "id"));
-  bool cancelled = false;
-  if (session_id != NULL) {
-    wd_run *run = run_find(srv, session_id);
-    if (run != NULL && wd_turn_pending_kind(run->turn) == 2)
-      cancelled = wd_turn_cancel_tool(run->turn) != 0;
-  }
-  free(session_id);
-  cbor_item_t *result = wd_map(1);
-  wd_put(result, "cancelled", cbor_build_bool(cancelled));
-  conn_send_cached(conn, id, wd_response_ok(id, result));
-  conn_arm(srv, conn);
-}
-
 static void handle_session_fork(wd_server *srv, wd_conn *conn, uint64_t id,
                                 cbor_item_t *params) {
   char *session_id = wd_text_copy(wd_get(params, "id"));
@@ -1097,6 +1081,29 @@ static void handle_subagent_interrupt(wd_server *srv, wd_conn *conn,
   cbor_item_t *result = wd_map(2);
   wd_put(result, "interrupted", cbor_build_bool(stopped != 0));
   wd_put(result, "stopped", cbor_build_bool(stopped != 0));
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
+static void handle_session_cancel(wd_server *srv, wd_conn *conn, uint64_t id,
+                                  cbor_item_t *params) {
+  char *session_id = wd_text_copy(wd_get(params, "id"));
+  bool cancelled = false;
+  if (session_id != NULL) {
+    wd_run *run = run_find(srv, session_id);
+    wd_session *session = wd_session_find(&srv->store, session_id);
+    if (run != NULL && session != NULL) {
+      wd_turn_ctx tc = {srv, session};
+      char *err = NULL;
+      cancelled =
+          wd_turn_abort(run->turn, "cancelled", turn_emit, &tc, &err) == 0;
+      free(err);
+      if (cancelled) run_free(srv, run);
+    }
+  }
+  free(session_id);
+  cbor_item_t *result = wd_map(1);
+  wd_put(result, "cancelled", cbor_build_bool(cancelled));
   conn_send_cached(conn, id, wd_response_ok(id, result));
   conn_arm(srv, conn);
 }

@@ -188,7 +188,12 @@ case-insensitively, newest first. Answers `{sessions: [...]}`.
 A session object is `{id, cwd, model, created, last_seq}` plus, once it has a label row,
 `{name, archived, pinned, updated_ms}`.
 
-**`session.cancel`** — params `{id}`. Kills the command running for that session, if one is:
+**`session.cancel`** — params `{id}`. Ends the session's turn wherever it waits: a worker
+command is killed, a provider request is dropped, an approval is abandoned, and the turn
+finishes with `turn.end {turn, aborted: true, reason}`. Answers `{cancelled}`; false when the
+session was not running.
+
+**`session.cancel` (fields)** — params `{id}`. Kills the command running for that session, if one is:
 the worker dies, the turn takes the failure as the tool result and finishes with `turn.end`.
 Answers `{cancelled: bool}`, false when nothing was running.
 

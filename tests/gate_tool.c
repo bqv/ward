@@ -805,18 +805,14 @@ int main(void) {
   assert(cbor_array_size(wd_get(jobs, "jobs")) >= 2);
   wd_free(jobs);
 
-  cbor_item_t *killed_job = NULL;
-  cbor_item_t *kill_params = wd_map(1);
-  wd_put(kill_params, "job", wd_text(child_b));
-  bool killed_ok = false;
-  assert(request(&a, a.next_id++, "job.kill", kill_params, &killed_job,
-                 &killed_ok) == 0);
-  assert(killed_ok);
-  bool was_killed = false;
-  assert(wd_bool_of(wd_get(killed_job, "killed"), &was_killed));
-  assert(was_killed);
-  wd_free(killed_job);
-
+  cbor_item_t *cancel_sub = NULL;
+  cbor_item_t *cancel_child = wd_map(1);
+  wd_put(cancel_child, "id", wd_text(child_b));
+  bool cancel_ok = false;
+  assert(request(&a, a.next_id++, "session.cancel", cancel_child, &cancel_sub,
+                 &cancel_ok) == 0);
+  assert(cancel_ok);
+  wd_free(cancel_sub);
   cbor_item_t *end_b = wait_turn_end(&a, turn_b);
   assert(end_b != NULL);
   bool aborted = false;

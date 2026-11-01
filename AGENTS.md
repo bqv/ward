@@ -316,6 +316,13 @@ turn parks on an approval with that reason, and `plan.run` in core answers the a
 No new core machinery: the gate is a policy row, a tool mapping and a driver branch, which is
 what it should be. The tool gate prompts a plan, approves it and waits for the turn's own end.
 
+Thirty-second: cancel ends a turn too. `session.cancel` was a worker kill, so it did nothing
+for a turn waiting on a provider reply — the same gap `job.kill` had before `wd_turn_abort`
+existed. It now uses the abort primitive: any parked turn can be cancelled, the client gets
+`turn.end {turn, aborted, reason}`, and the run is freed. The tool gate cancels a
+provider-parked subagent and checks the aborted end, which is the case the old method could
+not touch.
+
 ## M3: started, with one finding worth keeping
 
 The first M3 attempt replaced the daemon's single `wd_turn` with a pool keyed by session, so
