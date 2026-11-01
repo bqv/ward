@@ -67,7 +67,7 @@ WARD := $(BUILDDIR)/ward
 
 TEST_BINS := $(patsubst tests/%.c,$(BUILDDIR)/%,$(wildcard tests/*.c))
 
-MODULES := engine driver provider tools policy schedule skills judge
+MODULES := engine driver provider tools policy schedule skills judge code
 MODULE_WASM := $(addprefix $(BUILDDIR)/,$(addsuffix .wasm,$(MODULES)))
 
 GUESTS := echo wasi importer
@@ -129,6 +129,10 @@ $(BUILDDIR)/policy.wasm: modules/policy/policy.c modules/abi/wd_abi.h
 	$(WASI_CC) $(WASI_FLAGS) -I modules/abi $< -o $@
 
 $(BUILDDIR)/judge.wasm: modules/judge/judge.c modules/abi/wd_abi.h
+	@mkdir -p $(@D)
+	$(WASI_CC) $(WASI_FLAGS) -I modules/abi $< -o $@
+
+$(BUILDDIR)/code.wasm: modules/code/code.c modules/abi/wd_abi.h
 	@mkdir -p $(@D)
 	$(WASI_CC) $(WASI_FLAGS) -I modules/abi $< -o $@
 

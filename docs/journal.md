@@ -915,3 +915,15 @@ it with the conformance guest and checks the migrated bytes.
 One limit is written down rather than hidden: the daemon passes the same schema in and out, because
 manifests are per module and not per version. Real migration between versions needs per-version
 manifests, and that is the next thing a stateful module will force.
+
+Seventy-fourth: the code outline guest, first half. `modules/code` is pure and answers `{text}` with
+`{symbols: [{name, kind, line}]}` — a scanner, not a parser: an identifier followed by a bracketed
+argument list and then a brace, skipping the language keywords that look the same. It is labelled a
+scanner everywhere because it is one, and tree-sitter is what would make it a real outline.
+
+The first version found nothing: it only examined the *first* word of each line, so `int main(void)`
+looked like the word `int` followed by a space. The rewrite walks every identifier and asks what
+follows it, which is both simpler and right.
+
+`tests/code_guest_test` measures two functions with an `if` inside them and a struct that must
+produce nothing — the case that would pass if the scanner merely looked for braces.
