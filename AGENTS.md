@@ -385,6 +385,18 @@ merge and the guest, not in the reading.
 The provider buffer increase is kept: a 4 KiB JSON buffer could not carry a rules message and
 a transcript together, and that limit would have bitten regardless.
 
+Thirty-ninth: web.search, first attempt, and the mistake to avoid. Core grew the capability —
+`{query, k}` in, a `srchdsh search -q … -max … -json` child run with `wd_proc_run` and its
+output returned as `{ok, status, text}` — and the skills guest was taught to call it for
+`/search`. It hung the gate instead of working, and the likely cause is structural: `skills`
+was loaded as a *pure* module (`no_caps, 0, true`), so the moment it gained a `ward.cap`
+import the host refused or mis-instantiated it, and every prompt after that stalled.
+
+The fix for the next attempt is explicit: a module that calls a capability is not pure. Its
+spec must say `false`, its granted list must name `web.search`, and the instance must be
+created with those grants — the same shape `driver` already has. Read the host's import
+enforcement before adding an import to a guest that was pure yesterday.
+
 ## M3: started, with one finding worth keeping
 
 The first M3 attempt replaced the daemon's single `wd_turn` with a pool keyed by session, so
