@@ -1112,3 +1112,27 @@ answering through ward with no cloud call.
 Still open: `ward session prompt` and `ward -p` do not stream deltas; they return before the turn ends, so
 the text is invisible unless the session is replayed. The daemon emits it correctly — this is the CLI's
 subscription gap, and it is the next thing to fix.
+
+Eighty-seventh: a remote endpoint, and both models answering. `net.request` refused anything that was not
+loopback — a sane default from M1, when the only endpoint was a fake one in the tests. A model entry that
+names its own endpoint is an operator decision, so that now sets `remote_ok` on the turn and the guard
+admits the host. The bearer token still only travels to non-loopback URLs, which is exactly the pair that
+matters for a cloud model: the key goes where the key belongs and nowhere else.
+
+Verified with the key from `~/.dsh/credentials.yaml`, installed to `<state>/api_key` at 0600 (never in a
+world-readable conf, never echoed into a log):
+
+    session.prompted {"text":"Reply with exactly: hello from deepseek"}
+    text.delta      {"text":"hello from deepseek"}
+    turn.end
+
+and the local rung, unchanged:
+
+    text.delta      {"text":"Hello from Qwen! How can I assist you today?"}
+
+Two models, two endpoints, one daemon: DeepSeek over TLS with a bearer token, Qwen1.5-1.8B on llamb with
+no token at all.
+
+The CLI still does not stream a turn it starts — `session prompt` returns before the turn ends, so the text
+appears only on `session resume --from 1 --follow`. That is the next thing to fix, and it is now the only
+thing between this setup and a usable one-liner.

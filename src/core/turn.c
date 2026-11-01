@@ -58,6 +58,7 @@ struct wd_turn {
   wd_module *code_module;
   char trapped[WD_MAX_MODULE_NAME];
   char model_name[128];
+  bool remote_ok;
   wd_judge *judge_cache;
   cbor_item_t *judge_event;
   char *worker_root;
@@ -142,6 +143,10 @@ static wd_module *load_pinned(wd_engine *engine, const char *dir,
     break;
   }
   return load_module(engine, dir, file, spec, err);
+}
+
+void wd_turn_allow_remote(wd_turn *turn) {
+  if (turn != NULL) turn->remote_ok = true;
 }
 
 void wd_turn_set_model_name(wd_turn *turn, const char *name) {
@@ -234,7 +239,7 @@ static int net_request(wd_turn *turn, const uint8_t *in, size_t in_len,
   char url[512];
   snprintf(url, sizeof(url), "%s%s", turn->endpoint, path != NULL ? path : "");
   free(path);
-  if (!wd_http_loopback(url)) {
+  if (!wd_http_loopback(url) && !turn->remote_ok) {
     free(body);
     *err = strdup("net.request: the endpoint is not loopback");
     return -1;
@@ -1409,7 +1414,7 @@ static int net_submit(wd_turn *turn, cbor_item_t *reply, char **err) {
   char url[512];
   snprintf(url, sizeof(url), "%s%s", turn->endpoint, path);
   free(path);
-  if (!wd_http_loopback(url)) {
+  if (!wd_http_loopback(url) && !turn->remote_ok) {
     free(body);
     *err = strdup("net.request: the endpoint is not loopback");
     return -1;
