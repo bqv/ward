@@ -68,27 +68,17 @@ static int spawn(const char *const argv[], const char *cwd, int *pipe_out) {
   return (int)pid;
 }
 
-int wd_proc_run(const char *const argv[], const char *cwd, uint64_t timeout_ms,
-                size_t max_bytes, wd_proc_result *result, char **err) {
-  if (argv == NULL || argv[0] == NULL) {
-    if (err != NULL) *err = strdup("no command");
-    return -1;
-  }
-  memset(result, 0, sizeof(*result));
-  int fd = -1;
-  int pid = spawn(argv, cwd, &fd);
-  if (pid < 0) {
-    if (err != NULL) *err = strdup("cannot start the command");
-    return -1;
-  }
+static int drain(int pid, int fd, uint64_t timeout_ms, size_t max_bytes,
+                wd_proc_result *result) {
   size_t cap = max_bytes < 4096 ? 4096 : max_bytes + 1;
   uint8_t *buf = malloc(cap);
   if (buf == NULL) {
-    kill(-pid, SIGKILL);
+    (void)kill(-pid, SIGKILL);
+    (void)kill(pid, SIGKILL);
     close(fd);
-    if (err != NULL) *err = strdup("out of memory");
     return -1;
   }
+  result->len = 0;
   uint64_t deadline = 0;
   if (timeout_ms > 0) {
     struct timespec now;
@@ -146,4 +136,80 @@ int wd_proc_run(const char *const argv[], const char *cwd, uint64_t timeout_ms,
   buf[result->len] = '\0';
   result->out = buf;
   return 0;
+}
+
+static int spawn_with_input(const char *const argv[], const char *cwd,
+                          int stdin_fd, int *pipe_out) {
+  int fds[2];
+  if (pipe2(fds, O_CLOEXEC) != 0) return -1;
+  pid_t pid = fork();
+  if (pid < 0) {
+    close(fds[0]);
+    close(fds[1]);
+    return -1;
+  }
+  if (pid == 0) {
+    (void)setsid();
+    close(fds[0]);
+    if (dup2(stdin_fd, STDIN_FILENO) < 0 ||
+        dup2(fds[1], STDOUT_FILENO) < 0 || dup2(fds[1], STDERR_FILENO) < 0)
+      _exit(126);
+    if (fds[1] != STDOUT_FILENO && fds[1] != STDERR_FILENO) close(fds[1]);
+    if (cwd != NULL && chdir(cwd) != 0) _exit(126);
+    exec_command(argv);
+    _exit(127);
+  }
+  close(fds[1]);
+  *pipe_out = fds[0];
+  return (int)pid;
+}
+
+int wd_proc_run(const char *const argv[], const char *cwd, uint64_t timeout_ms,
+                size_t max_bytes, wd_proc_result *result, char **err) {
+  if (argv == NULL || argv[0] == NULL) {
+    if (err != NULL) *err = strdup("no command");
+    return -1;
+  }
+  memset(result, 0, sizeof(*result));
+  int fd = -1;
+  int pid = spawn(argv, cwd, &fd);
+  if (pid < 0) {
+    if (err != NULL) *err = strdup("cannot start the command");
+    return -1;
+  }
+  return drain(pid, fd, timeout_ms, max_bytes, result);
+}
+
+int wd_proc_run_input(const char *const argv[], const char *cwd,
+                      const void *input, size_t input_len, uint64_t timeout_ms,
+                      size_t max_bytes, wd_proc_result *result, char **err) {
+  if (argv == NULL || argv[0] == NULL) {
+    if (err != NULL) *err = strdup("no command");
+    return -1;
+  }
+  memset(result, 0, sizeof(*result));
+  int in[2];
+  if (pipe2(in, O_CLOEXEC) != 0) {
+    if (err != NULL) *err = strdup("cannot create the input pipe");
+    return -1;
+  }
+  int out = -1;
+  int pid = spawn_with_input(argv, cwd, in[0], &out);
+  close(in[0]);
+  if (pid < 0) {
+    close(in[1]);
+    if (err != NULL) *err = strdup("cannot start the command");
+    return -1;
+  }
+  size_t written = 0;
+  while (written < input_len) {
+    ssize_t n = write(in[1], (const uint8_t *)input + written, input_len - written);
+    if (n < 0) {
+      if (errno == EINTR) continue;
+      break;
+    }
+    written += (size_t)n;
+  }
+  close(in[1]);
+  return drain(pid, out, timeout_ms, max_bytes, result);
 }

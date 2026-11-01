@@ -408,6 +408,16 @@ The previous round's hang was the pure-module spec: `skills` is loaded `false` w
 a guest that gains an import is no longer pure, and the gate's stub binary (`WARD_SEARCH_BIN`)
 keeps the test off the network.
 
+Forty-first: the MCP client. `mcp.call {request}` runs the configured server binary
+(`WARD_MCP_BIN`, else `~/bin/mcp`), writes one JSON-RPC line to its stdin, closes it and
+returns the first response line as `{ok, status, text}`. `src/core/proc.c` grew
+`wd_proc_run_input` for that — one child, a stdin pipe, the same bounded drain as `exec` —
+and the skills guest answers `/mcp <json>` with what the server said, so the module still
+decides and core still only owns the process.
+
+One request per process is the M4 shape and the note says so: a persistent session with
+`initialize`/`tools/list`/`tools/call` and a framed transport is a later milestone's work.
+
 ## M3: started, with one finding worth keeping
 
 The first M3 attempt replaced the daemon's single `wd_turn` with a pool keyed by session, so

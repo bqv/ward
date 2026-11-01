@@ -17,6 +17,9 @@ typedef struct {
   size_t len;
 } wd_proc_result;
 
+int wd_proc_run_input(const char *const argv[], const char *cwd,
+                      const void *input, size_t input_len, uint64_t timeout_ms,
+                      size_t max_bytes, wd_proc_result *result, char **err);
 int wd_proc_run(const char *const argv[], const char *cwd, uint64_t timeout_ms,
                 size_t max_bytes, wd_proc_result *out, char **err);
 void wd_proc_result_free(wd_proc_result *result);

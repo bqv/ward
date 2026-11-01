@@ -130,6 +130,12 @@ fields stay the same when a real tokenizer replaces the estimate.
 **`stats.global`** — no params. The same counters summed over every session, plus
 `{sessions}`.
 
+**MCP.** `/mcp <json request>` sends one JSON-RPC line to the configured MCP server: core's
+`mcp.call` capability runs the server binary (`WARD_MCP_BIN`, else `~/bin/mcp`) as a child,
+writes the request to its stdin, closes it, and answers `{ok, status, text}` with the
+server's first response. One request per process is the M4 shape; a persistent session is
+what a later milestone would add.
+
 **Web search.** `/search <terms>` is handled by the `skills` guest, which calls core's
 `web.search` capability with `{query, k}`. Core runs the local `srchdsh` binary
 (`search -q … -max … -json`) as a child with no shell, a 20 s timeout and a 64 KiB cap, and

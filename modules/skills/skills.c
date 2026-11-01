@@ -79,6 +79,47 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
     handled = 1;
     text = "project rules are read from AGENTS.md in the session's cwd";
   }
+  if (wd_key_eq((const uint8_t *)command, wd_len(command), "mcp")) {
+    handled = 1;
+    if (args[0] == '\0') {
+      text = "usage: /mcp <json request>";
+    } else {
+      static uint8_t callbuf2[1024];
+      static const char cap_name2[] = "mcp.call";
+      wd_put32(callbuf2, 8);
+      for (uint32_t i = 0; i < 8; i++) callbuf2[4 + i] = (uint8_t)cap_name2[i];
+      wd_w cw2;
+      wd_w_init(&cw2, callbuf2 + 12, sizeof(callbuf2) - 12);
+      wd_w_map(&cw2, 1);
+      wd_w_textz(&cw2, "request");
+      wd_w_textz(&cw2, args);
+      uint32_t desc2[2];
+      search_text[0] = '\0';
+      if (!cw2.failed) {
+        ward_cap((uint32_t)(uintptr_t)callbuf2, 12 + cw2.at, (uint32_t)(uintptr_t)desc2);
+        const uint8_t *res2 = (const uint8_t *)(uintptr_t)desc2[0];
+        wd_r rr2 = {res2, desc2[1], 0, 0};
+        uint32_t rn2 = 0;
+        if (wd_r_map(&rr2, &rn2) == 0) {
+          for (uint32_t i = 0; i < rn2; i++) {
+            const uint8_t *kp3 = 0;
+            uint32_t kn3 = 0;
+            if (wd_r_text_ptr(&rr2, &kp3, &kn3) != 0) break;
+            if (wd_key_eq(kp3, kn3, "text")) {
+              wd_r_text(&rr2, search_text, sizeof(search_text), 0);
+            } else if (wd_r_skip(&rr2) != 0) {
+              break;
+            }
+          }
+        }
+      }
+      if (search_text[0] == '\0') {
+        static const char none2[] = "the server said nothing";
+        for (uint32_t i = 0; i < sizeof(none2); i++) search_text[i] = none2[i];
+      }
+      text = search_text;
+    }
+  }
   if (wd_key_eq((const uint8_t *)command, wd_len(command), "search")) {
     handled = 1;
     if (args[0] == '\0') {

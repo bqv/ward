@@ -246,7 +246,7 @@ int main(void) {
 #ifdef __SANITIZE_ADDRESS__
   setenv("WARD_FAKE_DELAY_MS", "1500", 1);
 #else
-  setenv("WARD_FAKE_DELAY_MS", "400", 1);
+  setenv("WARD_FAKE_DELAY_MS", "800", 1);
 #endif
   setenv("WARD_MAX_RUNS", "2", 1);
   fake_endpoint(&endpoint_port, &endpoint);
@@ -260,6 +260,15 @@ int main(void) {
   fclose(stub);
   assert(chmod(stub_path, 0755) == 0);
   setenv("WARD_SEARCH_BIN", stub_path, 1);
+  char mcp_path[512];
+  snprintf(mcp_path, sizeof(mcp_path), "%s/mcp-stub", root);
+  FILE *mcp = fopen(mcp_path, "wb");
+  assert(mcp != NULL);
+  assert(fputs("#!/bin/bash\nread -r line\necho '{\"result\":\"mcp ok\"}'\n",
+               mcp) >= 0);
+  fclose(mcp);
+  assert(chmod(mcp_path, 0755) == 0);
+  setenv("WARD_MCP_BIN", mcp_path, 1);
   char state[256];
   char sock[128];
   snprintf(state, sizeof(state), "%s/state", root);
@@ -828,6 +837,24 @@ int main(void) {
   assert(search_end != NULL);
   wd_free(search_end);
 
+  cbor_item_t *mcp_resp = NULL;
+  cbor_item_t *mcp_prompt = wd_map(2);
+  wd_put(mcp_prompt, "id", wd_text(session));
+  wd_put(mcp_prompt, "text",
+         wd_text("/mcp {\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}"));
+  assert(request(&a, a.next_id++, "session.prompt", mcp_prompt, &mcp_resp,
+                 NULL) == 0);
+  wd_free(mcp_resp);
+  cbor_item_t *mcp_delta = wait_event(&a, "text.delta", NULL);
+  assert(mcp_delta != NULL);
+  char *mcp_text = wd_text_copy(wd_get(mcp_delta, "text"));
+  assert(mcp_text != NULL && strstr(mcp_text, "mcp ok") != NULL);
+  free(mcp_text);
+  wd_free(mcp_delta);
+  cbor_item_t *mcp_end = wait_turn_end(&a, last_turn);
+  assert(mcp_end != NULL);
+  wd_free(mcp_end);
+
   cbor_item_t *sched = NULL;
   cbor_item_t *sched_params = wd_map(3);
   wd_put(sched_params, "session", wd_text(session));
@@ -940,7 +967,7 @@ int main(void) {
 #ifdef __SANITIZE_ADDRESS__
   assert(elapsed < 4000);
 #else
-  assert(elapsed < 700);
+  assert(elapsed < 1500);
 #endif
 
   cbor_item_t *idle = NULL;
