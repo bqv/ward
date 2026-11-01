@@ -54,6 +54,7 @@ struct wd_turn {
   wd_instance *judge;
   wd_module *judge_module;
   wd_judge *judge_cache;
+  cbor_item_t *judge_event;
   char *worker_root;
   wd_instance *policy;
   wd_instance *skills;
@@ -868,6 +869,15 @@ static int policy_check(wd_turn *turn, const uint8_t *in, size_t in_len,
                         (const uint8_t *)(payload != NULL ? payload : ""),
                         payload != NULL ? strlen(payload) : 0, judge_ask, &jc,
                         &consulted);
+    if (consulted) {
+      cbor_item_t *event = wd_map(3);
+      wd_put(event, "tool", wd_text(tool));
+      wd_put(event, "verdict", wd_text(wd_verdict_name(merged)));
+      wd_put(event, "escalated",
+             cbor_build_bool(merged != WD_VERDICT_ALLOW));
+      if (turn->judge_event != NULL) wd_free(turn->judge_event);
+      turn->judge_event = event;
+    }
     if (merged != WD_VERDICT_ALLOW) {
       cbor_item_t *rewritten = wd_map(3);
       wd_put(rewritten, "decision", wd_text(wd_verdict_name(merged)));
@@ -1061,6 +1071,7 @@ void wd_turn_free(wd_turn *turn) {
   wd_instance_free(turn->judge);
   wd_module_free(turn->judge_module);
   wd_judge_free(turn->judge_cache);
+  if (turn->judge_event != NULL) wd_free(turn->judge_event);
   wd_instance_free(turn->eng);
   wd_module_free(turn->driver_module);
   wd_module_free(turn->provider_module);
@@ -1418,6 +1429,16 @@ static int drive(wd_turn *turn, cbor_item_t *message, wd_turn_emit emit,
       }
     }
     wd_free(reply);
+    if (turn->judge_event != NULL) {
+      cbor_item_t *event = turn->judge_event;
+      turn->judge_event = NULL;
+      if (emit != NULL) {
+        char *emit_err = NULL;
+        (void)emit(ctx, "judge.decision", event, &emit_err);
+        free(emit_err);
+      }
+      wd_free(event);
+    }
     if (failed) {
       wd_free(message);
       return -1;

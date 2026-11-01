@@ -1157,9 +1157,18 @@ int main(void) {
   assert(request(&a, a.next_id++, "approval.respond", judge_respond,
                  &judge_answer, NULL) == 0);
   wd_free(judge_answer);
+  cbor_item_t *judge_event = wait_event(&a, "judge.decision", NULL);
+  assert(judge_event != NULL);
+  char *judged_tool = wd_text_copy(wd_get(judge_event, "tool"));
+  bool judged_escalated = false;
+  assert(judged_tool != NULL && strcmp(judged_tool, "read") == 0);
+  assert(wd_bool_of(wd_get(judge_event, "escalated"), &judged_escalated));
+  assert(judged_escalated);
+  free(judged_tool);
+  wd_free(judge_event);
   char judged_text[2048];
   turn_text(&a, last_turn, judged_text, sizeof(judged_text));
-  assert(strstr(judged_text, "denied") != NULL || judged_text[0] != '\0');
+  assert(judged_text[0] != '\0');
 
   cbor_item_t *py = NULL;
   cbor_item_t *py_prompt = wd_map(2);

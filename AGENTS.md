@@ -582,6 +582,16 @@ still in flight when the third is issued, so the queue assertion measures the ca
 the machine's speed. That number had been drifting for several rounds and is no longer on the
 edge.
 
+Fifty-fifth: the judge's audit trail. When the judge is consulted, `policy.check` stashes the
+outcome on the turn and the drive loop emits `judge.decision {tool, verdict, escalated}` after
+the driver returns — the capability itself has no emit path, and giving it one would have meant
+threading a callback through every capability for one event. The gate asserts the event: tool
+`read`, `escalated: true`, on the turn that parked.
+
+The judge row is now complete at the rule level: contract, classifier, escalation and audit.
+What remains is the model behind the classifier, which is a swap of the guest's body rather than
+new machinery.
+
 ## M3: started, with one finding worth keeping
 
 The first M3 attempt replaced the daemon's single `wd_turn` with a pool keyed by session, so

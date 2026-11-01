@@ -153,7 +153,9 @@ its shape stay when that guest lands.
 decision; when that decision is `allow`, the `judge` guest may raise it to `ask` by classifying
 the payload. The merge is monotonic — a judge can never lower an `ask` or a `deny` — and if the
 judge fails or answers nonsense the rule stands. An escalated call parks exactly like a rule
-`ask`, so the client sees an ordinary `approval.requested`.
+`ask`, so the client sees an ordinary `approval.requested`. Whenever the judge is consulted the
+turn appends a durable `judge.decision {tool, verdict, escalated}` event, so a replay can
+explain why a call was allowed or paused.
 
 **Terminals.** `terminal.open {id, command?, rows?, cols?}` starts a command under a
 pseudo-terminal in the session's cwd (default `sh -i`) and answers `{terminal, pid}`.
