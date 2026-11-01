@@ -283,6 +283,18 @@ the provider — there is no worker to kill — and killing it has to end the ru
 kill that may never come. The slice was reverted rather than committed untested; the next
 attempt should start from that distinction: cancel stops a command, kill ends a run.
 
+Twenty-eighth: abort, then jobs. `wd_turn_abort` is the primitive the previous round lacked:
+it ends a parked turn wherever it is waiting — a worker command is killed, a provider reply
+is dropped, an approval is abandoned — and emits `turn.end {turn, aborted, reason}` itself
+rather than re-entering the driver, whose state no longer matches. `job.list` reports the
+runs, `job.kill` aborts one and appends `job.updated {state: "killed"}`, and
+`subagent.interrupt` now uses the same primitive, so it also stops a child waiting on the
+provider, which `session.cancel` cannot.
+
+The gate proves it on the case that hung last round: two subagents are in flight, the second
+is killed while parked on the provider, its `turn.end` comes back `aborted`, and the first
+still finishes inside 700 ms — 488 ms measured.
+
 ## M3: started, with one finding worth keeping
 
 The first M3 attempt replaced the daemon's single `wd_turn` with a pool keyed by session, so

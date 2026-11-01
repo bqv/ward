@@ -130,6 +130,17 @@ fields stay the same when a real tokenizer replaces the estimate.
 **`stats.global`** — no params. The same counters summed over every session, plus
 `{sessions}`.
 
+**`job.list`** — no params. Answers `{jobs: [{job, session, state}]}` for every turn
+currently running; the job id is the session it runs in.
+
+**`job.kill`** — params `{job}`. Ends that run: a worker-owned command is killed, a pending
+provider request is dropped, and the turn finishes with `turn.end {turn, aborted: true,
+reason}` plus a durable `job.updated {job, state: "killed"}`. Answers `{killed}`; false when
+the job was not running.
+
+`turn.end` carries `aborted: true` only when a turn was killed rather than finishing its
+driver.
+
 **`subagent.prompt`** — params `{session, text}`. Forks the parent's log into a child
 session, appends `subagent.updated {subagent, parent, state}` to the parent, runs one turn in
 the child and answers `{session: child, turn}`. The child is an ordinary session: the same

@@ -756,12 +756,32 @@ int main(void) {
                  NULL) == 0);
   wd_free(watch_b);
 
+  cbor_item_t *jobs = NULL;
+  assert(request(&a, a.next_id++, "job.list", wd_map(0), &jobs, NULL) == 0);
+  assert(cbor_array_size(wd_get(jobs, "jobs")) >= 2);
+  wd_free(jobs);
+
+  cbor_item_t *killed_job = NULL;
+  cbor_item_t *kill_params = wd_map(1);
+  wd_put(kill_params, "job", wd_text(child_b));
+  bool killed_ok = false;
+  assert(request(&a, a.next_id++, "job.kill", kill_params, &killed_job,
+                 &killed_ok) == 0);
+  assert(killed_ok);
+  bool was_killed = false;
+  assert(wd_bool_of(wd_get(killed_job, "killed"), &was_killed));
+  assert(was_killed);
+  wd_free(killed_job);
+
+  cbor_item_t *end_b = wait_turn_end(&a, turn_b);
+  assert(end_b != NULL);
+  bool aborted = false;
+  assert(wd_bool_of(wd_get(end_b, "aborted"), &aborted));
+  assert(aborted);
+  wd_free(end_b);
   cbor_item_t *end_a = wait_turn_end(&a, turn_a);
   assert(end_a != NULL);
   wd_free(end_a);
-  cbor_item_t *end_b = wait_turn_end(&a, turn_b);
-  assert(end_b != NULL);
-  wd_free(end_b);
   uint64_t elapsed = wd_now_ms() - started;
   assert(elapsed < 700);
 

@@ -1149,6 +1149,31 @@ int wd_turn_resume_tool(wd_turn *turn, wd_turn_emit emit, void *ctx,
   return drive(turn, message, emit, ctx, err);
 }
 
+int wd_turn_abort(wd_turn *turn, const char *reason, wd_turn_emit emit,
+                  void *ctx, char **err) {
+  if (turn->pending_kind == 0) {
+    *err = strdup("nothing is running");
+    return -1;
+  }
+  if (turn->pending_kind == 2) (void)wd_turn_cancel_tool(turn);
+  if (turn->http_job != NULL) {
+    wd_http_job_free(turn->http_job);
+    turn->http_job = NULL;
+  }
+  turn->pending_kind = 0;
+  if (turn->parked != NULL) {
+    wd_free(turn->parked);
+    turn->parked = NULL;
+  }
+  cbor_item_t *event = wd_map(3);
+  wd_put(event, "turn", wd_uint(turn->id));
+  wd_put(event, "aborted", cbor_build_bool(true));
+  wd_put(event, "reason", wd_text(reason != NULL ? reason : "aborted"));
+  int rc = emit(ctx, "turn.end", event, err);
+  wd_free(event);
+  return rc == 0 ? 0 : -1;
+}
+
 int wd_turn_resume_http(wd_turn *turn, wd_turn_emit emit, void *ctx,
                         char **err) {
   if (turn->pending_kind != 3 || turn->http_job == NULL) {
