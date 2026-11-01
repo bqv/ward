@@ -543,6 +543,18 @@ The guest — `judge.classify` over its own scoped endpoint, and the wiring into
 that emits `judge.decision` — is the next slice. Splitting it this way means the merge and the
 cache are proven before a model is in the loop.
 
+Fifty-second: the judge guest. `modules/judge` is pure — no imports — and answers
+`{tool, payload}` with `{verdict, reason}`: it looks for destructive, network or remote
+patterns in the payload and asks for approval when it finds one, allows the rest. `judge_guest_test`
+loads the module the way `provider_test` does and asserts three verdicts directly, so the
+classifier is proven without a turn, a policy gate or an endpoint.
+
+This is the decision half of judge-assisted policy. The wiring — `judge.classify` through a
+capability, `wd_judge_decide` merging the verdict, and a `judge.decision` event carrying model,
+prompt hash, latency and verdict — is the next slice. The guest is rule-shaped today; when the
+model-backed judge arrives it keeps this ABI and replaces the body with a `net` call, which is
+the same shape `skills` took for search.
+
 ## M3: started, with one finding worth keeping
 
 The first M3 attempt replaced the daemon's single `wd_turn` with a pool keyed by session, so
