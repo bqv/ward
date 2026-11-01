@@ -3,7 +3,9 @@
 A coding agent harness with a small native core and a reloadable WebAssembly logic layer.
 Feature parity with DSH, minus the web UI, with a binary protocol instead of HTTP.
 
-Status: design. Nothing built yet.
+Status: M0 implemented — daemon, `AF_UNIX` transport, handshake, `session.create/list/get/resume`,
+durable events and replay, and a test client. The wire contract is frozen in `docs/protocol.md`;
+M1 (the Wasmtime host) is next.
 
 ## Thesis
 
@@ -483,7 +485,7 @@ Fences, in order of severity:
 
 Crash and restart:
 
-- The daemon writes `$XDG_RUNTIME_DIR/harness.lock` with `{pid, boot_id, started_at}`, `O_EXCL`
+- The daemon writes `<state>/harness.lock` with `{pid, boot_id, started_at}`, `O_EXCL`
   and stale-detected by boot id. Two daemons can never share a state directory.
 - Workers get `PDEATHSIG(SIGTERM)` and live in the session cgroup, so `cgroup.kill` reaps the
   tree. On daemon death a worker finishes the operation it is in, bounded by its own timeout,

@@ -4,14 +4,13 @@ A coding agent harness: a small C core that owns I/O and enforcement, and a
 reloadable WebAssembly layer that owns every decision. Binary protocol over a
 Unix socket; no web UI.
 
-**Status: design only.** The repository holds one file of prose — `README.md` —
-which is the specification and the only source of truth here. There is no
-`meson.build`, no `src/`, and no `docs/protocol.md` yet. Do not write code
-against an imagined skeleton; if the work is not the first two weeks below, the
-first task is nearly always to extend `README.md` and let the design settle.
-
-`README.md` is the contract and the parity table is its spine. When this file and
-`README.md` disagree, `README.md` wins and this file gets fixed.
+**Status: M0.** The daemon, the `AF_UNIX` transport, the handshake, sessions,
+durable events, replay and a client exist and pass their gate. M1 is the Wasmtime
+host. `docs/protocol.md` is a frozen contract: the frame layout, the method names
+and the error names are a compatibility surface, so changing one is a version
+bump, not an edit. `README.md` remains the design, its parity table is the scope contract, and the
+design outranks this file; when they disagree, the README wins and this file gets
+fixed.
 
 ## The one rule that decides everything
 
@@ -29,20 +28,18 @@ no cron arithmetic. Budget: **core stays under roughly 8,000 lines**, and an
 addition that breaks the budget must delete something or prove it is authority.
 Three tenants are on notice (tokenizer, judge, recall); the README says why.
 
-## Before the first line of code
+## Where the work stands
 
-The first two weeks, in order, are fixed by the README:
+Done, in the README's own order: `meson.build` and options with libcbor and zstd;
+`docs/protocol.md`, frozen before the codec; `src/proto` frame and message codecs
+with a fuzz gate; `harness up` with handshake, `session.create/list/get/resume`
+and replay; a CLI client; and the M0 gate, which measures round-trips rather
+than assuming them.
 
-1. `meson.build` and `meson_options.txt`, dependencies pinned, CI with ASan,
-   UBSan, TSan and `clang --analyze` from day one.
-2. `docs/protocol.md` — **freeze the frame table and the method list before
-   writing the codec.** Method names, event kinds and error codes are a wire
-   format; changing them after a client exists means a version bump.
-3. `src/proto`: frame codec, CBOR wrapper, fuzz harness.
-4. `harness up`: socket, handshake, `session.create`, and a CLI client printing
-   events.
-5. The SSE client, before anything touches a model. Fuzz the parser before the
-   provider client exists.
+Next: the SSE client, fuzzed before the provider client exists, then the Wasmtime
+host and the `engine`/`driver` pair (M1). A method is served only when
+`docs/protocol.md` says it is served — the rest of the frozen list answers
+`not_supported`.
 
 M0's acceptance is 1,000 round-trips/s over UDS and a fuzz-clean decoder. A
 gate that is not measured is not met.
@@ -60,6 +57,11 @@ ngtcp2, OpenSSL, tree-sitter, libcurl, sqlite3, libcbor, yyjson, zstd. Guests:
 the version — the language still breaks between releases), a thin C module
 embedding Janet for policy.
 
+`meson test -C build` runs the suite. Sanitizer builds are the options, not edits:
+`meson setup build-asan -Dsanitize=address`, likewise `undefined` and `thread`,
+then `meson test` in each. `gate-m0-test` is the bench — 2,000 round-trips, and
+it asserts 1,000/s unless it was built with ASan.
+
 One build at a time, at the top level. A subagent edits and reasons; the
 coordinating session runs the build and the suite and feeds the output back.
 Never build release or `clean` on a guess.
@@ -75,6 +77,19 @@ method table · `src/wasm/` registry, instance pool, migration, ABI ·
 Every guest has a manifest with `capabilities`, and the host refuses to
 instantiate one whose capabilities are not granted. Adding a capability is a
 core change and therefore needs the authority argument above.
+
+## libcbor is not safe to hand untrusted bytes
+
+`cbor_load` allocates from the lengths declared in the input, so a 41-byte frame
+claiming a 2^39-element array hangs the decoder with no syscall in sight. Every
+decode in core goes through `hx_decode`, which pre-scans with `scan_cbor`
+(bounds, depth, chunk types) before libcbor sees anything. Do not call
+`cbor_load` directly.
+
+Its reference counting is also unusual: `cbor_map_add` and `cbor_array_push`
+**incref** what they take, so the caller must `cbor_decref` its own reference
+afterwards. Getting that backwards leaks every key and value; ASan only catches
+it because the suite runs with leak detection.
 
 ## Traps already in the design
 
