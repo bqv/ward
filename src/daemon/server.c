@@ -29,6 +29,7 @@
 #include "core/ids.h"
 #include "core/labels.h"
 #include "core/models.h"
+#include "core/modstate.h"
 #include "core/pty.h"
 #include "core/registry.h"
 #include "core/schedule.h"
@@ -1901,6 +1902,37 @@ static void run_watch(wd_server *srv, wd_run *run, int kind) {
   }
 }
 
+static void persist_state(wd_server *srv, wd_run *run) {
+  if (run->turn == NULL || srv->state_dir == NULL) return;
+  wd_session *session = wd_session_find(&srv->store, run->session_id);
+  if (session == NULL) return;
+  static const char *const names[] = {"engine",  "driver", "provider", "tools",
+                                      "policy", "skills", "judge"};
+  for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+    const char *version = "1";
+    for (size_t p = 0; p < session->pins_len; p++)
+      if (strcmp(session->pins[p].name, names[i]) == 0)
+        version = session->pins[p].version;
+    uint8_t *blob = NULL;
+    size_t len = 0;
+    char *err = NULL;
+    if (wd_turn_state_export(run->turn, names[i], &blob, &len, &err) != 0) {
+      free(err);
+      continue;
+    }
+    char *path = wd_module_state_path(srv->state_dir, run->session_id,
+                                      names[i], version);
+    if (path != NULL) {
+      if (wd_module_state_write(path, blob, len) == 0)
+        wd_module_state_forget(srv->state_dir, run->session_id, names[i],
+                               version);
+      free(path);
+    }
+    free(blob);
+    free(err);
+  }
+}
+
 static void run_free(wd_server *srv, wd_run *run) {
   run_unwatch(srv, run, 2);
   run_unwatch(srv, run, 3);
@@ -1910,6 +1942,7 @@ static void run_free(wd_server *srv, wd_run *run) {
       break;
     }
   }
+  persist_state(srv, run);
   wd_turn_free(run->turn);
   free(run);
 }

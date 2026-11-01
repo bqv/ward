@@ -881,3 +881,20 @@ exactly that — it validated the root as if it were a name.
 
 `tests/modstate_test` measures all of it: write then read a blob back byte for byte, find the
 version, forget the others and find nothing, refuse a traversal name, and forget everything.
+
+Seventy-second: state leaves the turn. `wd_turn_state_export(turn, name, ...)` answers three things
+that are not the same: zero with bytes, one for "this guest has no state", and minus one for a name
+that is not a module of this turn. The distinction matters because the daemon must skip a stateless
+guest silently and should complain about a typo.
+
+When a run is freed and the turn still exists, the daemon asks each module for its state and, if
+there is any, writes it to `<state>/<session>/modules/<name>@<version>.bin` — the version taken from
+the session's pins — and forgets every other version of that module. Nothing is written for a
+stateless guest, which is every shipped module today.
+
+The test drives a real turn and asserts the stateless answer for `driver` and the unknown-name
+answer, so the API's three outcomes are all measured even though no guest carries state yet.
+
+The read side of the handover — finding a blob whose version differs from the pinned one and
+handing over into the turn's instance — is the next slice, and it is now the only one missing
+between a written blob and a moved session.

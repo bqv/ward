@@ -139,6 +139,28 @@ static wd_module *load_pinned(wd_engine *engine, const char *dir,
   return load_module(engine, dir, file, spec, err);
 }
 
+static wd_instance *instance_named(wd_turn *turn, const char *name) {
+  if (strcmp(name, "engine") == 0) return turn->eng;
+  if (strcmp(name, "driver") == 0) return turn->driver;
+  if (strcmp(name, "provider") == 0) return turn->provider;
+  if (strcmp(name, "tools") == 0) return turn->tools;
+  if (strcmp(name, "policy") == 0) return turn->policy;
+  if (strcmp(name, "skills") == 0) return turn->skills;
+  if (strcmp(name, "judge") == 0) return turn->judge;
+  return NULL;
+}
+
+int wd_turn_state_export(wd_turn *turn, const char *name, uint8_t **blob,
+                         size_t *len, char **err) {
+  if (turn == NULL || name == NULL || blob == NULL || len == NULL) return -1;
+  *blob = NULL;
+  *len = 0;
+  wd_instance *instance = instance_named(turn, name);
+  if (instance == NULL) return -1;
+  if (wd_instance_state_export(instance, blob, len, err) != 0) return 1;
+  return 0;
+}
+
 static int net_request(wd_turn *turn, const uint8_t *in, size_t in_len,
                        uint8_t **out, size_t *out_len, char **err) {
   if (turn->endpoint == NULL) {

@@ -114,6 +114,14 @@ int main(void) {
   assert(strstr(second.text, "again") != NULL);
   assert(second.ended == 1);
 
+  uint8_t *blob = NULL;
+  size_t blob_len = 0;
+  char *state_err = NULL;
+  assert(wd_turn_state_export(turn, "driver", &blob, &blob_len, &state_err) == 1);
+  assert(blob == NULL && blob_len == 0);
+  free(state_err);
+  assert(wd_turn_state_export(turn, "nonesuch", &blob, &blob_len, &state_err) == -1);
+
   wd_turn_free(turn);
 
   char pinned_dir[] = "/tmp/ward-turn-XXXXXX";
