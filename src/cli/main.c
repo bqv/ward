@@ -273,6 +273,7 @@ static int command_session(int argc, char **argv) {
   bool json = false;
   bool follow = false;
   const char *id = NULL;
+  const char *text = NULL;
   const char *cwd = NULL;
   const char *model = NULL;
   uint64_t from = 0;
@@ -295,7 +296,14 @@ static int command_session(int argc, char **argv) {
     } else if (strcmp(argv[i], "--socket") == 0 && i + 1 < argc) {
       i++;
     } else if (argv[i][0] != '-') {
-      id = argv[i];
+      if (id == NULL) {
+        id = argv[i];
+      } else if (text == NULL) {
+        text = argv[i];
+      } else {
+        fprintf(stderr, "ward: too many arguments\n");
+        return 2;
+      }
     } else {
       fprintf(stderr, "ward: unknown option %s\n", argv[i]);
       return 2;
@@ -409,6 +417,84 @@ static int command_session(int argc, char **argv) {
       if (!follow) break;
     }
     rc = 0;
+  } else if (strcmp(sub, "prompt") == 0) {
+    if (id == NULL || text == NULL) {
+      fprintf(stderr, "ward: session prompt needs an id and text\n");
+      goto done;
+    }
+    cbor_item_t *focus = wd_map(1);
+    wd_put(focus, "id", wd_text(id));
+    if (client_request(&client, "session.resume", focus, &result) != 0) goto done;
+    wd_free(result);
+    result = NULL;
+    uint64_t req = client.next_id++;
+    cbor_item_t *params = wd_map(2);
+    wd_put(params, "id", wd_text(id));
+    wd_put(params, "text", wd_text(text));
+    if (client_send_item(&client, wd_request(req, "session.prompt", params)) != 0)
+      goto done;
+    for (;;) {
+      wd_frame frame;
+      uint8_t *body = client_read_frame(client.fd, &frame);
+      if (body == NULL) break;
+      cbor_item_t *root = wd_decode(body, frame.len);
+      free(body);
+      if (root == NULL) break;
+      if (frame.type == WD_FRAME_EVENT) {
+        char *kind = NULL;
+        cbor_item_t *payload = NULL;
+        bool end = false;
+        if (wd_read_event(root, &kind, &payload)) {
+          if (json) {
+            print_json(root);
+          } else if (strcmp(kind, "text.delta") == 0) {
+            char *piece = wd_text_copy(wd_get(payload, "text"));
+            if (piece != NULL) {
+              fputs(piece, stdout);
+              fflush(stdout);
+              free(piece);
+            }
+          } else if (strcmp(kind, "turn.end") == 0) {
+            end = true;
+          }
+          free(kind);
+          wd_free(root);
+          if (end && !json) {
+            putchar('\n');
+            rc = 0;
+            break;
+          }
+          continue;
+        }
+        free(kind);
+        wd_free(root);
+        continue;
+      }
+      if (frame.type != WD_FRAME_RESPONSE) {
+        wd_free(root);
+        break;
+      }
+      uint64_t got = 0;
+      bool ok = false;
+      cbor_item_t *value = NULL;
+      if (!wd_read_response(root, &got, &ok, &value) || got != req) {
+        wd_free(root);
+        break;
+      }
+      if (!ok) {
+        char *name = wd_text_copy(wd_get(value, "name"));
+        char *message = wd_text_copy(wd_get(value, "message"));
+        fprintf(stderr, "ward: %s: %s\n", name != NULL ? name : "error",
+                message != NULL ? message : "");
+        free(name);
+        free(message);
+        wd_free(root);
+        break;
+      }
+      wd_free(root);
+      rc = 0;
+      break;
+    }
   } else {
     fprintf(stderr, "ward: unknown session command %s\n", sub);
     rc = 2;

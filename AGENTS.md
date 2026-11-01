@@ -48,8 +48,10 @@ feeds the result back, and turns `emit` into an event. `driver` reaches `engine`
 through `ward.cap("engine.call")`, core-mediated. `turn-test` runs two prompts end to
 end through all three guests.
 
-Next: serve `session.prompt` and stream its events to a client, then the provider over a
-local endpoint. A method is served only when
+Fourth: `session.prompt` is served and streams `text.delta`/`turn.end` as durable events,
+and `ward session prompt <id> <text>` prints a headless turn. The provider is still the
+echo stub, so the turn loop is proven but nothing has talked to a model yet. Next: the
+provider over a local endpoint, then QUIC and pairing. A method is served only when
 `docs/protocol.md` says it is served — the rest of the frozen list answers
 `not_supported`.
 
@@ -128,8 +130,9 @@ Its reference counting is also unusual: `cbor_map_add` and `cbor_array_push`
 **incref** what they take, so the caller must `cbor_decref` its own reference
 afterwards (which is what `wd_put` does for you). `wd_encode` **consumes** the item
 it is given — it frees it, including on failure — so encoding a borrowed subtree
-means a local `cbor_serialized_size`/`cbor_serialize` pair, never `wd_encode`. Getting that backwards leaks every key and value; ASan only catches
-it because the suite runs with leak detection.
+means a local `cbor_serialized_size`/`cbor_serialize` pair, never `wd_encode`. Getting
+the reference counting backwards leaks every key and value; ASan only catches it because
+the suite runs with leak detection.
 
 ## Traps already in the design
 

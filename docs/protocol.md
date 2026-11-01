@@ -14,10 +14,13 @@ Implemented: `AF_UNIX` transport, handshake, `session.create/list/get/resume`, d
 events and replay, the error taxonomy, client request dedupe.
 
 Not implemented, and refused with `not_supported` if asked: everything else in the frozen
-method list below — prompts, tools, approvals, subagents, jobs, schedules, goals, settings,
+method list below — tools, approvals, subagents, jobs, schedules, goals, settings,
 terminal, file transfer, modules, stats. QUIC, device certificates, session tokens and
 message chunking arrive with M1/M4; until then the frame body cap is 64 KiB and a larger
 message is `limit`.
+
+M1 adds one method: `session.prompt`, which runs a turn and streams its events. It is
+described below with the session object.
 
 ## Transport
 
@@ -108,6 +111,19 @@ replay and no `replay.end`.
 
 A session object is `{id, cwd, model, created: <unix ms>, last_seq: <uint>}`.
 
+### session.prompt
+
+`session.prompt {id, text}` runs one turn in the session and answers `{session}`. The
+turn's events are appended to the session log before they are broadcast, so they reach
+every subscribed client and survive a replay:
+
+- `text.delta` — payload `{text}`; a piece of assistant text.
+- `turn.end` — payload `{}`; the turn finished.
+
+A prompt is synchronous: the request is answered after the turn ends, and the events
+arrive before the response. A second prompt on the same session is served after the
+first returns.
+
 ### Declared, not served in M0
 
 The frozen list, from `README.md`:
@@ -143,6 +159,11 @@ Served in M0:
   rename, archive and pin.
 - `replay.end` — payload `{from: <seq>, to: <seq>}`; not durable, not logged, does not
   consume a sequence number. Marks the end of a replay burst.
+
+Served in M1:
+
+- `text.delta` — payload `{text}`; durable.
+- `turn.end` — payload `{}`; durable, emitted after the last delta of a turn.
 
 The full frozen list, from `README.md`:
 

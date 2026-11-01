@@ -4,6 +4,9 @@
 
 #include "daemon/server.h"
 
+#include "core/turn.h"
+#include "wasm/host.h"
+
 #include <cbor.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -77,6 +80,8 @@ typedef struct {
   char *state_dir;
   char *lock_path;
   hs_store store;
+  wd_engine *engine;
+  wd_turn *turn;
   wd_conn *conns[WD_MAX_CONNS];
   bool stop;
 } wd_server;
@@ -390,6 +395,97 @@ static void handle_session_resume(wd_server *srv, wd_conn *conn, uint64_t id,
   if (have_from) replay_into(srv, conn, session, sub, from);
 }
 
+typedef struct {
+  wd_server *srv;
+  hs_session *session;
+} wd_turn_ctx;
+
+static cbor_item_t *dup_item(cbor_item_t *item) {
+  size_t need = cbor_serialized_size(item);
+  if (need == 0) return NULL;
+  uint8_t *buf = malloc(need);
+  if (buf == NULL) return NULL;
+  size_t written = cbor_serialize(item, buf, need);
+  cbor_item_t *copy = written == 0 ? NULL : wd_decode(buf, written);
+  free(buf);
+  return copy;
+}
+
+static int turn_emit(void *ctx, const char *event, cbor_item_t *payload,
+                     char **err) {
+  wd_turn_ctx *tc = ctx;
+  cbor_item_t *logged = payload != NULL ? dup_item(payload) : wd_map(0);
+  uint64_t seq = 0;
+  if (logged == NULL || hs_emit(tc->session, event, logged, &seq) != 0) {
+    *err = strdup("cannot append the turn event");
+    return -1;
+  }
+  cbor_item_t *broadcast = payload != NULL ? dup_item(payload) : wd_map(0);
+  if (broadcast != NULL)
+    conn_broadcast(tc->srv, tc->session, event, seq, broadcast);
+  return 0;
+}
+
+static wd_turn *server_turn(wd_server *srv, char **err) {
+  if (srv->turn != NULL) return srv->turn;
+  if (srv->engine == NULL) srv->engine = wd_engine_new(srv->state_dir);
+  if (srv->engine == NULL) {
+    *err = strdup("cannot create the wasm engine");
+    return NULL;
+  }
+  const char *dir = getenv("WARD_MODULE_DIR");
+  char path[PATH_MAX];
+  if (dir == NULL) {
+    snprintf(path, sizeof(path), "%s/modules", srv->state_dir);
+    dir = path;
+  }
+  srv->turn = wd_turn_new(srv->engine, dir, err);
+  return srv->turn;
+}
+
+static void handle_session_prompt(wd_server *srv, wd_conn *conn, uint64_t id,
+                                  cbor_item_t *params) {
+  char *session_id = wd_text_copy(wd_get(params, "id"));
+  char *text = wd_text_copy(wd_get(params, "text"));
+  hs_session *session =
+      session_id != NULL ? hs_find(&srv->store, session_id) : NULL;
+  if (session == NULL) {
+    free(session_id);
+    free(text);
+    conn_send_error(conn, id, WD_ERR_NOT_FOUND, "no such session");
+    conn_arm(srv, conn);
+    return;
+  }
+  if (text == NULL || text[0] == '\0') {
+    free(session_id);
+    free(text);
+    conn_send_error(conn, id, WD_ERR_INVALID_PARAMS, "text is empty");
+    conn_arm(srv, conn);
+    return;
+  }
+  char *err = NULL;
+  wd_turn *turn = server_turn(srv, &err);
+  if (turn == NULL) {
+    free(session_id);
+    free(text);
+    respond_internal(srv, conn, id, err != NULL ? err : "no modules");
+    free(err);
+    return;
+  }
+  wd_turn_ctx tc = {srv, session};
+  int rc = wd_turn_prompt(turn, text, turn_emit, &tc, &err);
+  free(session_id);
+  free(text);
+  if (rc != 0) {
+    respond_internal(srv, conn, id, err != NULL ? err : "turn failed");
+    free(err);
+    return;
+  }
+  cbor_item_t *result = wd_map(1);
+  wd_put(result, "session", wd_text(session->id));
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+}
+
 static void handle_request(wd_server *srv, wd_conn *conn, uint64_t id,
                            const char *method, cbor_item_t *params) {
   if (strcmp(method, "session.create") == 0) {
@@ -400,6 +496,8 @@ static void handle_request(wd_server *srv, wd_conn *conn, uint64_t id,
     handle_session_get(srv, conn, id, params);
   } else if (strcmp(method, "session.resume") == 0) {
     handle_session_resume(srv, conn, id, params);
+  } else if (strcmp(method, "session.prompt") == 0) {
+    handle_session_prompt(srv, conn, id, params);
   } else {
     conn_send_error(conn, id, WD_ERR_NOT_SUPPORTED, "method not served yet");
     conn_arm(srv, conn);
@@ -855,6 +953,8 @@ cleanup:
   if (srv.listen_fd >= 0) close(srv.listen_fd);
   if (srv.epoll_fd >= 0) close(srv.epoll_fd);
   if (srv.signal_fd >= 0) close(srv.signal_fd);
+  wd_turn_free(srv.turn);
+  wd_engine_free(srv.engine);
   hs_close(&srv.store);
   free(srv.socket_path);
   free(srv.state_dir);
