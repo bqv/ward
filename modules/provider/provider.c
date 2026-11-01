@@ -214,9 +214,11 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
     if (status == 200)
       text_at = scan_content((const uint8_t *)body, body_len);
     wd_w_init(&w, reply, REPLY_SIZE);
-    wd_w_map(&w, 1);
+    wd_w_map(&w, 2);
     wd_w_textz(&w, "text");
     wd_w_text(&w, answer, text_at);
+    wd_w_textz(&w, "status");
+    wd_w_uint(&w, status);
     if (!w.failed) pair(out, reply, w.at);
     return;
   }

@@ -1201,3 +1201,20 @@ sections and the project rules in the order the model will receive them.
 
 Verified: a session given "survive the restart" still shows that section after `rc-service --user ward restart`,
 and the preview lists it between identity and the rest.
+
+Ninety-second: a provider failure is now a diagnosis, not an empty answer. The provider reports the HTTP
+status it got, and core classifies it: 501 `endpoint_unsupported`, 503 `model_limit`, 408/504
+`provider_timeout`, 5xx or no status `provider_unavailable`, a 4xx whose body mentions the context
+`context_exceeded`, any other 4xx `provider_rejected`. A transport failure is `provider_unavailable`.
+
+On any of those the turn emits the frozen `error {code, name, message, turn}` and then
+`turn.end {turn, aborted: true, reason}` — the shape the local-compat note asked for, and the shape that
+was missing when a misconfigured endpoint produced silence. Compaction keeps its plain failure, because it
+has no event sink and reports to its caller instead.
+
+Verified against a dead port: the session replays `error {code:14, name:"provider_unavailable"}` followed by
+`turn.end {aborted: true, reason:"provider_unavailable"}` instead of nothing at all.
+
+The semantic change is the one the note flagged: a failed turn is `aborted` with an error event rather
+than a normal end with no text. No version bump — adding an error name is compatible, and the old behaviour
+was indistinguishable from success.

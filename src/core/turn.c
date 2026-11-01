@@ -1849,6 +1849,36 @@ int wd_turn_abort(wd_turn *turn, const char *reason, wd_turn_emit emit,
   return rc == 0 ? 0 : -1;
 }
 
+static wd_error classify_provider(int status, const char *body) {
+  if (status == 501) return WD_ERR_ENDPOINT_UNSUPPORTED;
+  if (status == 503) return WD_ERR_MODEL_LIMIT;
+  if (status == 408 || status == 504) return WD_ERR_PROVIDER_TIMEOUT;
+  if (status >= 500 || status <= 0) return WD_ERR_PROVIDER_UNAVAILABLE;
+  if (body != NULL &&
+      (strstr(body, "context") != NULL || strstr(body, "n_ctx") != NULL))
+    return WD_ERR_CONTEXT_EXCEEDED;
+  return WD_ERR_PROVIDER_REJECTED;
+}
+
+static int emit_provider_error(wd_turn *turn, wd_error code, const char *message,
+                               wd_turn_emit emit, void *ctx, char **err) {
+  cbor_item_t *event = wd_map(4);
+  wd_put(event, "code", wd_uint((uint64_t)code));
+  wd_put(event, "name", wd_text(wd_error_name(code)));
+  wd_put(event, "message", wd_text(message != NULL ? message : ""));
+  wd_put(event, "turn", wd_uint(turn->id));
+  int rc = emit(ctx, "error", event, err);
+  wd_free(event);
+  if (rc != 0) return -1;
+  cbor_item_t *end = wd_map(3);
+  wd_put(end, "turn", wd_uint(turn->id));
+  wd_put(end, "aborted", cbor_build_bool(true));
+  wd_put(end, "reason", wd_text(wd_error_name(code)));
+  rc = emit(ctx, "turn.end", end, err);
+  wd_free(end);
+  return rc == 0 ? 0 : -1;
+}
+
 int wd_turn_resume_http(wd_turn *turn, wd_turn_emit emit, void *ctx,
                         char **err) {
   if (turn->pending_kind != 3 || turn->http_job == NULL) {
@@ -1863,12 +1893,29 @@ int wd_turn_resume_http(wd_turn *turn, wd_turn_emit emit, void *ctx,
   cbor_item_t *message = wd_map(2);
   wd_put(message, "kind", wd_text("result"));
   if (rc != 0) {
+    char *reason = err != NULL && *err != NULL ? strdup(*err) : NULL;
     free(err != NULL ? *err : NULL);
     if (err != NULL) *err = NULL;
-    cbor_item_t *payload = wd_map(1);
-    wd_put(payload, "text", wd_text("the provider request failed"));
-    wd_put(message, "payload", payload);
-    return drive(turn, message, emit, ctx, err);
+    wd_free(message);
+    return emit_provider_error(turn, WD_ERR_PROVIDER_UNAVAILABLE,
+                               reason != NULL && reason[0] != '\0'
+                                   ? reason
+                                   : "the provider is unreachable",
+                               emit, ctx, err) == 0 ? 0 : -1;
+  }
+  if (response.status != 200) {
+    wd_error code = classify_provider((int)response.status,
+                                      (const char *)response.body);
+    char excerpt[256];
+    size_t take = response.len < sizeof(excerpt) - 1 ? response.len
+                                                    : sizeof(excerpt) - 1;
+    if (take > 0) memcpy(excerpt, response.body, take);
+    excerpt[take] = '\0';
+    wd_http_response_free(&response);
+    wd_free(message);
+    return emit_provider_error(turn, code,
+                               take > 0 ? excerpt : "the provider refused",
+                               emit, ctx, err) == 0 ? 0 : -1;
   }
   cbor_item_t *phase = wd_map(2);
   wd_put(phase, "status", wd_uint((uint64_t)response.status));
@@ -1910,6 +1957,12 @@ int wd_turn_compact(wd_turn *turn, cbor_item_t *history, char **summary,
   }
   wd_http_job_free(turn->http_job);
   turn->http_job = NULL;
+  if (response.status != 200) {
+    *err = strdup(wd_error_name(classify_provider((int)response.status,
+                                                  (const char *)response.body)));
+    wd_http_response_free(&response);
+    return -1;
+  }
   cbor_item_t *phase = wd_map(2);
   wd_put(phase, "status", wd_uint((uint64_t)response.status));
   wd_put(phase, "body", wd_text_len((const char *)response.body, response.len));
