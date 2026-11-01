@@ -85,6 +85,20 @@ static int apply_upgrade(void *ctx, uint64_t seq, cbor_item_t *event) {
   wd_session *s = ctx;
   (void)seq;
   char *kind = wd_text_copy(wd_get(event, "kind"));
+  if (kind != NULL && strcmp(kind, "session.migration_failed") == 0) {
+    cbor_item_t *payload = wd_get(event, "payload");
+    char *name = wd_text_copy(wd_get(payload, "module"));
+    char *from = wd_text_copy(wd_get(payload, "from"));
+    if (name != NULL && from != NULL && from[0] != '\0') {
+      for (size_t i = 0; i < s->pins_len; i++) {
+        if (strcmp(s->pins[i].name, name) != 0) continue;
+        snprintf(s->pins[i].version, sizeof(s->pins[i].version), "%s", from);
+        break;
+      }
+    }
+    free(name);
+    free(from);
+  }
   if (kind != NULL && strcmp(kind, "session.upgraded") == 0) {
     cbor_item_t *payload = wd_get(event, "payload");
     char *name = wd_text_copy(wd_get(payload, "module"));
@@ -168,6 +182,18 @@ int wd_session_upgrade(wd_session *s, const char *name, const char *version,
   wd_put(payload, "from", wd_text(was));
   wd_put(payload, "to", wd_text(version));
   return wd_session_emit(s, "session.upgraded", payload, seq_out);
+}
+
+int wd_session_note_migration(wd_session *s, const char *name,
+                              const char *from, const char *to,
+                              const char *reason, uint64_t *seq_out) {
+  if (name == NULL || name[0] == '\0') return -1;
+  cbor_item_t *payload = wd_map(4);
+  wd_put(payload, "module", wd_text(name));
+  wd_put(payload, "from", wd_text(from != NULL ? from : ""));
+  wd_put(payload, "to", wd_text(to != NULL ? to : ""));
+  wd_put(payload, "reason", wd_text(reason != NULL ? reason : "refused"));
+  return wd_session_emit(s, "session.migration_failed", payload, seq_out);
 }
 
 int wd_session_set_pins(wd_session *s, const wd_pin *pins, size_t n,

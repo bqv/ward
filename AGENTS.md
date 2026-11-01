@@ -793,6 +793,20 @@ Still missing from the join: the state handover itself. The pins now choose the 
 yet carries a module's exported state from the old version's instance to the new one, and
 `migration_failed` has no path that writes it.
 
+Sixty-ninth: a failed migration is durable. `wd_session_note_migration` appends
+`session.migration_failed {module, from, to, reason}`, and replaying it moves the pin back to
+`from` — which is the log expressing "keep the old instance", since the pin is what the next run
+resolves through. A session whose handover refused therefore restarts on the version it was on
+rather than on the one it failed to reach.
+
+The test upgrades `driver` from 3 to 4, notes a failure moving 3 to 4, reopens the store and
+finds `driver` back at 3. It also kept its own trap: the id was read from a session the store had
+already closed, so the first run found an empty replay and the bug was in the test, not the
+replay — copy the id before closing.
+
+Nothing calls the writer yet. The caller belongs with the handover slice, which needs persisted
+guest state to have something to hand over.
+
 ## Resuming M5
 
 Where the milestone stands, so the next session does not have to reconstruct it: master is at

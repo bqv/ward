@@ -197,6 +197,19 @@ int main(void) {
   cbor_decref(&first_pin);
   wd_free(object);
 
+  snprintf(pinned_id, sizeof(pinned_id), "%s", found->id);
+  uint64_t failed_seq = 0;
+  assert(wd_session_note_migration(found, "driver", "3", "4",
+                                   "the guest refused", &failed_seq) == 0);
+  assert(failed_seq > 0);
+
+  wd_store_close(&store);
+  assert(wd_store_open(&store, dir) == 0);
+  wd_session *replayed = wd_session_find(&store, pinned_id);
+  assert(replayed != NULL);
+  assert(strcmp(replayed->pins[0].name, "driver") == 0);
+  assert(strcmp(replayed->pins[0].version, "3") == 0);
+
   wd_store_close(&store);
 
   printf("session tests passed\n");
