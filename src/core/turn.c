@@ -714,7 +714,6 @@ static wd_worker *worker_for(wd_turn *turn) {
     return turn->worker;
   if (turn->worker != NULL && turn->tool_worker == turn->worker)
     return turn->worker;
-  if (turn->history != NULL) wd_free(turn->history);
   wd_http_job_free(turn->http_job);
   wd_worker_free(turn->worker);
   turn->worker = NULL;
@@ -796,7 +795,6 @@ static int net_submit(wd_turn *turn, cbor_item_t *reply, char **err) {
     *err = strdup("net.request: the endpoint is not loopback");
     return -1;
   }
-  if (turn->history != NULL) wd_free(turn->history);
   wd_http_job_free(turn->http_job);
   turn->http_job =
       wd_http_start(url, "POST", body != NULL ? body : "", 300000, 4u << 20, err);
@@ -1126,7 +1124,6 @@ int wd_turn_resume_http(wd_turn *turn, wd_turn_emit emit, void *ctx,
   turn->pending_kind = 0;
   wd_http_response response;
   int rc = wd_http_job_finish(turn->http_job, &response, err);
-  if (turn->history != NULL) wd_free(turn->history);
   wd_http_job_free(turn->http_job);
   turn->http_job = NULL;
   cbor_item_t *message = wd_map(2);
