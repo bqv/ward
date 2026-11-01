@@ -13,6 +13,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "core/proc.h"
 #include "core/util.h"
 #include "net/http.h"
 #include "proto/codec.h"
@@ -256,6 +257,68 @@ static int fs_read(wd_turn *turn, const uint8_t *in, size_t in_len,
   return rc;
 }
 
+static int exec_run(wd_turn *turn, const uint8_t *in, size_t in_len,
+                    uint8_t **out, size_t *out_len) {
+  cbor_item_t *request = wd_decode(in, in_len);
+  if (request == NULL) {
+    cbor_item_t *reply = wd_map(2);
+    wd_put(reply, "ok", cbor_build_bool(false));
+    wd_put(reply, "error", wd_text("exec.run: parameters are not cbor"));
+    return tool_reply(reply, out, out_len);
+  }
+  char *command = wd_text_copy(wd_get(request, "command"));
+  uint64_t timeout = 10000;
+  wd_uint_of(wd_get(request, "timeout_ms"), &timeout);
+  wd_free(request);
+  if (command == NULL || command[0] == '\0') {
+    free(command);
+    return tool_fail("exec.run: the command is missing", out, out_len);
+  }
+  char *copy = strdup(command);
+  free(command);
+  if (copy == NULL) return tool_fail("exec.run: out of memory", out, out_len);
+  const char *argv[33];
+  size_t argc = 0;
+  for (char *tok = strtok(copy, " \t"); tok != NULL && argc < 32;
+       tok = strtok(NULL, " \t"))
+    argv[argc++] = tok;
+  argv[argc] = NULL;
+  if (argc == 0) {
+    free(copy);
+    return tool_fail("exec.run: the command is empty", out, out_len);
+  }
+  if (timeout == 0 || timeout > 600000) timeout = 600000;
+  wd_proc_result result;
+  char *err = NULL;
+  int rc = wd_proc_run(argv, turn->root, timeout, WD_TOOL_MAX, &result, &err);
+  free(copy);
+  if (rc != 0) {
+    char message[256];
+    snprintf(message, sizeof(message), "%s",
+             err != NULL ? err : "exec.run: cannot run the command");
+    free(err);
+    return tool_fail(message, out, out_len);
+  }
+  int status = WIFEXITED(result.status) ? WEXITSTATUS(result.status) : 127;
+  cbor_item_t *reply = wd_map(4);
+  wd_put(reply, "ok", cbor_build_bool(!result.timed_out && status == 0));
+  wd_put(reply, "status", wd_uint((uint64_t)status));
+  wd_put(reply, "timed_out", cbor_build_bool(result.timed_out));
+  if (result.len > 0) {
+    wd_put(reply, "text",
+           wd_text_len((const char *)result.out, result.len));
+  } else {
+    char note[96];
+    if (result.timed_out)
+      snprintf(note, sizeof(note), "the command timed out");
+    else
+      snprintf(note, sizeof(note), "the command exited with status %d", status);
+    wd_put(reply, "text", wd_text(note));
+  }
+  wd_proc_result_free(&result);
+  return tool_reply(reply, out, out_len);
+}
+
 static int fs_write(wd_turn *turn, const uint8_t *in, size_t in_len,
                     uint8_t **out, size_t *out_len) {
   cbor_item_t *request = wd_decode(in, in_len);
@@ -306,6 +369,8 @@ static int turn_capability(void *ctx, const char *capability,
     return fs_read(turn, in, in_len, out, out_len);
   if (strcmp(capability, "fs.write") == 0)
     return fs_write(turn, in, in_len, out, out_len);
+  if (strcmp(capability, "exec.run") == 0)
+    return exec_run(turn, in, in_len, out, out_len);
   if (strcmp(capability, "policy.check") == 0)
     return wd_instance_call(turn->policy, in, in_len, out, out_len, err);
   *err = strdup("unknown capability");
@@ -329,13 +394,13 @@ wd_turn *wd_turn_new(wd_engine *engine, const char *module_dir, const char *root
   }
   static const char *const driver_caps[] = {"engine.call", "policy.check"};
   static const char *const provider_caps[] = {"net.request"};
-  static const char *const tools_caps[] = {"fs.read", "fs.write"};
+  static const char *const tools_caps[] = {"fs.read", "fs.write", "exec.run"};
   static const char *const no_caps[] = {NULL};
   wd_module_spec engine_spec = {"engine", no_caps, 0, true};
   wd_module_spec driver_spec = {"driver", driver_caps, 2, false};
   wd_module_spec policy_spec = {"policy", no_caps, 0, true};
   wd_module_spec provider_spec = {"provider", provider_caps, 1, false};
-  wd_module_spec tools_spec = {"tools", tools_caps, 2, false};
+  wd_module_spec tools_spec = {"tools", tools_caps, 3, false};
 
   turn->engine_module = load_module(engine, module_dir, "engine.wasm",
                                     &engine_spec, err);
@@ -362,7 +427,7 @@ wd_turn *wd_turn_new(wd_engine *engine, const char *module_dir, const char *root
   turn->driver = wd_instance_new(turn->driver_module, driver_caps, 2,
                                  &TURN_LIMITS, turn_capability, turn, err);
   if (turn->driver == NULL) goto fail;
-  turn->tools = wd_instance_new(turn->tools_module, tools_caps, 2,
+  turn->tools = wd_instance_new(turn->tools_module, tools_caps, 3,
                                 &TURN_LIMITS, turn_capability, turn, err);
   if (turn->tools == NULL) goto fail;
   turn->policy = wd_instance_new(turn->policy_module, no_caps, 0, &TURN_LIMITS,

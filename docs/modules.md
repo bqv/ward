@@ -80,6 +80,21 @@ The tools module's only inputs are `{tool, args}`; it forwards to the capability
 the tool and returns the capability's reply unchanged. Core decides what a capability may
 do; the module decides which one to ask.
 
+## exec.run
+
+`exec.run {command, timeout_ms?}` runs one command in the turn's tool root and returns
+`{ok, status, timed_out, text}`; `text` is the combined output, capped at 64 KiB, and a
+command that exits with no output still says what happened. Core splits the command on
+whitespace itself — there is no shell, so no quoting, globbing or redirection — resolves
+the program through `/usr/local/bin`, `/usr/bin` and `/bin`, and runs it with a scrubbed
+environment (`PATH`, `LANG`, `LC_ALL` and nothing else), in its own session, with a
+default ten-second timeout that the caller may raise to ten minutes. A timeout kills the
+whole process group.
+
+This is core's process spawning, which the README reserves for core; the worker that will
+own the sandbox for a session's long-lived children is not built yet, so an `exec` call
+today is one short-lived child of the daemon.
+
 ## policy.check
 
 `policy.check {tool}` returns `{decision}` where the decision is `allow`, `ask` or `deny`.

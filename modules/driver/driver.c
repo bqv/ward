@@ -265,7 +265,12 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
       }
     }
     if (text_prefix(text, "/run ")) {
-      emit_text_delta(out, "the policy denied exec");
+      int verdict = policy_check("exec");
+      if (verdict == 0) {
+        emit_text_delta(out, "the policy denied exec");
+        return;
+      }
+      invoke_tool(out, "exec", text + 5, text + 5, verdict == 2);
       return;
     }
     wd_w w;

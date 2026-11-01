@@ -134,12 +134,27 @@ int main(void) {
   snprintf(path, sizeof(path), "%s/blocked.txt", root);
   assert(access(path, F_OK) != 0);
 
-  seen refused = {{0}, 0, 0, 0, 0, {0}};
-  assert(wd_turn_prompt(turn, "/run rm -rf /", emit, &refused, &err) ==
-         WD_TURN_OK);
-  assert(refused.deltas >= 1);
-  assert(strstr(refused.text, "denied") != NULL);
-  assert(refused.approvals == 0);
+  seen exec_seen = {{0}, 0, 0, 0, 0, {0}};
+  assert(wd_turn_prompt(turn, "/run echo tool exec works", emit, &exec_seen,
+                        &err) == WD_TURN_PENDING);
+  assert(exec_seen.approvals == 1);
+  assert(strstr(exec_seen.reason, "exec") != NULL ||
+         exec_seen.reason[0] != '\0');
+  assert(wd_turn_resume(turn, true, emit, &exec_seen, &err) == WD_TURN_OK);
+  assert(strstr(exec_seen.text, "tool exec works") != NULL);
+
+  seen exec_denied = {{0}, 0, 0, 0, 0, {0}};
+  assert(wd_turn_prompt(turn, "/run echo nope", emit, &exec_denied, &err) ==
+         WD_TURN_PENDING);
+  assert(wd_turn_resume(turn, false, emit, &exec_denied, &err) == WD_TURN_OK);
+  assert(strstr(exec_denied.text, "denied") != NULL);
+
+  seen exec_fails = {{0}, 0, 0, 0, 0, {0}};
+  assert(wd_turn_prompt(turn, "/run /nonexistent/command", emit, &exec_fails,
+                        &err) == WD_TURN_PENDING);
+  assert(wd_turn_resume(turn, true, emit, &exec_fails, &err) == WD_TURN_OK);
+  assert(strstr(exec_fails.text, "cannot") != NULL ||
+         strstr(exec_fails.text, "127") != NULL);
 
   wd_turn_free(turn);
   wd_engine_free(engine);

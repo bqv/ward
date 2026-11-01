@@ -82,20 +82,26 @@ one-in-five hang. And the ALPN constant carries its length byte: `"\4ward"` with
 Seventh: tools and approvals. `modules/tools` is one guest with one shape, `{tool, args}`,
 which forwards to a capability and returns its reply; core implements `fs.read` and
 `fs.write` against the turn's tool root, refusing `..`, absolute paths and symlinks, and
-capping a read at 64 KiB. The driver decides which calls need approval — in M1 `write` does
-— and core parks the action keyed `(session, call, epoch)`, emits `approval.requested` as a
+capping a read at 64 KiB. The policy guest decides which calls need approval and core
+parks the action keyed `(session, call, epoch)`, emits `approval.requested` as a
 durable event and answers `session.prompt` with `{session, approval: {call, epoch, reason}}`.
 `approval.respond` records the answer, emits `approval.resolved`, resumes the turn and the
 driver finishes with `turn.end`. A client that attaches later sees the request on replay; a
 second answer is `already_resolved`, an unknown one `not_found`. `tool-test` drives the turn
 directly and `gate-tool-test` drives the daemon, late attach included.
 
+`exec` is the third tool: `exec.run` in core spawns one short-lived child in the turn's
+tool root with a scrubbed environment, no shell, a ten-second default timeout and a 64 KiB
+output cap, and the policy module makes it `ask`, so an exec-shaped call parks exactly like
+a write. The per-session worker that will own long-lived children and the sandbox is still
+to come; until then `exec` is a child of the daemon.
+
 Policy is its own guest again: `modules/policy` is pure, with an empty import section like
 `engine`, and answers `{tool}` with `{decision}` of `allow`, `ask` or `deny`. The driver asks
 it through `policy.check`, a core capability that dispatches into the module, and core owns
-only the gate that turns `ask` into a parked approval. `read` is allowed, `write` asks, and
-`/run` — an exec-shaped prompt — is denied, which is the fail-closed path with no tool
-behind it. The README's judge and plan gate are M2. A method is served only when
+only the gate that turns `ask` into a parked approval. `read` is allowed; `write` and
+`exec` ask; anything else the module is not told about — an unknown tool — is denied, which
+is the fail-closed default. The README's judge and plan gate are M2. A method is served only when
 `docs/protocol.md` says it is served — the rest of the frozen list answers `not_supported`.
 
 M0's acceptance is 1,000 round-trips/s over UDS and a fuzz-clean decoder. A

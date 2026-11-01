@@ -41,6 +41,7 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
   const char *decision = "deny";
   if (wd_key_eq((const uint8_t *)tool, wd_len(tool), "read")) decision = "allow";
   if (wd_key_eq((const uint8_t *)tool, wd_len(tool), "write")) decision = "ask";
+  if (wd_key_eq((const uint8_t *)tool, wd_len(tool), "exec")) decision = "ask";
 
   wd_w w;
   wd_w_init(&w, reply, REPLY_SIZE);

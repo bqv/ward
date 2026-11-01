@@ -100,6 +100,14 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
     forward(out, "fs.read", payload, w.at);
     return;
   }
+  if (wd_key_eq((const uint8_t *)tool, wd_len(tool), "exec")) {
+    wd_w_map(&w, 1);
+    wd_w_textz(&w, "command");
+    wd_w_textz(&w, text);
+    if (w.failed) return;
+    forward(out, "exec.run", payload, w.at);
+    return;
+  }
   if (wd_key_eq((const uint8_t *)tool, wd_len(tool), "write")) {
     wd_w_map(&w, 2);
     wd_w_textz(&w, "path");
