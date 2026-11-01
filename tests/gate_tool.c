@@ -469,7 +469,9 @@ int main(void) {
   assert(wd_uint_of(wd_get(stats_one, "turns"), &turns));
   assert(wd_uint_of(wd_get(stats_one, "text_bytes"), &text_bytes));
   assert(wd_uint_of(wd_get(stats_one, "events"), &events));
-  assert(turns >= 1 && text_bytes > 0 && events >= 4);
+  uint64_t prompt_bytes = 0;
+  assert(wd_uint_of(wd_get(stats_one, "prompt_bytes"), &prompt_bytes));
+  assert(turns >= 1 && text_bytes > 0 && events >= 4 && prompt_bytes > 0);
   wd_free(stats_one);
 
   cbor_item_t *stats_all = NULL;

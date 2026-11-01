@@ -210,6 +210,15 @@ session at that sequence, or at the last checkpoint when asked for none, through
 append-only — the old line stays, and the client gets a new session id whose transcript is
 the history up to the checkpoint.
 
+Nineteenth: the log records the question. `session.prompt` appends `session.prompted {text}`
+before running the turn, so a transcript can be read back as a conversation rather than as
+answers to questions nobody kept. `hs_measure` counts those bytes as `prompt_bytes`, and
+both stats methods report it beside `text_bytes`.
+
+This is the foundation the two remaining M2 rows need: compaction summarises what was asked,
+and a price needs both sides of it. Until this commit the user's own words were not durable
+anywhere, which would have made either row a guess.
+
 M0's acceptance is 1,000 round-trips/s over UDS and a fuzz-clean decoder. A
 gate that is not measured is not met.
 

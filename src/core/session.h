@@ -51,6 +51,7 @@ typedef struct {
   uint64_t events;
   uint64_t turns;
   uint64_t text_bytes;
+  uint64_t prompt_bytes;
 } hs_stats;
 
 int hs_measure(hs_session *s, hs_stats *out);

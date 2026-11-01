@@ -349,6 +349,11 @@ static int measure_record(void *ctx, uint64_t seq, cbor_item_t *event) {
       if (text != NULL) stats->text_bytes += strlen(text);
       free(text);
     }
+    if (strcmp(kind, "session.prompted") == 0) {
+      char *text = wd_text_copy(wd_get(wd_get(event, "payload"), "text"));
+      if (text != NULL) stats->prompt_bytes += strlen(text);
+      free(text);
+    }
   }
   free(kind);
   return 0;

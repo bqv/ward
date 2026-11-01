@@ -746,16 +746,19 @@ static int command_stats(int argc, char **argv) {
     char *session = wd_text_copy(wd_get(result, "session"));
     char *model = wd_text_copy(wd_get(result, "model"));
     uint64_t sessions = 0, turns = 0, text_bytes = 0, events = 0;
+    uint64_t prompt_bytes = 0;
     wd_uint_of(wd_get(result, "sessions"), &sessions);
     wd_uint_of(wd_get(result, "turns"), &turns);
     wd_uint_of(wd_get(result, "text_bytes"), &text_bytes);
     wd_uint_of(wd_get(result, "events"), &events);
+    wd_uint_of(wd_get(result, "prompt_bytes"), &prompt_bytes);
     if (session != NULL) printf("session     %s\n", session);
     if (model != NULL) printf("model       %s\n", model);
     if (session == NULL) printf("sessions    %llu\n", (unsigned long long)sessions);
-    printf("events      %llu\nturns       %llu\ntext bytes  %llu\n",
+    printf("events      %llu\nturns       %llu\ntext bytes  %llu\n"
+           "prompt bytes %llu\n",
            (unsigned long long)events, (unsigned long long)turns,
-           (unsigned long long)text_bytes);
+           (unsigned long long)text_bytes, (unsigned long long)prompt_bytes);
     free(session);
     free(model);
   }

@@ -421,12 +421,13 @@ static void handle_stats_session(wd_server *srv, wd_conn *conn, uint64_t id,
     respond_internal(srv, conn, id, "cannot read the session log");
     return;
   }
-  cbor_item_t *result = wd_map(5);
+  cbor_item_t *result = wd_map(6);
   wd_put(result, "session", wd_text(session->id));
   wd_put(result, "model", wd_text(session->model));
   wd_put(result, "events", wd_uint(stats.events));
   wd_put(result, "turns", wd_uint(stats.turns));
   wd_put(result, "text_bytes", wd_uint(stats.text_bytes));
+  wd_put(result, "prompt_bytes", wd_uint(stats.prompt_bytes));
   conn_send_cached(conn, id, wd_response_ok(id, result));
   conn_arm(srv, conn);
 }
@@ -440,13 +441,15 @@ static void handle_stats_global(wd_server *srv, wd_conn *conn, uint64_t id) {
       total.events += one.events;
       total.turns += one.turns;
       total.text_bytes += one.text_bytes;
+      total.prompt_bytes += one.prompt_bytes;
     }
   }
-  cbor_item_t *result = wd_map(4);
+  cbor_item_t *result = wd_map(5);
   wd_put(result, "sessions", wd_uint(srv->store.len));
   wd_put(result, "events", wd_uint(total.events));
   wd_put(result, "turns", wd_uint(total.turns));
   wd_put(result, "text_bytes", wd_uint(total.text_bytes));
+  wd_put(result, "prompt_bytes", wd_uint(total.prompt_bytes));
   conn_send_cached(conn, id, wd_response_ok(id, result));
   conn_arm(srv, conn);
 }
@@ -878,6 +881,14 @@ static void handle_session_prompt(wd_server *srv, wd_conn *conn, uint64_t id,
     respond_internal(srv, conn, id, err != NULL ? err : "no modules");
     free(err);
     return;
+  }
+  cbor_item_t *asked = wd_map(1);
+  wd_put(asked, "text", wd_text(text));
+  uint64_t asked_seq = 0;
+  if (hs_emit(session, "session.prompted", asked, &asked_seq) == 0) {
+    cbor_item_t *event = wd_map(1);
+    wd_put(event, "text", wd_text(text));
+    conn_broadcast(srv, session, "session.prompted", asked_seq, event);
   }
   wd_turn_set_root(turn, session->cwd);
   wd_turn_ctx tc = {srv, session};
