@@ -274,6 +274,15 @@ reply and serves connections in a forked child, two subagents start back to back
 gate asserts both turns finish inside 700 ms when a single turn takes 400 — 466 ms measured,
 so they were genuinely in flight together rather than merely started.
 
+Twenty-seventh: what `job.kill` must mean. A first attempt exposed the running set through
+`job.list` and made `job.kill` cancel the run's worker, mirroring `session.cancel`. It hung
+in the gate, and the reason is structural rather than a slip: `session.cancel` stops a
+*command*, so it only applies to a turn parked on the worker. A job can equally be parked on
+the provider — there is no worker to kill — and killing it has to end the run, which means
+`turn.end` with an aborted result and a `job.updated {state: "killed"}` notice, not a worker
+kill that may never come. The slice was reverted rather than committed untested; the next
+attempt should start from that distinction: cancel stops a command, kill ends a run.
+
 ## M3: started, with one finding worth keeping
 
 The first M3 attempt replaced the daemon's single `wd_turn` with a pool keyed by session, so
