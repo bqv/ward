@@ -40,6 +40,7 @@ int main(void) {
              "model = \"qwen3\"\n"
              "context = \"32768\"\n"
              "tags = \"local, fast\"\n"
+             "price = \"0.04,2.0\"\n"
              "\n"
              "[[model]]\n"
              "id = \"cloud:flash\"\n"
@@ -55,6 +56,7 @@ int main(void) {
   assert(strcmp(first->model, "qwen3") == 0);
   assert(strcmp(first->context, "32768") == 0);
   assert(strcmp(first->tags, "local, fast") == 0);
+  assert(first->price != NULL && strcmp(first->price, "0.04,2.0") == 0);
   const wd_model *second = wd_models_at(models, 1);
   assert(second != NULL && strcmp(second->id, "cloud:flash") == 0);
   assert(second->tags == NULL);

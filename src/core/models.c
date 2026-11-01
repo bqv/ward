@@ -55,6 +55,8 @@ static int set_field(wd_model *model, const char *key, const char *value) {
     field = &model->context;
   else if (strcmp(key, "tags") == 0)
     field = &model->tags;
+  else if (strcmp(key, "price") == 0)
+    field = &model->price;
   else
     return 0;
   free(*field);
@@ -140,6 +142,7 @@ bad:
   free(current.model);
   free(current.context);
   free(current.tags);
+  free(current.price);
   wd_models_free(models);
   return NULL;
 }
@@ -152,6 +155,7 @@ void wd_models_free(wd_models *models) {
     free(models->items[i].model);
     free(models->items[i].context);
     free(models->items[i].tags);
+    free(models->items[i].price);
   }
   free(models->items);
   free(models);

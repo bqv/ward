@@ -421,13 +421,28 @@ static void handle_stats_session(wd_server *srv, wd_conn *conn, uint64_t id,
     respond_internal(srv, conn, id, "cannot read the session log");
     return;
   }
-  cbor_item_t *result = wd_map(6);
+  const wd_model *model = wd_models_find(srv->models, session->model);
+  double in_price = 0;
+  double out_price = 0;
+  bool priced = model != NULL && model->price != NULL &&
+                sscanf(model->price, "%lf,%lf", &in_price, &out_price) == 2;
+  cbor_item_t *result = wd_map(priced ? 10 : 7);
   wd_put(result, "session", wd_text(session->id));
   wd_put(result, "model", wd_text(session->model));
   wd_put(result, "events", wd_uint(stats.events));
   wd_put(result, "turns", wd_uint(stats.turns));
   wd_put(result, "text_bytes", wd_uint(stats.text_bytes));
   wd_put(result, "prompt_bytes", wd_uint(stats.prompt_bytes));
+  wd_put(result, "tokens_estimated", cbor_build_bool(true));
+  if (priced) {
+    double prompt_tokens = (double)stats.prompt_bytes / 4.0;
+    double text_tokens = (double)stats.text_bytes / 4.0;
+    double in_cost = prompt_tokens * in_price / 1e6;
+    double out_cost = text_tokens * out_price / 1e6;
+    wd_put(result, "cost_in", cbor_build_float8(in_cost));
+    wd_put(result, "cost_out", cbor_build_float8(out_cost));
+    wd_put(result, "cost_total", cbor_build_float8(in_cost + out_cost));
+  }
   conn_send_cached(conn, id, wd_response_ok(id, result));
   conn_arm(srv, conn);
 }

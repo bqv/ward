@@ -233,7 +233,8 @@ int main(void) {
   FILE *models = fopen(models_path, "w");
   assert(models != NULL);
   assert(fputs("[[model]]\nid = \"local:qwen\"\nprovider = \"stadi\"\n"
-               "model = \"qwen3\"\ncontext = \"32768\"\n",
+               "model = \"qwen3\"\ncontext = \"32768\"\n"
+               "price = \"0.04,2.0\"\n",
                models) >= 0);
   fclose(models);
 
@@ -472,6 +473,12 @@ int main(void) {
   uint64_t prompt_bytes = 0;
   assert(wd_uint_of(wd_get(stats_one, "prompt_bytes"), &prompt_bytes));
   assert(turns >= 1 && text_bytes > 0 && events >= 4 && prompt_bytes > 0);
+  bool estimated = false;
+  assert(wd_bool_of(wd_get(stats_one, "tokens_estimated"), &estimated));
+  assert(estimated);
+  cbor_item_t *total = wd_get(stats_one, "cost_total");
+  assert(total != NULL && cbor_isa_float_ctrl(total));
+  assert(cbor_float_get_float(total) > 0);
   wd_free(stats_one);
 
   cbor_item_t *stats_all = NULL;

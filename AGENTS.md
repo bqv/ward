@@ -227,6 +227,13 @@ in order, so a conversation is answered in context rather than one prompt at a t
 fake endpoint now echoes the *newest* content, so the gates still assert the current prompt
 while the history rides along.
 
+Twenty-first: cost accounting. A model entry may carry `price = "in,out"` per million
+tokens; `stats.session` looks the session's model up in the catalog and answers
+`{cost_in, cost_out, cost_total}` beside the counters, and `ward stats` prints the total.
+The token count is bytes over four and the answer says so with `tokens_estimated: true` —
+a labelled estimate, not a measured price, until the tokenizer the README reserves a core
+budget for exists. The field shape will not change when it does.
+
 M0's acceptance is 1,000 round-trips/s over UDS and a fuzz-clean decoder. A
 gate that is not measured is not met.
 

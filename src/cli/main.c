@@ -759,6 +759,10 @@ static int command_stats(int argc, char **argv) {
            "prompt bytes %llu\n",
            (unsigned long long)events, (unsigned long long)turns,
            (unsigned long long)text_bytes, (unsigned long long)prompt_bytes);
+    cbor_item_t *cost = wd_get(result, "cost_total");
+    if (cost != NULL && cbor_isa_float_ctrl(cost))
+      printf("cost        %.6f (estimated tokens)\n",
+             cbor_float_get_float(cost));
     free(session);
     free(model);
   }

@@ -117,9 +117,15 @@ to `"unset"`. The id is minted by the daemon, never supplied by the client.
 **`session.get`** — params `{id: text}`. Returns `{session: <session>}`, or `not_found`.
 
 **`stats.session`** — params `{id}`. Counts the session's log: `{session, model, events,
-turns, text_bytes}`, where `events` is `last_seq`, `turns` the number of `turn.end` events
-and `text_bytes` the total length of the text deltas. These are the counters cost accounting
-will price.
+turns, text_bytes, prompt_bytes, tokens_estimated}`, where `events` is `last_seq`, `turns`
+the number of `turn.end` events, `text_bytes` the total length of the text deltas and
+`prompt_bytes` the length of what was asked. When the session's model carries a `price` in
+`models.toml` the answer also has `{cost_in, cost_out, cost_total}` in the currency those
+numbers were written in.
+
+`tokens_estimated` is true because there is no tokenizer yet: the cost divides bytes by
+four. It is labelled so a client can never mistake the number for a measured one, and the
+fields stay the same when a real tokenizer replaces the estimate.
 
 **`stats.global`** — no params. The same counters summed over every session, plus
 `{sessions}`.
@@ -225,7 +231,8 @@ administration is local only; a QUIC connection asking for it is `permission_den
 ### The model catalog
 
 The catalog is data, not code: `models.toml` in the state directory, one `[[model]]` table
-per entry with `id`, `provider`, `model`, `context` and `tags` (all text). It is read at
+per entry with `id`, `provider`, `model`, `context`, `tags` and `price` (all text; `price`
+is `in,out` per million tokens). It is read at
 start-up; a missing file is an empty catalog, and a duplicate `id` is a start-up error.
 
 **`model.list`** — no params. Returns `{models: [{id, provider, model, context, tags}]}`.
