@@ -643,6 +643,21 @@ The slices, in order, each building and committing alone:
 Steps 1 and 2 are independent of the rest and can run first; 3–6 are a chain; 7–8 are orthogonal
 and can start in parallel.
 
+Fifty-eighth: the module manifest loader, slice one of M5. `src/core/manifest.c` reads
+`<dir>/<name>.toml` — `name`, `version`, `state_schema`, `lazy`, `capabilities` — with the
+same hand-rolled TOML idiom the model catalog uses, because the tree has no TOML library and a
+manifest is five keys. It refuses a manifest whose name does not match its file, a capability
+list that is not closed or too long, and a schema that is not a number; a missing `version`
+means `"1"`, a missing `state_schema` means `1`.
+
+`wd_manifest_compare_version` compares numerically first and falls back to text, so `2 < 10` as
+an operator expects rather than as `strcmp` would say.
+
+This is deliberately only the loader: the registry that scans, resolves and validates against a
+core-owned table of purity and grants is the next step, and it needs this underneath it. Purity
+and grants stay out of the manifest on purpose — a file a client can edit must never widen its
+own authority.
+
 ## M3: started, with one finding worth keeping
 
 The first M3 attempt replaced the daemon's single `wd_turn` with a pool keyed by session, so
