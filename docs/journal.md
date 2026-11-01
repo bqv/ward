@@ -1248,3 +1248,17 @@ honest rather than letting the arithmetic go negative.
 Not yet measured end to end: the effect is that more history survives trimming, which needs a session with
 tens of kilobytes of turns and a capture of the request body to observe. The arithmetic is tested; the wiring
 is three lines; the observation is owed.
+
+Ninety-fifth: the head can now be byte-stable, and the reason it was not. The driver no longer stamps the
+prompt with the wall clock — that stamp lived only in the outbound request while `session.prompted` recorded
+the raw text, so replay rebuilt different bytes and llama.cpp re-prefilled from the first user turn every
+time. The daemon now appends a durable `session.time {text}` before each `session.prompted`, and replay turns
+that event into a `system` message, so the bytes the model saw are the bytes the log holds.
+
+`session_test` asserts the property that matters rather than a message count: history after one turn is a
+byte-prefix of history after two, compared with `cbor_serialize_alloc` per entry. Counting messages would not
+catch a moved byte, which is exactly how the stamp survived this long.
+
+The first attempt at the broadcast was a use-after-free: `wd_session_emit` consumes its payload, and the same
+map was then handed to `wd_event` for the broadcast. ASan caught it in `gate_crash` and `gate_tool` while the
+debug build passed, which is the sanitizer earning its place. The event map is now built separately.

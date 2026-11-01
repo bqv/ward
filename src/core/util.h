@@ -18,6 +18,7 @@ char *wd_default_state_dir(void);
 char *wd_default_socket_path(void);
 char *wd_boot_id(void);
 uint64_t wd_now_ms(void);
+void wd_now_text(char *buf, size_t cap);
 bool wd_pid_alive(long pid);
 int wd_random_bytes(void *buf, size_t len);
 

@@ -210,6 +210,53 @@ int main(void) {
   assert(strcmp(replayed->pins[0].name, "driver") == 0);
   assert(strcmp(replayed->pins[0].version, "3") == 0);
 
+  {
+    wd_session *stable = NULL;
+    assert(wd_session_create(&store, "/tmp", NULL, &stable) == 0);
+    cbor_item_t *first = NULL;
+    cbor_item_t *second = NULL;
+    for (int round = 1; round <= 2; round++) {
+      cbor_item_t *when = wd_map(1);
+      wd_put(when, "text", wd_text("2026-11-02 01:00:00 EET"));
+      assert(wd_session_emit(stable, "session.time", when, NULL) == 0);
+      cbor_item_t *ask = wd_map(1);
+      char question[32];
+      snprintf(question, sizeof(question), "question %d", round);
+      wd_put(ask, "text", wd_text(question));
+      assert(wd_session_emit(stable, "session.prompted", ask, NULL) == 0);
+      cbor_item_t *piece = wd_map(1);
+      char reply[32];
+      snprintf(reply, sizeof(reply), "answer %d", round);
+      wd_put(piece, "text", wd_text(reply));
+      assert(wd_session_emit(stable, "text.delta", piece, NULL) == 0);
+      assert(wd_session_emit(stable, "turn.end", wd_map(0), NULL) == 0);
+      cbor_item_t *built_now = NULL;
+      assert(wd_session_history(stable, 0, &built_now) == 0);
+      if (round == 1) {
+        first = built_now;
+      } else {
+        second = built_now;
+      }
+    }
+    assert(cbor_array_size(first) == 3);
+    assert(cbor_array_size(second) == 6);
+    cbor_item_t **a = cbor_array_handle(first);
+    cbor_item_t **b = cbor_array_handle(second);
+    for (size_t i = 0; i < cbor_array_size(first); i++) {
+      unsigned char *a_bytes = NULL;
+      unsigned char *b_bytes = NULL;
+      size_t a_len = cbor_serialize_alloc(a[i], &a_bytes, NULL);
+      size_t b_len = cbor_serialize_alloc(b[i], &b_bytes, NULL);
+      assert(a_bytes != NULL && b_bytes != NULL);
+      assert(a_len == b_len);
+      assert(memcmp(a_bytes, b_bytes, a_len) == 0);
+      free(a_bytes);
+      free(b_bytes);
+    }
+    wd_free(first);
+    wd_free(second);
+  }
+
   wd_store_close(&store);
 
   printf("session tests passed\n");

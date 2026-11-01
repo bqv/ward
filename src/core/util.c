@@ -114,6 +114,15 @@ char *wd_boot_id(void) {
   return strdup(buf);
 }
 
+void wd_now_text(char *buf, size_t cap) {
+  if (buf == NULL || cap == 0) return;
+  time_t now = time(NULL);
+  struct tm tm;
+  buf[0] = '\0';
+  if (localtime_r(&now, &tm) != NULL)
+    strftime(buf, cap, "%Y-%m-%d %H:%M:%S %Z", &tm);
+}
+
 uint64_t wd_now_ms(void) {
   struct timespec ts;
   clock_gettime(CLOCK_REALTIME, &ts);

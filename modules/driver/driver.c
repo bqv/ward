@@ -49,31 +49,6 @@ static int cap_call(const char *capability, const uint8_t *payload, uint32_t len
   return 0;
 }
 
-static int clock_text(char *out, uint32_t cap) {
-  uint8_t payload[8];
-  wd_w w;
-  wd_w_init(&w, payload, sizeof(payload));
-  wd_w_map(&w, 0);
-  uint8_t answer[REPLY_SIZE];
-  uint32_t answer_len = 0;
-  if (cap_call("clock.now", payload, w.at, answer, &answer_len) != 0) return -1;
-  wd_r r = {answer, answer_len, 0, 0};
-  uint32_t n = 0;
-  if (wd_r_map(&r, &n) != 0) return -1;
-  out[0] = '\0';
-  for (uint32_t i = 0; i < n; i++) {
-    const uint8_t *kp = 0;
-    uint32_t kn = 0;
-    if (wd_r_text_ptr(&r, &kp, &kn) != 0) return -1;
-    if (wd_key_eq(kp, kn, "text")) {
-      if (wd_r_text(&r, out, cap, 0) != 0) return -1;
-    } else if (wd_r_skip(&r) != 0) {
-      return -1;
-    }
-  }
-  return 0;
-}
-
 static int policy_check(const char *tool, const char *args) {
   uint8_t payload[768];
   wd_w w;
@@ -440,24 +415,10 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
         }
       }
     }
-    char clock[TEXT_SIZE];
     char stamped[TEXT_SIZE];
-    stamped[0] = '\0';
-    if (clock_text(clock, sizeof(clock)) == 0 && clock[0] != '\0') {
-      uint32_t at = 0;
-      stamped[at++] = '[';
-      for (uint32_t i = 0; clock[i] != '\0' && at + 4 < sizeof(stamped); i++)
-        stamped[at++] = clock[i];
-      stamped[at++] = ']';
-      stamped[at++] = ' ';
-      for (uint32_t i = 0; text[i] != '\0' && at + 1 < sizeof(stamped); i++)
-        stamped[at++] = text[i];
-      stamped[at] = '\0';
-    } else {
-      for (uint32_t i = 0; text[i] != '\0' && i + 1 < sizeof(stamped); i++)
-        stamped[i] = text[i];
-      stamped[wd_len(text)] = '\0';
-    }
+    for (uint32_t i = 0; text[i] != '\0' && i + 1 < sizeof(stamped); i++)
+      stamped[i] = text[i];
+    stamped[wd_len(text)] = '\0';
     wd_w w;
     uint8_t message[1024];
     wd_w_init(&w, message, sizeof(message));

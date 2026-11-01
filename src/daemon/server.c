@@ -1238,6 +1238,15 @@ static void start_session_turn(wd_server *srv, wd_session *session,
     cbor_item_t *asked = wd_map(1);
     wd_put(asked, "text", wd_text(text));
     uint64_t seq = 0;
+    char when[64];
+    wd_now_text(when, sizeof(when));
+    cbor_item_t *time_event = wd_map(1);
+    wd_put(time_event, "text", wd_text(when));
+    cbor_item_t *time_payload = wd_map(1);
+    wd_put(time_payload, "text", wd_text(when));
+    uint64_t time_seq = 0;
+    if (wd_session_emit(session, "session.time", time_payload, &time_seq) == 0)
+      conn_broadcast(srv, session, "session.time", time_seq, time_event);
     if (wd_session_emit(session, "session.prompted", asked, &seq) == 0) {
       cbor_item_t *event = wd_map(1);
       wd_put(event, "text", wd_text(text));
@@ -2292,6 +2301,15 @@ static void handle_session_prompt(wd_server *srv, wd_conn *conn, uint64_t id,
   cbor_item_t *asked = wd_map(1);
   wd_put(asked, "text", wd_text(text));
   uint64_t asked_seq = 0;
+  char when[64];
+  wd_now_text(when, sizeof(when));
+  cbor_item_t *time_event = wd_map(1);
+  wd_put(time_event, "text", wd_text(when));
+  cbor_item_t *time_payload = wd_map(1);
+  wd_put(time_payload, "text", wd_text(when));
+  uint64_t time_seq = 0;
+  if (wd_session_emit(session, "session.time", time_payload, &time_seq) == 0)
+    conn_broadcast(srv, session, "session.time", time_seq, time_event);
   if (wd_session_emit(session, "session.prompted", asked, &asked_seq) == 0) {
     cbor_item_t *event = wd_map(1);
     wd_put(event, "text", wd_text(text));
@@ -2351,6 +2369,15 @@ static void drain_schedules(wd_server *srv, uint64_t now) {
           cbor_item_t *asked = wd_map(1);
           wd_put(asked, "text", wd_text(entry->text));
           uint64_t seq = 0;
+          char when[64];
+          wd_now_text(when, sizeof(when));
+          cbor_item_t *time_event = wd_map(1);
+          wd_put(time_event, "text", wd_text(when));
+          cbor_item_t *time_payload = wd_map(1);
+          wd_put(time_payload, "text", wd_text(when));
+          uint64_t time_seq = 0;
+          if (wd_session_emit(child, "session.time", time_payload, &time_seq) == 0)
+            conn_broadcast(srv, child, "session.time", time_seq, time_event);
           if (wd_session_emit(child, "session.prompted", asked, &seq) == 0) {
             cbor_item_t *event = wd_map(1);
             wd_put(event, "text", wd_text(entry->text));

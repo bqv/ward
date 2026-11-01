@@ -628,6 +628,16 @@ static int history_record(void *ctx, uint64_t seq, cbor_item_t *event) {
       }
       free(text);
     }
+  } else if (strcmp(kind, "session.time") == 0) {
+    char *text = wd_text_copy(wd_get(payload, "text"));
+    if (text != NULL) {
+      if (hist_push(hc, "system", text) != 0) {
+        free(text);
+        free(kind);
+        return 1;
+      }
+      free(text);
+    }
   } else if (strcmp(kind, "text.delta") == 0) {
     char *piece = wd_text_copy(wd_get(payload, "text"));
     if (piece != NULL) {
