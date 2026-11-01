@@ -489,6 +489,31 @@ int main(void) {
   fclose(file);
   assert(strcmp(content, "hello there") == 0);
 
+  cbor_item_t *checked = NULL;
+  cbor_item_t *check_params = wd_map(2);
+  wd_put(check_params, "id", wd_text(session));
+  wd_put(check_params, "label", wd_text("before the undo"));
+  assert(request(&a, a.next_id++, "session.checkpoint", check_params, &checked,
+                 NULL) == 0);
+  uint64_t checkpoint_seq = 0;
+  assert(wd_uint_of(wd_get(checked, "seq"), &checkpoint_seq));
+  assert(checkpoint_seq > 0);
+  wd_free(checked);
+
+  cbor_item_t *branched = NULL;
+  cbor_item_t *undo_params = wd_map(1);
+  wd_put(undo_params, "id", wd_text(session));
+  assert(request(&a, a.next_id++, "session.undo", undo_params, &branched,
+                 NULL) == 0);
+  char *branch_id = wd_text_copy(wd_get(wd_get(branched, "session"), "id"));
+  assert(branch_id != NULL && strcmp(branch_id, session) != 0);
+  uint64_t branch_seq = 0;
+  assert(wd_uint_of(wd_get(wd_get(branched, "session"), "last_seq"),
+                    &branch_seq));
+  assert(branch_seq == checkpoint_seq + 1);
+  free(branch_id);
+  wd_free(branched);
+
   cbor_item_t *forked = NULL;
   cbor_item_t *fork_params = wd_map(1);
   wd_put(fork_params, "id", wd_text(session));

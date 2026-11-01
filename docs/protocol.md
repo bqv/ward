@@ -124,6 +124,13 @@ will price.
 **`stats.global`** — no params. The same counters summed over every session, plus
 `{sessions}`.
 
+**`session.checkpoint`** — params `{id, label?}`. Appends `session.checkpoint {label}` and
+answers `{session, seq}`, the sequence a later branch can start from.
+
+**`session.undo`** — params `{id, to?}`. Branches the session at `to`, or at the last
+checkpoint when `to` is absent, and answers `{session}` for the new branch. The transcript is
+append-only, so undo never rewrites: it forks the log, exactly as `session.fork` does.
+
 **`session.rename`** — params `{id, name}`. Stores the label in the label database and
 appends `session.updated` so subscribers see it. Answers `{session}`.
 

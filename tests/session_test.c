@@ -76,17 +76,30 @@ int main(void) {
   assert(reloaded->last_seq == 1);
   assert(strcmp(reloaded->cwd, "/tmp") == 0);
   assert(strcmp(reloaded->model, "deepseek") == 0);
+  uint64_t checkpoint = 0;
+  assert(hs_checkpoint(reloaded, "before the branch", &checkpoint) == 0);
+  assert(checkpoint == 2);
+  uint64_t last = 0;
+  assert(hs_last_checkpoint(reloaded, &last) == 0);
+  assert(last == checkpoint);
+  assert(hs_checkpoint(reloaded, "", &checkpoint) == 0);
+  assert(checkpoint == 3);
+  assert(hs_last_checkpoint(reloaded, &last) == 0);
+  assert(last == 3);
+
   hs_session *child = NULL;
   assert(hs_fork(&store, reloaded, 0, &child) == 0);
   assert(child != NULL);
   assert(strcmp(child->id, reloaded->id) != 0);
   assert(strcmp(child->cwd, reloaded->cwd) == 0);
   assert(strcmp(child->model, reloaded->model) == 0);
-  assert(child->last_seq == 2);
+  assert(child->last_seq == 4);
   seen fork_seen = {0};
-  assert(hs_replay(child, 0, note, &fork_seen) == 2);
+  assert(hs_replay(child, 0, note, &fork_seen) == 4);
   assert(strcmp(fork_seen.kinds[0], "session.updated") == 0);
-  assert(strcmp(fork_seen.kinds[1], "session.forked") == 0);
+  assert(strcmp(fork_seen.kinds[1], "session.checkpoint") == 0);
+  assert(strcmp(fork_seen.kinds[2], "session.checkpoint") == 0);
+  assert(strcmp(fork_seen.kinds[3], "session.forked") == 0);
 
   hs_session *cut = NULL;
   assert(hs_fork(&store, reloaded, 1, &cut) == 0);

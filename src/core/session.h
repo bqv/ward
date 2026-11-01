@@ -40,6 +40,8 @@ int hs_emit(hs_session *s, const char *kind, cbor_item_t *payload,
             uint64_t *seq_out);
 int hs_set_model(hs_session *s, const char *model, uint64_t *seq_out);
 int hs_fork(hs_store *st, hs_session *parent, uint64_t upto, hs_session **out);
+int hs_checkpoint(hs_session *s, const char *label, uint64_t *seq_out);
+int hs_last_checkpoint(hs_session *s, uint64_t *seq_out);
 
 typedef int (*hs_replay_cb)(void *ctx, uint64_t seq, cbor_item_t *event);
 

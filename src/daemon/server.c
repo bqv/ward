@@ -507,6 +507,69 @@ static void handle_session_label(wd_server *srv, wd_conn *conn, uint64_t id,
   free(session_id);
 }
 
+static void handle_session_checkpoint(wd_server *srv, wd_conn *conn,
+                                      uint64_t id, cbor_item_t *params) {
+  char *session_id = wd_text_copy(wd_get(params, "id"));
+  char *label = wd_text_copy(wd_get(params, "label"));
+  hs_session *session =
+      session_id != NULL ? hs_find(&srv->store, session_id) : NULL;
+  free(session_id);
+  if (session == NULL) {
+    free(label);
+    conn_send_error(conn, id, WD_ERR_NOT_FOUND, "no such session");
+    conn_arm(srv, conn);
+    return;
+  }
+  uint64_t seq = 0;
+  int rc = hs_checkpoint(session, label, &seq);
+  free(label);
+  if (rc != 0) {
+    respond_internal(srv, conn, id, "cannot record the checkpoint");
+    return;
+  }
+  cbor_item_t *result = wd_map(2);
+  wd_put(result, "session", wd_text(session->id));
+  wd_put(result, "seq", wd_uint(seq));
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
+static void handle_session_undo(wd_server *srv, wd_conn *conn, uint64_t id,
+                                cbor_item_t *params) {
+  char *session_id = wd_text_copy(wd_get(params, "id"));
+  uint64_t to = 0;
+  bool have_to = wd_uint_of(wd_get(params, "to"), &to);
+  hs_session *session =
+      session_id != NULL ? hs_find(&srv->store, session_id) : NULL;
+  free(session_id);
+  if (session == NULL) {
+    conn_send_error(conn, id, WD_ERR_NOT_FOUND, "no such session");
+    conn_arm(srv, conn);
+    return;
+  }
+  if (!have_to && hs_last_checkpoint(session, &to) != 0) {
+    conn_send_error(conn, id, WD_ERR_CONFLICT,
+                    "the session has no checkpoint to undo to");
+    conn_arm(srv, conn);
+    return;
+  }
+  if (to == 0 || to > session->last_seq) {
+    conn_send_error(conn, id, WD_ERR_INVALID_PARAMS,
+                    "the checkpoint is not in this session");
+    conn_arm(srv, conn);
+    return;
+  }
+  hs_session *branch = NULL;
+  if (hs_fork(&srv->store, session, to, &branch) != 0) {
+    respond_internal(srv, conn, id, "cannot branch from the checkpoint");
+    return;
+  }
+  cbor_item_t *result = wd_map(1);
+  wd_put(result, "session", session_cbor(srv, branch));
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
 static void handle_session_search(wd_server *srv, wd_conn *conn, uint64_t id,
                                   cbor_item_t *params) {
   char *query = wd_text_copy(wd_get(params, "query"));
@@ -1304,6 +1367,10 @@ static void handle_request(wd_server *srv, wd_conn *conn, uint64_t id,
     handle_session_label(srv, conn, id, params, 1);
   } else if (strcmp(method, "session.pin") == 0) {
     handle_session_label(srv, conn, id, params, 2);
+  } else if (strcmp(method, "session.checkpoint") == 0) {
+    handle_session_checkpoint(srv, conn, id, params);
+  } else if (strcmp(method, "session.undo") == 0) {
+    handle_session_undo(srv, conn, id, params);
   } else if (strcmp(method, "session.search") == 0) {
     handle_session_search(srv, conn, id, params);
   } else if (strcmp(method, "session.cancel") == 0) {

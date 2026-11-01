@@ -267,6 +267,28 @@ int hs_set_model(hs_session *s, const char *model, uint64_t *seq_out) {
   return 0;
 }
 
+int hs_checkpoint(hs_session *s, const char *label, uint64_t *seq_out) {
+  cbor_item_t *payload = wd_map(1);
+  wd_put(payload, "label", wd_text(label != NULL ? label : ""));
+  return hs_emit(s, "session.checkpoint", payload, seq_out);
+}
+
+static int find_checkpoint(void *ctx, uint64_t seq, cbor_item_t *event) {
+  uint64_t *last = ctx;
+  char *kind = wd_text_copy(wd_get(event, "kind"));
+  if (kind != NULL && strcmp(kind, "session.checkpoint") == 0) *last = seq;
+  free(kind);
+  return 0;
+}
+
+int hs_last_checkpoint(hs_session *s, uint64_t *seq_out) {
+  uint64_t last = 0;
+  if (hs_replay(s, 0, find_checkpoint, &last) < 0) return -1;
+  if (last == 0) return -1;
+  *seq_out = last;
+  return 0;
+}
+
 static cbor_item_t *dup_item(cbor_item_t *item) {
   size_t need = cbor_serialized_size(item);
   if (need == 0) return NULL;

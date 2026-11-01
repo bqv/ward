@@ -203,6 +203,13 @@ Nothing on the prompt path blocks the loop now.
 M1 is feature-complete: no item on its parity row is missing, and both of its acceptance
 lines are gated.
 
+Eighteenth: checkpoints and undo. `session.checkpoint {id, label?}` appends a
+`session.checkpoint` event and answers its sequence; `session.undo {id, to?}` branches the
+session at that sequence, or at the last checkpoint when asked for none, through the same
+`hs_fork` the fork method uses. Undo is a branch rather than a rewrite because the log is
+append-only — the old line stays, and the client gets a new session id whose transcript is
+the history up to the checkpoint.
+
 M0's acceptance is 1,000 round-trips/s over UDS and a fuzz-clean decoder. A
 gate that is not measured is not met.
 
