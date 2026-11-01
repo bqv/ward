@@ -479,6 +479,18 @@ would grow a session log without limit — so `terminal.output` goes to subscrib
 protocol note says so. The gate opens `cat`, writes a line, asserts the line comes back through
 the terminal, resizes, and closes.
 
+Forty-seventh: recall. `recall.search {query, k}` runs the local `dsh-recall search <query> -k
+<k>` as a child and returns its words; the skills guest answers `/recall <words>` with them.
+The index, the embedding endpoint and the ranking are all `dsh-recall`'s — core owns the child
+process and nothing else, which is the same shape as `web.search` and `mcp.call`.
+
+The gate points `WARD_RECALL_BIN` at a stub and asserts its line arrives as a text delta, so
+the row is measured without depending on a live index.
+
+Worth fixing while it is fresh: `web.search` defaults to `~/bin/srchdsh`, but the binary is at
+`~/.local/bin/srchdsh` on this box. `WARD_SEARCH_BIN` hides it in tests; the default needs
+checking against the real path when search is next touched.
+
 ## M3: started, with one finding worth keeping
 
 The first M3 attempt replaced the daemon's single `wd_turn` with a pool keyed by session, so

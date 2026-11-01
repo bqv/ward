@@ -79,6 +79,49 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
     handled = 1;
     text = "project rules are read from AGENTS.md in the session's cwd";
   }
+  if (wd_key_eq((const uint8_t *)command, wd_len(command), "recall")) {
+    handled = 1;
+    if (args[0] == '\0') {
+      text = "usage: /recall <words>";
+    } else {
+      static uint8_t rbuf[1024];
+      static const char rname[] = "recall.search";
+      wd_put32(rbuf, 13);
+      for (uint32_t i = 0; i < 13; i++) rbuf[4 + i] = (uint8_t)rname[i];
+      wd_w rw;
+      wd_w_init(&rw, rbuf + 17, sizeof(rbuf) - 17);
+      wd_w_map(&rw, 2);
+      wd_w_textz(&rw, "query");
+      wd_w_textz(&rw, args);
+      wd_w_textz(&rw, "k");
+      wd_w_textz(&rw, "5");
+      uint32_t rdesc[2];
+      search_text[0] = '\0';
+      if (!rw.failed) {
+        ward_cap((uint32_t)(uintptr_t)rbuf, 17 + rw.at, (uint32_t)(uintptr_t)rdesc);
+        const uint8_t *rres = (const uint8_t *)(uintptr_t)rdesc[0];
+        wd_r rr3 = {rres, rdesc[1], 0, 0};
+        uint32_t rn3 = 0;
+        if (wd_r_map(&rr3, &rn3) == 0) {
+          for (uint32_t i = 0; i < rn3; i++) {
+            const uint8_t *kp4 = 0;
+            uint32_t kn4 = 0;
+            if (wd_r_text_ptr(&rr3, &kp4, &kn4) != 0) break;
+            if (wd_key_eq(kp4, kn4, "text")) {
+              wd_r_text(&rr3, search_text, sizeof(search_text), 0);
+            } else if (wd_r_skip(&rr3) != 0) {
+              break;
+            }
+          }
+        }
+      }
+      if (search_text[0] == '\0') {
+        static const char rnone[] = "nothing found";
+        for (uint32_t i = 0; i < sizeof(rnone); i++) search_text[i] = rnone[i];
+      }
+      text = search_text;
+    }
+  }
   if (wd_key_eq((const uint8_t *)command, wd_len(command), "mcp")) {
     handled = 1;
     if (args[0] == '\0') {

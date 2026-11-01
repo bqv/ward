@@ -276,6 +276,15 @@ int main(void) {
   fclose(mcp);
   assert(chmod(mcp_path, 0755) == 0);
   setenv("WARD_MCP_BIN", mcp_path, 1);
+  char recall_path[512];
+  snprintf(recall_path, sizeof(recall_path), "%s/recall-stub", root);
+  FILE *recall = fopen(recall_path, "wb");
+  assert(recall != NULL);
+  assert(fputs("#!/bin/bash\necho '1. score +0.9  ~/ref/NOTE.md remember this'\n",
+               recall) >= 0);
+  fclose(recall);
+  assert(chmod(recall_path, 0755) == 0);
+  setenv("WARD_RECALL_BIN", recall_path, 1);
   char state[256];
   char sock[128];
   snprintf(state, sizeof(state), "%s/state", root);
@@ -912,6 +921,23 @@ int main(void) {
   assert(wd_bool_of(wd_get(term_close_resp, "closed"), &term_closed));
   wd_free(term_close_resp);
   free(term_id);
+
+  cbor_item_t *recall_resp = NULL;
+  cbor_item_t *recall_prompt = wd_map(2);
+  wd_put(recall_prompt, "id", wd_text(session));
+  wd_put(recall_prompt, "text", wd_text("/recall ward terminal"));
+  assert(request(&a, a.next_id++, "session.prompt", recall_prompt,
+                 &recall_resp, NULL) == 0);
+  wd_free(recall_resp);
+  cbor_item_t *recall_delta = wait_event(&a, "text.delta", NULL);
+  assert(recall_delta != NULL);
+  char *recall_text = wd_text_copy(wd_get(recall_delta, "text"));
+  assert(recall_text != NULL && strstr(recall_text, "remember this") != NULL);
+  free(recall_text);
+  wd_free(recall_delta);
+  cbor_item_t *recall_end = wait_turn_end(&a, last_turn);
+  assert(recall_end != NULL);
+  wd_free(recall_end);
 
   cbor_item_t *sched = NULL;
   cbor_item_t *sched_params = wd_map(3);

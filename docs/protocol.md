@@ -130,6 +130,11 @@ fields stay the same when a real tokenizer replaces the estimate.
 **`stats.global`** — no params. The same counters summed over every session, plus
 `{sessions}`.
 
+**Recall.** `/recall <words>` asks the skills guest, which calls core's `recall.search
+{query, k}`. Core runs the local `dsh-recall search <query> -k <k>` as a child (no shell, 20 s,
+64 KiB) and answers `{ok, status, text}`. The index, its embedding endpoint and its ranking
+belong to `dsh-recall`; ward only runs it.
+
 **Terminals.** `terminal.open {id, command?, rows?, cols?}` starts a command under a
 pseudo-terminal in the session's cwd (default `sh -i`) and answers `{terminal, pid}`.
 `terminal.write {terminal, data}`, `terminal.resize {terminal, rows, cols}` and

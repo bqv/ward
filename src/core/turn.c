@@ -286,6 +286,65 @@ static int clock_now(uint8_t **out, size_t *out_len) {
   return tool_reply(reply, out, out_len);
 }
 
+static const char *recall_binary(void) {
+  const char *override = getenv("WARD_RECALL_BIN");
+  if (override != NULL && override[0] != '\0') return override;
+  static char path[PATH_MAX];
+  const char *home = getenv("HOME");
+  if (home == NULL || home[0] == '\0') return NULL;
+  snprintf(path, sizeof(path), "%s/bin/dsh-recall", home);
+  return path;
+}
+
+static int recall_search_run(wd_turn *turn, const uint8_t *in, size_t in_len,
+                             uint8_t **out, size_t *out_len) {
+  cbor_item_t *request = wd_decode(in, in_len);
+  if (request == NULL)
+    return tool_fail("recall.search: parameters are not cbor", out, out_len);
+  char *query = wd_text_copy(wd_get(request, "query"));
+  uint64_t k = 5;
+  wd_uint_of(wd_get(request, "k"), &k);
+  wd_free(request);
+  if (query == NULL || query[0] == '\0' || strlen(query) > 512) {
+    free(query);
+    return tool_fail("recall.search: the query is missing or too long", out,
+                     out_len);
+  }
+  if (k == 0 || k > 20) k = 5;
+  char count[8];
+  snprintf(count, sizeof(count), "%llu", (unsigned long long)k);
+  const char *binary = recall_binary();
+  if (binary == NULL) {
+    free(query);
+    return tool_fail("recall.search: no index is configured", out, out_len);
+  }
+  const char *argv[6];
+  size_t argc = 0;
+  argv[argc++] = binary;
+  argv[argc++] = "search";
+  argv[argc++] = query;
+  argv[argc++] = "-k";
+  argv[argc++] = count;
+  argv[argc] = NULL;
+  wd_proc_result result;
+  char *err = NULL;
+  int rc = wd_proc_run(argv, turn->root, 20000, WD_TOOL_MAX, &result, &err);
+  free(query);
+  free(err);
+  if (rc != 0)
+    return tool_fail("recall.search: cannot run dsh-recall", out, out_len);
+  int status = WIFEXITED(result.status) ? WEXITSTATUS(result.status) : 127;
+  cbor_item_t *reply = wd_map(3);
+  wd_put(reply, "ok", cbor_build_bool(status == 0));
+  wd_put(reply, "status", wd_uint((uint64_t)status));
+  if (result.len > 0)
+    wd_put(reply, "text", wd_text_len((const char *)result.out, result.len));
+  else
+    wd_put(reply, "text", wd_text(""));
+  wd_proc_result_free(&result);
+  return tool_reply(reply, out, out_len);
+}
+
 static const char *mcp_binary(void) {
   const char *override = getenv("WARD_MCP_BIN");
   if (override != NULL && override[0] != '\0') return override;
@@ -739,6 +798,8 @@ static int turn_capability(void *ctx, const char *capability,
   }
   if (strcmp(capability, "web.search") == 0)
     return web_search_run(turn, in, in_len, out, out_len);
+  if (strcmp(capability, "recall.search") == 0)
+    return recall_search_run(turn, in, in_len, out, out_len);
   if (strcmp(capability, "mcp.call") == 0)
     return mcp_call_run(turn, in, in_len, out, out_len);
   if (strcmp(capability, "skills.expand") == 0)
@@ -768,11 +829,12 @@ wd_turn *wd_turn_new(wd_engine *engine, const char *module_dir, const char *root
                                             "clock.now", "skills.expand"};
   static const char *const provider_caps[] = {"net.request"};
   static const char *const no_caps[] = {NULL};
-  static const char *const skills_caps[] = {"web.search", "mcp.call"};
+  static const char *const skills_caps[] = {"web.search", "mcp.call",
+                                            "recall.search"};
   wd_module_spec engine_spec = {"engine", no_caps, 0, true};
   wd_module_spec driver_spec = {"driver", driver_caps, 3, false};
   wd_module_spec policy_spec = {"policy", no_caps, 0, true};
-  wd_module_spec skills_spec = {"skills", skills_caps, 2, false};
+  wd_module_spec skills_spec = {"skills", skills_caps, 3, false};
   wd_module_spec provider_spec = {"provider", provider_caps, 1, false};
   wd_module_spec tools_spec = {"tools", no_caps, 0, true};
 
@@ -810,7 +872,7 @@ wd_turn *wd_turn_new(wd_engine *engine, const char *module_dir, const char *root
   turn->policy = wd_instance_new(turn->policy_module, no_caps, 0, &TURN_LIMITS,
                                  turn_capability, turn, err);
   if (turn->policy == NULL) goto fail;
-  turn->skills = wd_instance_new(turn->skills_module, skills_caps, 2,
+  turn->skills = wd_instance_new(turn->skills_module, skills_caps, 3,
                                  &TURN_LIMITS, turn_capability, turn, err);
   if (turn->skills == NULL) goto fail;
   return turn;
