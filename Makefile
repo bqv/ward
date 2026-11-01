@@ -56,6 +56,7 @@ CORE_SRC := \
            src/core/modstate.c \
            src/core/index.c \
            src/core/credentials.c \
+           src/core/prompt.c \
   src/wasm/host.c \
   src/net/http.c \
   src/net/pki.c \

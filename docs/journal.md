@@ -1149,3 +1149,23 @@ authenticates it. `credentials_test` covers parsing, quoting, the comment and th
 
 Adding a provider is now two lines: `key = "openrouter"` in its model entry, and `openrouter=sk-…` in the
 credentials file.
+
+Eighty-ninth: a prompt assembly module, and why it is not wired yet. `src/core/prompt.c` builds the system
+prompt the way DSH does — ordered sections, not one string:
+
+- `identity` at -100, built in;
+- any `<state>/prompt/NN-name.md`, the number is the order, so a user section slots anywhere;
+- `rules` at 100 from `<cwd>/AGENTS.md`;
+- `attachments` at 120 from the session.
+
+A file with a built-in's name replaces it, so `100-rules.md` overrides the project rules and `-100-identity.md`
+overrides the harness line. `wd_prompt_to_cbor` renders the assembly with each section's name, order, source
+path and text — that is the transparency the design asks for, and `prompt_test` measures the ordering, the
+override and the files that must be ignored.
+
+It is not connected to a turn. Wiring it in leaked one entry per prompt under ASan (4521 bytes in 110
+allocations over the test run) and I could not settle whether `cbor_array_push` increfs a borrowed item in
+this libcbor build before running out of patience. The repository's own note says it does; the experiment said
+otherwise twice. Rather than ship a leak, the module and its test are committed alone and the turn still uses
+the old two-line rules loader. The next step is a two-file experiment that answers that refcount question
+once, then the wiring is ten lines.
