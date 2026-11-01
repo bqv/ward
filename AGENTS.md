@@ -252,6 +252,27 @@ naming the owner: `wd_store_open`, `wd_session_emit`, `wd_session_history`, `wd_
 prefix at all. It is a rename with no behaviour change, which is why the same 21 tests pass
 before and after.
 
+## M3: started, with one finding worth keeping
+
+The first M3 attempt replaced the daemon's single `wd_turn` with a pool keyed by session, so
+two sessions — a parent and two subagents — can run turns at once. It built, and it exposed a
+bug that the old design was hiding: **a second `session.prompt` while a turn was parked used
+to clobber that turn silently**, because there was one turn object and no busy check. Every
+gate that "waited for `turn.end`" after an approval had in fact been reading the *previous*
+turn's end on occasion; with a per-session pool the daemon correctly refused the second
+prompt with `conflict`, and the tool gate failed.
+
+That is the shape of the real work, not a reason to go back:
+
+- turns need identities: `turn.start` and `turn.end` should carry a turn id, and a client
+  waits for the id it was given rather than for the next event of that kind;
+- `session.prompt` must refuse a busy session with `conflict`, and the CLI must say so;
+- then the pool goes back in, a session per run, and subagents are child sessions driven
+  through the same pool.
+
+The pool changes are reverted for now so master stays green; the finding above is the first
+thing the next attempt needs.
+
 M0's acceptance is 1,000 round-trips/s over UDS and a fuzz-clean decoder. A
 gate that is not measured is not met.
 
