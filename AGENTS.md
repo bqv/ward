@@ -214,6 +214,11 @@ These are decisions, not open questions; a change to one is a design change.
   removes a replay surface.
 - **No FTS table.** `rg` decompresses a log on demand; if that gets slow the
   answer is a plain-text sidecar cache, not an index in SQLite.
+- **Web search is a skill, not a tool.** It is judgement — what to search for, which result
+  to trust — so it lives in the `skills` module, and core offers exactly one capability
+  behind it: `web.search`, which runs the local `srchdsh` binary as a child. No module holds
+  a search API key or a socket to one, and the engine list belongs to srchdsh's config, not
+  to this repository.
 - **Do not reimplement syscall-heavy tools in WASM.** Grep runs in the worker's
   file broker on top of `rg`; the module chooses paths, patterns and shaping.
 

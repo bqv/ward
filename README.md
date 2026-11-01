@@ -80,6 +80,7 @@ engine.call(event)               -> {state, [action]}; core-mediated, granted on
 pty.{open,write,resize,read}
 tokens.count(model, text)
 judge.classify(kind, payload)    -> {verdict, reason, model, latency_ms}
+web.search(query, k)             -> [{title, url, snippet}]; srchdsh, no socket in the guest
 recall.search(query, k, scope)   -> [{text, source, score}]
 code.outline(path)               -> [{name, kind, line, end_line}]
 code.defs(name)                  -> [{path, line, kind}]
@@ -152,8 +153,18 @@ What runs in WASM, and therefore reloads without dropping a session:
 | `recall` | chunking, ranking and snippet shaping over the core-held index | Zig |
 | `code` | tree-sitter grammars, outline and symbol queries | Zig |
 | `policy` | which calls require approval, including judge escalation | Janet |
-| `skills` | AGENTS.md, skill loading, slash commands | Zig |
+| `skills` | AGENTS.md, skill loading, slash commands, web search | Zig |
 | plugins | event hooks | Zig, C or C++ |
+
+### Web search is a skill
+
+Searching the web is neither a core tool nor a provider feature: it is a skill, because what
+to search for, which result to trust and when to stop are judgement rather than I/O. The
+`skills` module owns that procedure and calls one core capability, `web.search(query, k)`,
+which runs the local metasearch binary — `srchdsh search -q … -json` — as a child of core.
+The module never holds a socket or an API key, and adding, removing or reweighting engines
+is a change to srchdsh's configuration, not to ward. Results are capped, timeout-bounded and
+logged with their decision like every other crossing.
 
 Languages are chosen per module, not per project: C for boundaries, C++ for the two modules
 that share a data model, Zig for I/O and text, Janet where a decision should be editable
@@ -435,6 +446,7 @@ and the worker does not fork until a resolution is recorded.
 | schedules (cron) | core scheduler | M3 |
 | goals | module `engine` | M3 |
 | skills, AGENTS.md, slash commands | module `skills` | M4 |
+| web search | module `skills` over core `web.search` (srchdsh) | M4 |
 | MCP client | module | M4 |
 | terminal/PTY | worker + protocol | M4 |
 | attachments, uploads | core + protocol | M4 |
