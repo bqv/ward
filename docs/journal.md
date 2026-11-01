@@ -1218,3 +1218,20 @@ Verified against a dead port: the session replays `error {code:14, name:"provide
 The semantic change is the one the note flagged: a failed turn is `aborted` with an error event rather
 than a normal end with no text. No version bump — adding an error name is compatible, and the old behaviour
 was indistinguishable from success.
+
+Ninety-third: the window comes from the server. `model.probe {id}` asks the endpoint for `/props`; a router
+answers that with `role: router` and `n_ctx: 0`, so when the answer is useless the probe reads
+`/v1/models`, finds the entry whose id matches the catalog's `model`, and takes `--ctx-size` and `--parallel`
+out of its recorded argv. `context_source` says which happened: `server`, `config` (the `context` key parsed,
+`32768` or `32k`) or `default` (8192).
+
+Measured against the running router: `qwen-local n_ctx 8192 n_slots 1 from server`, which is exactly what
+llama was started with — `--ctx-size 8192 --parallel 1`. The number in `models.toml` happens to agree here,
+which is why the source matters: on the next rung it will not.
+
+The catalog also grew `max_output`, `device`, `slots` and `stop`, and `model.list` serves them, so a client
+stops inferring capability from a model's name. `probe_test` covers the key scan, the router-argv scan, the
+`32k` parsing and the absent-model case.
+
+Still to do for §3: the budget arithmetic that consumes `n_ctx` — the 8192-byte prompt budget in the daemon
+is the number this probe exists to replace.

@@ -33,6 +33,8 @@
 #include "core/manifest.h"
 #include "core/modstate.h"
 #include "core/prompt.h"
+#include "core/probe.h"
+#include "net/http.h"
 #include "core/pty.h"
 #include "core/registry.h"
 #include "core/schedule.h"
@@ -320,7 +322,7 @@ static bool valid_cwd(const char *path) {
 }
 
 static cbor_item_t *model_to_cbor(const wd_model *model) {
-  cbor_item_t *item = wd_map(5);
+  cbor_item_t *item = wd_map(9);
   wd_put(item, "id", wd_text(model->id));
   wd_put(item, "provider",
          wd_text(model->provider != NULL ? model->provider : ""));
@@ -328,7 +330,83 @@ static cbor_item_t *model_to_cbor(const wd_model *model) {
   wd_put(item, "context",
          wd_text(model->context != NULL ? model->context : ""));
   wd_put(item, "tags", wd_text(model->tags != NULL ? model->tags : ""));
+  wd_put(item, "max_output",
+         wd_text(model->max_output != NULL ? model->max_output : ""));
+  wd_put(item, "device", wd_text(model->device != NULL ? model->device : ""));
+  wd_put(item, "slots", wd_text(model->slots != NULL ? model->slots : ""));
+  wd_put(item, "stop", wd_text(model->stop != NULL ? model->stop : ""));
   return item;
+}
+
+static void handle_model_probe(wd_server *srv, wd_conn *conn, uint64_t id,
+                               cbor_item_t *params) {
+  char *name = wd_text_copy(wd_get(params, "id"));
+  const wd_model *model = wd_models_find(srv->models, name);
+  if (model == NULL) {
+    free(name);
+    conn_send_error(conn, id, WD_ERR_NOT_FOUND, "no such model");
+    conn_arm(srv, conn);
+    return;
+  }
+  int n_ctx = 0;
+  int slots = 0;
+  const char *source = "default";
+  const char *endpoint = model->endpoint;
+  if (endpoint != NULL && endpoint[0] != '\0') {
+    char url[600];
+    snprintf(url, sizeof(url), "%s/props", endpoint);
+    const char *key = model->key != NULL
+                          ? wd_credentials_find(srv->credentials, model->key)
+                          : NULL;
+    wd_http_response response;
+    char *err = NULL;
+    if (wd_http_request(url, "GET", NULL, key, 2000, 64 * 1024, &response,
+                        &err) == 0) {
+      if (response.status == 200 && response.body != NULL) {
+        char *body = strndup((const char *)response.body, response.len);
+        if (body != NULL && wd_probe_scan(body, &n_ctx, &slots) == 0)
+          source = "server";
+        free(body);
+      }
+      wd_http_response_free(&response);
+    }
+    free(err);
+    if (n_ctx == 0 && model->model != NULL) {
+      snprintf(url, sizeof(url), "%s/v1/models", endpoint);
+      wd_http_response list_response;
+      char *list_err = NULL;
+      if (wd_http_request(url, "GET", NULL, key, 2000, 256 * 1024,
+                          &list_response, &list_err) == 0) {
+        if (list_response.status == 200 && list_response.body != NULL) {
+          char *body = strndup((const char *)list_response.body,
+                               list_response.len);
+          if (body != NULL &&
+              wd_probe_router_models(body, model->model, &n_ctx, &slots) == 0)
+            source = "server";
+          free(body);
+        }
+        wd_http_response_free(&list_response);
+      }
+      free(list_err);
+    }
+  }
+  if (n_ctx == 0) {
+    int parsed = wd_context_from_text(model->context);
+    if (parsed > 0) {
+      n_ctx = parsed;
+      source = "config";
+    }
+  }
+  if (n_ctx == 0) n_ctx = 8192;
+  if (slots <= 0) slots = 1;
+  cbor_item_t *result = wd_map(4);
+  wd_put(result, "id", wd_text(model->id));
+  wd_put(result, "n_ctx", wd_uint((uint64_t)n_ctx));
+  wd_put(result, "n_slots", wd_uint((uint64_t)slots));
+  wd_put(result, "context_source", wd_text(source));
+  free(name);
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
 }
 
 static void handle_model_list(wd_server *srv, wd_conn *conn, uint64_t id) {
@@ -2678,6 +2756,8 @@ static void handle_request(wd_server *srv, wd_conn *conn, uint64_t id,
     handle_session_set_model(srv, conn, id, params);
   } else if (strcmp(method, "session.set_system") == 0) {
     handle_session_set_system(srv, conn, id, params);
+  } else if (strcmp(method, "model.probe") == 0) {
+    handle_model_probe(srv, conn, id, params);
   } else if (strcmp(method, "model.list") == 0) {
     handle_model_list(srv, conn, id);
   } else if (strcmp(method, "model.select") == 0) {

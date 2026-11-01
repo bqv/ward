@@ -59,6 +59,14 @@ static int set_field(wd_model *model, const char *key, const char *value) {
     field = &model->endpoint;
   else if (strcmp(key, "key") == 0)
     field = &model->key;
+  else if (strcmp(key, "max_output") == 0)
+    field = &model->max_output;
+  else if (strcmp(key, "device") == 0)
+    field = &model->device;
+  else if (strcmp(key, "slots") == 0)
+    field = &model->slots;
+  else if (strcmp(key, "stop") == 0)
+    field = &model->stop;
   else if (strcmp(key, "price") == 0)
     field = &model->price;
   else

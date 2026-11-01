@@ -17,6 +17,10 @@ typedef struct {
   char *price;
   char *endpoint;
   char *key;
+  char *max_output;
+  char *device;
+  char *slots;
+  char *stop;
 } wd_model;
 
 typedef struct wd_models wd_models;

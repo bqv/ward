@@ -57,6 +57,7 @@ CORE_SRC := \
            src/core/index.c \
            src/core/credentials.c \
            src/core/prompt.c \
+           src/core/probe.c \
   src/wasm/host.c \
   src/net/http.c \
   src/net/pki.c \

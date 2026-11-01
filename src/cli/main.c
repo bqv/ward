@@ -47,6 +47,7 @@ static void usage(FILE *out) {
           "  session set-model <id> <model>\n"
           "  session set-system <id> <text>\n"
           "  model list     [--json]\n"
+          "  model probe    <id> [--json]\n"
           "  model select   <id>\n"
           "  prompt <id>    [--json]  show the assembled system prompt\n"
           "  stats          [<id>] [--json]\n"
@@ -964,6 +965,28 @@ static int command_model(int argc, char **argv) {
         free(name);
         free(context);
       }
+    }
+    rc = 0;
+  } else if (strcmp(sub, "probe") == 0) {
+    if (id == NULL) {
+      fprintf(stderr, "ward: model probe needs an id\n");
+      goto done;
+    }
+    cbor_item_t *params = wd_map(1);
+    wd_put(params, "id", wd_text(id));
+    if (client_request(&client, "model.probe", params, &result) != 0) goto done;
+    if (json) {
+      print_json(result);
+    } else {
+      uint64_t n_ctx = 0;
+      uint64_t n_slots = 0;
+      wd_uint_of(wd_get(result, "n_ctx"), &n_ctx);
+      wd_uint_of(wd_get(result, "n_slots"), &n_slots);
+      char *source = wd_text_copy(wd_get(result, "context_source"));
+      printf("%s n_ctx %llu n_slots %llu from %s\n", id,
+             (unsigned long long)n_ctx, (unsigned long long)n_slots,
+             source != NULL ? source : "?");
+      free(source);
     }
     rc = 0;
   } else if (strcmp(sub, "select") == 0) {
