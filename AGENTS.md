@@ -768,6 +768,32 @@ Nothing calls `wd_registry_trap` from the turn path yet; that wiring belongs wit
 swaps instances, because that is where a trap is observable as a module's failure rather than a
 caller's.
 
+## Resuming M5
+
+Where the milestone stands, so the next session does not have to reconstruct it: master is at
+`fc467f7`, the suite is 28/28 in debug, ASan and UBSan, and nothing is uncommitted. Delivered:
+the manifest loader, the registry (scan, hash, resolve by name and version), `module.list` and
+`module.reload`, `ward_state_migrate` in the host with a conformance guest that proves it ran,
+pinning (`session.modules`), moving a pin (`session.upgrade` over the protocol, with its busy
+and `not_found` refusals), `wd_state_handover` (export, migrate, import, leaving the old instance
+untouched on failure) and bad-version demotion at two traps.
+
+Left, in order:
+
+1. **The join.** `run_new` should resolve each module through the session's pins, hand over
+   instead of loading fresh when the version moved, and append `migration_failed` while keeping
+   the old instance when the handover refuses. Both halves are tested; only the wire between
+   them is missing. Until it lands, the milestone's acceptance line is "proven with a fixture",
+   not "the session moved", and the note above says so.
+2. **Trap reporting from the turn path**, where a trap is a module's failure rather than a
+   caller's.
+3. **`code.outline`, then the index** — nothing exists behind either, and `code.defs finds a
+   symbol in the harness` is the acceptance line the README names for this milestone.
+
+Two habits the last few rounds earned: assert the **no-op** case (a repeated upgrade that must
+append nothing found a pin that was never recorded), and compare the live path with the replay
+path rather than only checking that a prompt still works — the join is exactly that shape again.
+
 ## M3: started, with one finding worth keeping
 
 The first M3 attempt replaced the daemon's single `wd_turn` with a pool keyed by session, so
