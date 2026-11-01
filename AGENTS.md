@@ -768,6 +768,17 @@ Nothing calls `wd_registry_trap` from the turn path yet; that wiring belongs wit
 swaps instances, because that is where a trap is observable as a module's failure rather than a
 caller's.
 
+Sixty-seventh: the pins are visible. `wd_session_to_cbor` now carries a `pins` array of
+`{name, version}` beside the id, cwd, model, created time and last sequence — built at map size
+six, because this is the object the libcbor trap has already bitten twice and a size that is one
+short silently drops the new key rather than failing.
+
+The test asserts the shape through the object the protocol actually sends: two pins, the first
+named `driver`.
+
+This is a reporting change only. Nothing resolves through the pins yet; that is the join, and it
+is still the one thing between this milestone and its acceptance line.
+
 ## Resuming M5
 
 Where the milestone stands, so the next session does not have to reconstruct it: master is at

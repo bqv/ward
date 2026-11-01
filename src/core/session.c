@@ -332,12 +332,22 @@ fail:
 }
 
 cbor_item_t *wd_session_to_cbor(const wd_session *s) {
-  cbor_item_t *root = wd_map(5);
+  cbor_item_t *root = wd_map(6);
   wd_put(root, "id", wd_text(s->id));
   wd_put(root, "cwd", wd_text(s->cwd));
   wd_put(root, "model", wd_text(s->model));
   wd_put(root, "created", wd_uint((uint64_t)s->created_ms));
   wd_put(root, "last_seq", wd_uint(s->last_seq));
+  cbor_item_t *pins = wd_array(s->pins_len);
+  for (size_t i = 0; i < s->pins_len; i++) {
+    cbor_item_t *entry = wd_map(2);
+    wd_put(entry, "name", wd_text(s->pins[i].name));
+    wd_put(entry, "version", wd_text(s->pins[i].version));
+    bool pushed = cbor_array_push(pins, entry);
+    cbor_decref(&entry);
+    if (!pushed) break;
+  }
+  wd_put(root, "pins", pins);
   return root;
 }
 

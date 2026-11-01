@@ -187,6 +187,15 @@ int main(void) {
   assert(strcmp(found->pins[0].version, "4") == 0);
   assert(strcmp(found->pins[1].name, "provider") == 0);
   assert(strcmp(found->pins[1].version, "1") == 0);
+  cbor_item_t *object = wd_session_to_cbor(found);
+  cbor_item_t *pinned_array = wd_get(object, "pins");
+  assert(pinned_array != NULL && cbor_array_size(pinned_array) == 2);
+  cbor_item_t *first_pin = cbor_array_get(pinned_array, 0);
+  char *pin_name = wd_text_copy(wd_get(first_pin, "name"));
+  assert(pin_name != NULL && strcmp(pin_name, "driver") == 0);
+  free(pin_name);
+  cbor_decref(&first_pin);
+  wd_free(object);
 
   wd_store_close(&store);
 
