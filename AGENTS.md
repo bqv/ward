@@ -782,12 +782,13 @@ is still the one thing between this milestone and its acceptance line.
 ## Resuming M5
 
 Where the milestone stands, so the next session does not have to reconstruct it: master is at
-`fc467f7`, the suite is 28/28 in debug, ASan and UBSan, and nothing is uncommitted. Delivered:
+`c477b0a`, the suite is 28/28 in debug, ASan and UBSan, and nothing is uncommitted. Delivered:
 the manifest loader, the registry (scan, hash, resolve by name and version), `module.list` and
 `module.reload`, `ward_state_migrate` in the host with a conformance guest that proves it ran,
 pinning (`session.modules`), moving a pin (`session.upgrade` over the protocol, with its busy
 and `not_found` refusals), `wd_state_handover` (export, migrate, import, leaving the old instance
-untouched on failure) and bad-version demotion at two traps.
+untouched on failure), bad-version demotion at two traps, and the pins reported on the session
+object.
 
 Left, in order:
 
