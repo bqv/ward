@@ -592,6 +592,20 @@ The judge row is now complete at the rule level: contract, classifier, escalatio
 What remains is the model behind the classifier, which is a swap of the guest's body rather than
 new machinery.
 
+Fifty-sixth: a corrupted module in the build directory, and what it cost. An abandoned experiment
+overwrote `out/judge.wasm` with 17 bytes of text and died before restoring it — the test it was
+part of had `alarm(120)` and the run was killed. From then on every gate hung with no output at
+all: the daemon could not create a turn, so no event ever arrived, and the failure looked like a
+test deadlock rather than a broken file. `make` would not rebuild it either, because the
+corrupted file was newer than its source. `rm out/judge.wasm && make` fixed it and the suite went
+back to green.
+
+Two rules follow. A test must never mutate the module directory the suite shares: copy the
+modules into the test's own temporary directory and point a second daemon at the copy — this is
+also the first slice of M5, where the registry's reload path needs a throwaway tree. And when a
+gate hangs with *no* output, suspect the build tree before the code: check that every
+`out/*.wasm` is a real module (`head -c 8`) before reaching for a debugger.
+
 ## M3: started, with one finding worth keeping
 
 The first M3 attempt replaced the daemon's single `wd_turn` with a pool keyed by session, so
