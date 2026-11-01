@@ -351,6 +351,16 @@ like a broken search. A guest test is worth its cost twice over here: it found t
 reply-buffer clobber behind it, and then an out-of-range field (`61`) that scanned four years
 of minutes until it ran out of fuel — now rejected outright.
 
+Thirty-sixth: the job queue. The daemon caps concurrent turns (`WARD_MAX_RUNS`, eight by
+default). A background turn — a subagent or a schedule fire — started past the cap is queued
+rather than refused: it answers `{session, queued: true}`, `job.list` reports it as `queued`,
+`job.kill` can drop it before it runs, and finishing a run drains the queue in order. The
+gate proves it with a cap of two: two subagents run, a third queues, the list shows exactly
+one queued entry, and the third's turn ends once the others are done.
+
+M3 is complete: every row on its parity line is delivered, and the acceptance gate — two
+subagents concurrently under one session — passes in all three builds.
+
 ## M3: started, with one finding worth keeping
 
 The first M3 attempt replaced the daemon's single `wd_turn` with a pool keyed by session, so

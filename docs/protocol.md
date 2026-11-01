@@ -149,7 +149,10 @@ every later prompt sends, as a `system` message, so the model is reminded what t
 for without the client repeating it.
 
 **`job.list`** — no params. Answers `{jobs: [{job, session, state}]}` for every turn
-currently running; the job id is the session it runs in.
+currently running or waiting; the job id is the session it runs in. `state` is `running` or
+`queued`. At most `WARD_MAX_RUNS` turns (eight by default) run at once; a background turn
+started past the cap is queued, answers `{session, queued: true}`, and begins when a running
+turn ends.
 
 **`job.kill`** — params `{job}`. Ends that run: a worker-owned command is killed, a pending
 provider request is dropped, and the turn finishes with `turn.end {turn, aborted: true,

@@ -54,6 +54,13 @@ typedef struct wd_out {
 
 typedef struct wd_run wd_run;
 
+typedef struct wd_queue {
+  struct wd_queue *next;
+  char session[WD_ID_LEN];
+  char *text;
+  char job[WD_ID_LEN];
+} wd_queue;
+
 typedef struct wd_sched {
   struct wd_sched *next;
   char id[16];
@@ -126,6 +133,8 @@ typedef struct {
   wd_labels *labels;
   wd_scheduler *scheduler;
   wd_sched *schedules;
+  wd_queue *queue;
+  size_t max_runs;
   char *default_model;
   char *quic_endpoint;
   int quic_port;
@@ -981,12 +990,22 @@ static void handle_goal_clear(wd_server *srv, wd_conn *conn, uint64_t id,
 static void handle_job_list(wd_server *srv, wd_conn *conn, uint64_t id) {
   size_t count = 0;
   for (wd_run *run = srv->runs; run != NULL; run = run->next) count++;
+  for (wd_queue *item = srv->queue; item != NULL; item = item->next) count++;
   cbor_item_t *list = wd_array(count);
   for (wd_run *run = srv->runs; run != NULL; run = run->next) {
     cbor_item_t *job = wd_map(3);
     wd_put(job, "job", wd_text(run->session_id));
     wd_put(job, "session", wd_text(run->session_id));
     wd_put(job, "state", wd_text("running"));
+    bool pushed = cbor_array_push(list, job);
+    cbor_decref(&job);
+    if (!pushed) break;
+  }
+  for (wd_queue *item = srv->queue; item != NULL; item = item->next) {
+    cbor_item_t *job = wd_map(3);
+    wd_put(job, "job", wd_text(item->job));
+    wd_put(job, "session", wd_text(item->session));
+    wd_put(job, "state", wd_text("queued"));
     bool pushed = cbor_array_push(list, job);
     cbor_decref(&job);
     if (!pushed) break;
@@ -1002,6 +1021,16 @@ static void handle_job_kill(wd_server *srv, wd_conn *conn, uint64_t id,
   char *job = wd_text_copy(wd_get(params, "job"));
   wd_run *run = job != NULL ? run_find(srv, job) : NULL;
   bool killed = false;
+  for (wd_queue **at = &srv->queue; *at != NULL; at = &(*at)->next) {
+    if (job != NULL && strcmp((*at)->job, job) == 0) {
+      wd_queue *item = *at;
+      *at = item->next;
+      free(item->text);
+      free(item);
+      killed = true;
+      break;
+    }
+  }
   if (run != NULL) {
     wd_session *session = wd_session_find(&srv->store, run->session_id);
     if (session != NULL) {
@@ -1029,6 +1058,62 @@ static void handle_job_kill(wd_server *srv, wd_conn *conn, uint64_t id,
   wd_put(result, "killed", cbor_build_bool(killed));
   conn_send_cached(conn, id, wd_response_ok(id, result));
   conn_arm(srv, conn);
+}
+
+static size_t active_runs(wd_server *srv) {
+  size_t count = 0;
+  for (wd_run *run = srv->runs; run != NULL; run = run->next) count++;
+  return count;
+}
+
+static void start_session_turn(wd_server *srv, wd_session *session,
+                               const char *text) {
+  char *err = NULL;
+  wd_run *run = run_new(srv, session, &err);
+  if (run != NULL) {
+    cbor_item_t *history = NULL;
+    if (wd_session_history(session, 8192, &history) == 0)
+      wd_turn_set_history(run->turn, history);
+    cbor_item_t *asked = wd_map(1);
+    wd_put(asked, "text", wd_text(text));
+    uint64_t seq = 0;
+    if (wd_session_emit(session, "session.prompted", asked, &seq) == 0) {
+      cbor_item_t *event = wd_map(1);
+      wd_put(event, "text", wd_text(text));
+      conn_broadcast(srv, session, "session.prompted", seq, event);
+    }
+    wd_turn_ctx tc = {srv, session};
+    int rc = wd_turn_prompt(run->turn, text, turn_emit, &tc, &err);
+    run_after(srv, run, rc, NULL);
+  }
+  free(err);
+}
+
+static void drain_queue(wd_server *srv) {
+  while (srv->queue != NULL && active_runs(srv) < srv->max_runs) {
+    wd_queue *item = srv->queue;
+    srv->queue = item->next;
+    wd_session *session = wd_session_find(&srv->store, item->session);
+    if (session != NULL) start_session_turn(srv, session, item->text);
+    free(item->text);
+    free(item);
+  }
+}
+
+static bool enqueue_turn(wd_server *srv, wd_session *session, const char *text,
+                         const char *job) {
+  wd_queue *item = calloc(1, sizeof(*item));
+  if (item == NULL) return false;
+  snprintf(item->session, sizeof(item->session), "%s", session->id);
+  snprintf(item->job, sizeof(item->job), "%s", job != NULL ? job : session->id);
+  item->text = strdup(text);
+  if (item->text == NULL) {
+    free(item);
+    return false;
+  }
+  item->next = srv->queue;
+  srv->queue = item;
+  return true;
 }
 
 static void handle_subagent_prompt(wd_server *srv, wd_conn *conn, uint64_t id,
@@ -1065,6 +1150,17 @@ static void handle_subagent_prompt(wd_server *srv, wd_conn *conn, uint64_t id,
     conn_broadcast(srv, parent, "subagent.updated", seq, event);
   }
   free(parent_id);
+  if (srv->max_runs != 0 && active_runs(srv) >= srv->max_runs &&
+      enqueue_turn(srv, child, text, child->id)) {
+    cbor_item_t *queued = wd_map(3);
+    wd_put(queued, "session", wd_text(child->id));
+    wd_put(queued, "queued", cbor_build_bool(true));
+    wd_put(queued, "turn", wd_uint(0));
+    free(text);
+    conn_send_cached(conn, id, wd_response_ok(id, queued));
+    conn_arm(srv, conn);
+    return;
+  }
   cbor_item_t *sub = wd_map(2);
   wd_put(sub, "id", wd_text(child->id));
   wd_put(sub, "text", wd_text(text));
@@ -1367,6 +1463,7 @@ static void run_after(wd_server *srv, wd_run *run, int rc, char *err) {
             err != NULL ? err : "unknown");
   free(err);
   run_free(srv, run);
+  drain_queue(srv);
 }
 
 static void handle_session_prompt(wd_server *srv, wd_conn *conn, uint64_t id,
@@ -2416,6 +2513,12 @@ int wd_up_run(const wd_up_config *cfg) {
       free(sched_err);
     }
   }
+  const char *max_runs = getenv("WARD_MAX_RUNS");
+  srv.max_runs = 8;
+  if (max_runs != NULL) {
+    long value = strtol(max_runs, NULL, 10);
+    if (value > 0 && value <= WD_MAX_RUNS) srv.max_runs = (size_t)value;
+  }
   char *models_path = wd_models_path(srv.state_dir);
   if (models_path != NULL) {
     char *models_err = NULL;
@@ -2553,6 +2656,12 @@ cleanup:
   if (srv.epoll_fd >= 0) close(srv.epoll_fd);
   if (srv.signal_fd >= 0) close(srv.signal_fd);
   while (srv.runs != NULL) run_free(&srv, srv.runs);
+  while (srv.queue != NULL) {
+    wd_queue *item = srv.queue;
+    srv.queue = item->next;
+    free(item->text);
+    free(item);
+  }
   while (srv.schedules != NULL) {
     wd_sched *entry = srv.schedules;
     srv.schedules = entry->next;

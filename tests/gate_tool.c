@@ -243,6 +243,7 @@ int main(void) {
   int endpoint_port = 0;
   pid_t endpoint = 0;
   setenv("WARD_FAKE_DELAY_MS", "400", 1);
+  setenv("WARD_MAX_RUNS", "2", 1);
   fake_endpoint(&endpoint_port, &endpoint);
   char root[] = "/tmp/ward-tool-gate-XXXXXX";
   assert(mkdtemp(root) != NULL);
@@ -845,9 +846,30 @@ int main(void) {
   assert(was_cleared);
   wd_free(cleared);
 
+  cbor_item_t *third = NULL;
+  cbor_item_t *third_params = wd_map(2);
+  wd_put(third_params, "session", wd_text(session));
+  wd_put(third_params, "text", wd_text("subagent three"));
+  assert(request(&a, a.next_id++, "subagent.prompt", third_params, &third,
+                 NULL) == 0);
+  char *child_c = wd_text_copy(wd_get(third, "session"));
+  bool third_queued = false;
+  assert(wd_bool_of(wd_get(third, "queued"), &third_queued));
+  assert(third_queued);
+  wd_free(third);
+
   cbor_item_t *jobs = NULL;
   assert(request(&a, a.next_id++, "job.list", wd_map(0), &jobs, NULL) == 0);
-  assert(cbor_array_size(wd_get(jobs, "jobs")) >= 1);
+  size_t job_count = cbor_array_size(wd_get(jobs, "jobs"));
+  assert(job_count >= 3);
+  size_t queued_count = 0;
+  cbor_item_t **job_items = cbor_array_handle(wd_get(jobs, "jobs"));
+  for (size_t i = 0; i < job_count; i++) {
+    char *state = wd_text_copy(wd_get(job_items[i], "state"));
+    if (state != NULL && strcmp(state, "queued") == 0) queued_count++;
+    free(state);
+  }
+  assert(queued_count == 1);
   wd_free(jobs);
 
   cbor_item_t *cancel_sub = NULL;
@@ -886,8 +908,19 @@ int main(void) {
   assert(!was_interrupted);
   wd_free(idle);
   printf("subagents ran concurrently in %llu ms\n", (unsigned long long)elapsed);
+  cbor_item_t *watch_c = NULL;
+  cbor_item_t *watch_c_params = wd_map(2);
+  wd_put(watch_c_params, "id", wd_text(child_c));
+  wd_put(watch_c_params, "from", wd_uint(0));
+  assert(request(&a, a.next_id++, "session.resume", watch_c_params, &watch_c,
+                 NULL) == 0);
+  wd_free(watch_c);
+  cbor_item_t *end_c = wait_event(&a, "turn.end", NULL);
+  assert(end_c != NULL);
+  wd_free(end_c);
   free(child_a);
   free(child_b);
+  free(child_c);
 
   free(session);
   close(b.fd);
