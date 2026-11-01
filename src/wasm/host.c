@@ -7,6 +7,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <limits.h>
 #include <string.h>
 #include <wasmtime.h>
 
@@ -15,6 +16,7 @@
 struct wd_engine {
   wasm_engine_t *engine;
   wasmtime_linker_t *linker;
+  char state_dir[PATH_MAX];
 };
 
 struct wd_module {
@@ -279,6 +281,11 @@ static wasm_trap_t *cap_call(void *env, wasmtime_caller_t *caller,
   return NULL;
 }
 
+const char *wd_engine_state_dir(wd_engine *engine) {
+  return engine != NULL && engine->state_dir[0] != '\0' ? engine->state_dir
+                                                         : NULL;
+}
+
 wd_engine *wd_engine_new(const char *state_dir) {
   wd_engine *e = calloc(1, sizeof(*e));
   if (e == NULL) return NULL;
@@ -288,7 +295,10 @@ wd_engine *wd_engine_new(const char *state_dir) {
     return NULL;
   }
   wasmtime_config_consume_fuel_set(config, true);
-  if (state_dir != NULL) enable_cache(config, state_dir);
+  if (state_dir != NULL) {
+    snprintf(e->state_dir, sizeof(e->state_dir), "%s", state_dir);
+    enable_cache(config, state_dir);
+  }
   e->engine = wasm_engine_new_with_config(config);
   if (e->engine == NULL) {
     free(e);

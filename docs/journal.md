@@ -942,3 +942,20 @@ a number that only ever travels to a formatter does not need to be a number.
 `tool_test` writes a two-function C file, prompts `/outline sample.c`, and asserts both names with
 their lines, so the whole path — skill, grant, capability, file read, guest, formatting — is
 measured in one assertion pair.
+
+Seventy-sixth: the symbol index. `src/core/index.c` walks a root — depth six, two hundred files,
+256 KiB each, `.c` and `.h` only — hands each file's text to the `code` guest, and writes
+`<cache>/symbols.tsv` as `relative path, name, line`, with an FNV-1a generation over those rows in
+`<cache>/symbols.gen`. `wd_index_find` answers `path:line name` for an exact symbol name.
+
+Core owns the walk, the cache and the generation; the guest still decides what a symbol is. That is
+the split the README asks for, and it is why the same index will improve when tree-sitter replaces
+the scanner without any core change.
+
+Two of the test's own assertions were wrong before the code was: the search result had dropped the
+symbol name because the query nulled the first tab before reading it, and the expected line for a
+one-line header was `2` rather than `1`. Both were caught by the test disagreeing with itself,
+which is the cheapest kind of catching there is.
+
+`code.defs` — the method that searches the index by name and reports its generation — is the next
+slice, and it is what the milestone's acceptance line names.

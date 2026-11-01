@@ -35,6 +35,7 @@ typedef int (*wd_capability_handler)(void *ctx, const char *capability,
                                      char **err);
 
 wd_engine *wd_engine_new(const char *state_dir);
+const char *wd_engine_state_dir(wd_engine *engine);
 void wd_engine_free(wd_engine *engine);
 
 wd_module *wd_module_load(wd_engine *engine, const wd_module_spec *spec,
