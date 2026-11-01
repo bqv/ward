@@ -372,6 +372,19 @@ the driver's fixed 512-byte text buffer and 2 KiB reply cannot carry a real rule
 300-byte truncation is not "repo rules load". That row needs the rules delivered as a history
 system message with its own budget, which is the next M4 slice.
 
+Thirty-eighth: rules as a system message, and a dead end worth recording. The second attempt
+at AGENTS.md put the rules where they belong — a `system` entry prepended to the turn's
+history rather than text glued onto the prompt — and raised the provider's buffers so a rules
+file plus a transcript fits (16 KiB JSON, 24 KiB reply, 1 MiB heap). The daemon read the file
+(a log line confirmed 21 bytes from the right root) and the history was built with it, but the
+request that reached the fake endpoint carried only the stamped prompt. The slice is reverted
+with the mechanism half-understood: the next attempt should start by printing the provider's
+payload at the point `process_action` merges the history, because the fault is between the
+merge and the guest, not in the reading.
+
+The provider buffer increase is kept: a 4 KiB JSON buffer could not carry a rules message and
+a transcript together, and that limit would have bitten regardless.
+
 ## M3: started, with one finding worth keeping
 
 The first M3 attempt replaced the daemon's single `wd_turn` with a pool keyed by session, so

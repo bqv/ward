@@ -4,10 +4,10 @@
 
 #include "wd_abi.h"
 
-#define HEAP_SIZE (256u * 1024u)
-#define REPLY_SIZE 4096u
+#define HEAP_SIZE (1024u * 1024u)
+#define REPLY_SIZE 24576u
 #define TEXT_SIZE 2048u
-#define JSON_SIZE 4096u
+#define JSON_SIZE 16384u
 #define CALL_SIZE 8192u
 
 static uint8_t heap[HEAP_SIZE];
