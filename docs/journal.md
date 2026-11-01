@@ -1002,3 +1002,20 @@ buffer numbers.
 
 The working size stays at 16 KiB text, 4 KiB reply and 64 KiB heap, which is what is committed, and
 the harness acceptance line stays unclaimed.
+
+Eightieth: the wall came down, and it was three things stacked. `code.defs` now finds a symbol in the
+harness — `wd_turn_new` in `turn.c`, `wd_index_find` in `index.c` — asserted by the index test against
+this repository's own `src/core`.
+
+The three causes, each masked by the one before it:
+
+1. The guest's text buffer was a *local* — a 64 KiB stack array on a WASI stack that is that size.
+   Growing it trapped the call. It is `static` now.
+2. With the buffer fixed, `turn.c` at 66 KiB still did not fit a 64 KiB limit, so the file was
+   truncated before line 1145 where `wd_turn_new` is defined. The buffer is 128 KiB.
+3. `SYMBOL_MAX` was 16, so even a whole `turn.c` could not list more than sixteen definitions and
+   `wd_turn_new` was past the cut. It is 128, with a 16 KiB reply.
+
+The earlier note in §79 that the call was succeeding was wrong: the instrument had been placed in a
+test that did not make the failing call. The lesson is the one this repository keeps relearning —
+put the probe where the failure happens, not where it is convenient.

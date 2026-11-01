@@ -73,6 +73,17 @@ int main(void) {
   assert(wd_index_build(root, cache, instance, &again, &err) == 0);
   assert(again == generation);
 
+  char core_dir[1024];
+  snprintf(core_dir, sizeof(core_dir), "%s/../src/core", dir);
+  uint64_t repo_gen = 0;
+  if (wd_index_build(core_dir, cache, instance, &repo_gen, &err) == 0) {
+    char found[2048];
+    assert(wd_index_find(cache, "wd_index_find", found, sizeof(found)) > 0);
+    assert(strstr(found, "index.c") != NULL);
+    assert(wd_index_find(cache, "wd_turn_new", found, sizeof(found)) > 0);
+    assert(strstr(found, "turn.c") != NULL);
+  }
+
   wd_instance_free(instance);
   wd_module_free(module);
   wd_engine_free(engine);

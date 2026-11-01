@@ -4,10 +4,10 @@
 
 #include "wd_abi.h"
 
-#define HEAP_SIZE 65536u
-#define REPLY_SIZE 4096u
-#define TEXT_SIZE 16384u
-#define SYMBOL_MAX 16u
+#define HEAP_SIZE 262144u
+#define REPLY_SIZE 16384u
+#define TEXT_SIZE 131072u
+#define SYMBOL_MAX 128u
 #define NAME_MAX 48u
 
 static uint8_t heap[HEAP_SIZE];
@@ -97,7 +97,7 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
   heap_at = 0;
   wd_r r = {(const uint8_t *)(uintptr_t)at, len, 0, 0};
   uint32_t n = 0;
-  char text[TEXT_SIZE];
+  static char text[TEXT_SIZE];
   text[0] = '\0';
   if (wd_r_map(&r, &n) != 0) return;
   for (uint32_t i = 0; i < n; i++) {
