@@ -1,0 +1,24 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+#ifndef WARD_NET_HTTP_H
+#define WARD_NET_HTTP_H
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+typedef struct {
+  long status;
+  uint8_t *body;
+  size_t len;
+} wd_http_response;
+
+int wd_http_request(const char *url, const char *method, const char *body,
+                    uint64_t timeout_ms, size_t max_bytes,
+                    wd_http_response *out, char **err);
+void wd_http_response_free(wd_http_response *response);
+bool wd_http_loopback(const char *url);
+
+#endif

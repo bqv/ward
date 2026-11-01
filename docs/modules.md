@@ -60,6 +60,13 @@ No other imports are permitted. A module may import
 configuration; anything else — a second custom module, a second host function —
 fails the load.
 
+## net.request
+
+The provider's one capability returns bytes, not CBOR, because the body is a stream
+rather than a value: the reply is a little-endian `u32` HTTP status followed by the
+response body. The request is `{path, body}`; core owns the host, so a guest names a
+path and never an origin, and core refuses an endpoint that is not loopback.
+
 ## Limits
 
 Core owns the fences, and a module cannot widen them:

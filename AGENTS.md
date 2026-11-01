@@ -49,9 +49,15 @@ through `ward.cap("engine.call")`, core-mediated. `turn-test` runs two prompts e
 end through all three guests.
 
 Fourth: `session.prompt` is served and streams `text.delta`/`turn.end` as durable events,
-and `ward session prompt <id> <text>` prints a headless turn. The provider is still the
-echo stub, so the turn loop is proven but nothing has talked to a model yet. Next: the
-provider over a local endpoint, then QUIC and pairing. A method is served only when
+and `ward session prompt <id> <text>` prints a headless turn.
+
+Fifth: the provider is real. `src/net/http.c` posts to a loopback endpoint with a timeout
+and a 4 MiB body cap, core frames the reply for the guest as `status + body`, and the
+provider turns SSE `content` chunks into text. `gate-m1-test` runs a prompt against a
+fake OpenAI endpoint that echoes the request, so request building and response parsing
+are both proven. The HTTP call is synchronous inside the daemon's loop, which stalls
+other sessions for the length of a completion; that is M1's known limitation and the
+worker/async split is what removes it. Next: approvals, then QUIC and pairing. A method is served only when
 `docs/protocol.md` says it is served — the rest of the frozen list answers
 `not_supported`.
 

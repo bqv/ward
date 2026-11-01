@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "net/http.h"
 #include "proto/codec.h"
 
 #define WD_TURN_DEPTH 8
@@ -16,6 +17,7 @@
 
 struct wd_turn {
   wd_engine *engine;
+  char *endpoint;
   wd_module *driver_module;
   wd_module *provider_module;
   wd_module *engine_module;
@@ -71,15 +73,61 @@ static wd_module *load_module(wd_engine *engine, const char *dir,
   return module;
 }
 
-static int engine_capability(void *ctx, const char *capability,
-                             const uint8_t *in, size_t in_len, uint8_t **out,
-                             size_t *out_len, char **err) {
-  wd_turn *turn = ctx;
-  if (strcmp(capability, "engine.call") != 0) {
-    *err = strdup("unknown capability");
+static int net_request(wd_turn *turn, const uint8_t *in, size_t in_len,
+                       uint8_t **out, size_t *out_len, char **err) {
+  if (turn->endpoint == NULL) {
+    *err = strdup("no endpoint configured");
     return -1;
   }
-  return wd_instance_call(turn->eng, in, in_len, out, out_len, err);
+  cbor_item_t *request = wd_decode(in, in_len);
+  if (request == NULL) {
+    *err = strdup("net.request: parameters are not cbor");
+    return -1;
+  }
+  char *path = wd_text_copy(wd_get(request, "path"));
+  char *body = wd_text_copy(wd_get(request, "body"));
+  wd_free(request);
+  char url[512];
+  snprintf(url, sizeof(url), "%s%s", turn->endpoint, path != NULL ? path : "");
+  free(path);
+  if (!wd_http_loopback(url)) {
+    free(body);
+    *err = strdup("net.request: the endpoint is not loopback");
+    return -1;
+  }
+  wd_http_response response;
+  int rc = wd_http_request(url, "POST", body != NULL ? body : "", 300000,
+                           4u << 20, &response, err);
+  free(body);
+  if (rc != 0) return -1;
+  size_t total = 4 + response.len;
+  uint8_t *bytes = malloc(total);
+  if (bytes == NULL) {
+    wd_http_response_free(&response);
+    *err = strdup("net.request: out of memory");
+    return -1;
+  }
+  bytes[0] = (uint8_t)(response.status & 0xff);
+  bytes[1] = (uint8_t)((response.status >> 8) & 0xff);
+  bytes[2] = (uint8_t)((response.status >> 16) & 0xff);
+  bytes[3] = (uint8_t)((response.status >> 24) & 0xff);
+  if (response.len > 0) memcpy(bytes + 4, response.body, response.len);
+  wd_http_response_free(&response);
+  *out = bytes;
+  *out_len = total;
+  return 0;
+}
+
+static int turn_capability(void *ctx, const char *capability,
+                           const uint8_t *in, size_t in_len, uint8_t **out,
+                           size_t *out_len, char **err) {
+  wd_turn *turn = ctx;
+  if (strcmp(capability, "engine.call") == 0)
+    return wd_instance_call(turn->eng, in, in_len, out, out_len, err);
+  if (strcmp(capability, "net.request") == 0)
+    return net_request(turn, in, in_len, out, out_len, err);
+  *err = strdup("unknown capability");
+  return -1;
 }
 
 wd_turn *wd_turn_new(wd_engine *engine, const char *module_dir, char **err) {
@@ -89,11 +137,14 @@ wd_turn *wd_turn_new(wd_engine *engine, const char *module_dir, char **err) {
     return NULL;
   }
   turn->engine = engine;
+  const char *endpoint = getenv("WARD_ENDPOINT");
+  if (endpoint != NULL) turn->endpoint = strdup(endpoint);
   static const char *const driver_caps[] = {"engine.call"};
+  static const char *const provider_caps[] = {"net.request"};
   static const char *const no_caps[] = {NULL};
   wd_module_spec engine_spec = {"engine", no_caps, 0, true};
   wd_module_spec driver_spec = {"driver", driver_caps, 1, false};
-  wd_module_spec provider_spec = {"provider", no_caps, 0, false};
+  wd_module_spec provider_spec = {"provider", provider_caps, 1, false};
 
   turn->engine_module = load_module(engine, module_dir, "engine.wasm",
                                     &engine_spec, err);
@@ -108,11 +159,11 @@ wd_turn *wd_turn_new(wd_engine *engine, const char *module_dir, char **err) {
   turn->eng = wd_instance_new(turn->engine_module, no_caps, 0, &TURN_LIMITS,
                               NULL, NULL, err);
   if (turn->eng == NULL) goto fail;
-  turn->provider = wd_instance_new(turn->provider_module, no_caps, 0,
-                                   &TURN_LIMITS, NULL, NULL, err);
+  turn->provider = wd_instance_new(turn->provider_module, provider_caps, 1,
+                                   &TURN_LIMITS, turn_capability, turn, err);
   if (turn->provider == NULL) goto fail;
   turn->driver = wd_instance_new(turn->driver_module, driver_caps, 1,
-                                 &TURN_LIMITS, engine_capability, turn, err);
+                                 &TURN_LIMITS, turn_capability, turn, err);
   if (turn->driver == NULL) goto fail;
   return turn;
 
@@ -129,6 +180,7 @@ void wd_turn_free(wd_turn *turn) {
   wd_module_free(turn->driver_module);
   wd_module_free(turn->provider_module);
   wd_module_free(turn->engine_module);
+  free(turn->endpoint);
   free(turn);
 }
 

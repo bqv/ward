@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "core/turn.h"
+#include "fake_endpoint.h"
 #include "proto/codec.h"
 
 typedef struct {
@@ -38,6 +39,9 @@ static int emit(void *ctx, const char *event, cbor_item_t *payload, char **err) 
 int main(void) {
   const char *dir = getenv("WARD_MODULE_DIR");
   assert(dir != NULL);
+  int port = 0;
+  pid_t server = 0;
+  fake_endpoint(&port, &server);
   wd_engine *engine = wd_engine_new(NULL);
   assert(engine != NULL);
   char *err = NULL;
@@ -68,6 +72,7 @@ int main(void) {
 
   wd_turn_free(turn);
   wd_engine_free(engine);
+  stop_server(server);
   printf("turn tests passed\n");
   return 0;
 }

@@ -11,9 +11,10 @@ project('ward', 'c',
 libcbor = dependency('libcbor', version: '>=0.10')
 libzstd = dependency('libzstd', version: '>=1.4')
 wasmtime = dependency('wasmtime')
+libcurl = dependency('libcurl')
 wasi = dependency('wasi-sdk')
 
-deps = [libcbor, libzstd, wasmtime]
+deps = [libcbor, libzstd, wasmtime, libcurl]
 
 add_project_arguments('-D_GNU_SOURCE', language: 'c')
 
@@ -37,6 +38,7 @@ core = static_library('ward-core',
     'src/core/session.c',
     'src/core/turn.c',
     'src/wasm/host.c',
+    'src/net/http.c',
   ),
   include_directories: inc,
   dependencies: deps,
@@ -138,6 +140,14 @@ turn_test = executable('turn-test', 'tests/turn_test.c',
   dependencies: deps,
 )
 test('turn', turn_test, env: module_env, timeout: 120,
+     depends: [module_engine, module_driver, module_provider])
+
+gate_m1 = executable('gate-m1-test', 'tests/gate_m1.c',
+  include_directories: inc,
+  link_with: core,
+  dependencies: deps,
+)
+test('m1', gate_m1, env: module_env, timeout: 300,
      depends: [module_engine, module_driver, module_provider])
 
 wasm_env = environment()
