@@ -81,6 +81,51 @@ static int apply_model(void *ctx, uint64_t seq, cbor_item_t *event) {
   return 0;
 }
 
+static int apply_pins(void *ctx, uint64_t seq, cbor_item_t *event) {
+  wd_session *s = ctx;
+  (void)seq;
+  char *kind = wd_text_copy(wd_get(event, "kind"));
+  if (kind != NULL && strcmp(kind, "session.modules") == 0) {
+    cbor_item_t *modules = wd_get(wd_get(event, "payload"), "modules");
+    if (modules != NULL && cbor_isa_map(modules)) {
+      s->pins_len = 0;
+      struct cbor_pair *pairs = cbor_map_handle(modules);
+      for (size_t i = 0; i < cbor_map_size(modules) && i < WD_PIN_MAX; i++) {
+        char *name = wd_text_copy(pairs[i].key);
+        char *version = wd_text_copy(pairs[i].value);
+        if (name == NULL || version == NULL) {
+          free(name);
+          free(version);
+          continue;
+        }
+        snprintf(s->pins[s->pins_len].name, sizeof(s->pins[0].name), "%s",
+                 name);
+        snprintf(s->pins[s->pins_len].version, sizeof(s->pins[0].version),
+                 "%s", version);
+        s->pins_len++;
+        free(name);
+        free(version);
+      }
+    }
+  }
+  free(kind);
+  return 0;
+}
+
+int wd_session_set_pins(wd_session *s, const wd_pin *pins, size_t n,
+                        uint64_t *seq_out) {
+  if (n > WD_PIN_MAX) return -1;
+  cbor_item_t *modules = wd_map(n);
+  for (size_t i = 0; i < n; i++)
+    wd_put(modules, pins[i].name, wd_text(pins[i].version));
+  cbor_item_t *payload = wd_map(1);
+  wd_put(payload, "modules", modules);
+  if (wd_session_emit(s, "session.modules", payload, seq_out) != 0) return -1;
+  memcpy(s->pins, pins, n * sizeof(*pins));
+  s->pins_len = n;
+  return 0;
+}
+
 static int session_load(const char *root, const char *id, wd_session **out) {
   wd_session *s = calloc(1, sizeof(*s));
   if (s == NULL) return -1;
@@ -102,6 +147,7 @@ static int session_load(const char *root, const char *id, wd_session **out) {
   s->last_seq = lc.session.last_seq;
   if (hlog_open_append(&s->log, s->log_path) != 0) goto fail;
   if (wd_session_replay(s, 0, apply_model, s) < 0) goto fail;
+  if (wd_session_replay(s, 0, apply_pins, s) < 0) goto fail;
   *out = s;
   return 0;
 fail:

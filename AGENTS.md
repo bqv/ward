@@ -701,6 +701,20 @@ The binding is optional, like export and import, so no existing guest changes. T
 not use it yet — that comes with pinning and `session.upgrade`, where an instance has a version
 to move from.
 
+Sixty-second: pinning. A session now records the module versions it started with: `wd_pin
+{name, version}` on the session, and `wd_session_set_pins` appends a durable
+`session.modules {modules: {driver: "3", provider: "1"}}` — a map, so a replay reads it back by
+name rather than by position. `apply_pins` replays it beside `apply_model`, so a reloaded
+session remembers what it was running.
+
+The test gives pins their own session and asserts both directions: the event's sequence number
+is real, and after closing and reopening the store the session carries the same two pins. It is
+deliberately a separate session — adding an event to the existing one shifted every assertion
+that counts sequence numbers, which is a small reminder that these tests encode their own
+history.
+
+Nothing reads the pins yet; resolution through them, and `session.upgrade`, are the next slices.
+
 ## M3: started, with one finding worth keeping
 
 The first M3 attempt replaced the daemon's single `wd_turn` with a pool keyed by session, so

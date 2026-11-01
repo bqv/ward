@@ -12,6 +12,13 @@
 #include "core/ids.h"
 #include "core/log.h"
 
+#define WD_PIN_MAX 12
+
+typedef struct {
+  char name[32];
+  char version[16];
+} wd_pin;
+
 typedef struct {
   char id[WD_ID_LEN];
   char *dir;
@@ -21,6 +28,8 @@ typedef struct {
   int64_t created_ms;
   uint64_t last_seq;
   hlog log;
+  wd_pin pins[WD_PIN_MAX];
+  size_t pins_len;
 } wd_session;
 
 typedef struct {
@@ -40,6 +49,8 @@ int wd_session_emit(wd_session *s, const char *kind, cbor_item_t *payload,
             uint64_t *seq_out);
 int wd_session_attach(wd_session *s, const char *name, const uint8_t *data,
                       size_t len, char **path_out, char **err);
+int wd_session_set_pins(wd_session *s, const wd_pin *pins, size_t n,
+                       uint64_t *seq_out);
 int wd_session_set_model(wd_session *s, const char *model, uint64_t *seq_out);
 int wd_session_fork(wd_store *st, wd_session *parent, uint64_t upto, wd_session **out);
 int wd_session_checkpoint(wd_session *s, const char *label, uint64_t *seq_out);

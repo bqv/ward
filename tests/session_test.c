@@ -158,6 +158,29 @@ int main(void) {
   free(text);
   wd_free(built);
 
+  wd_session *pinned = NULL;
+  assert(wd_session_create(&store, "/tmp", NULL, &pinned) == 0);
+  wd_pin pins[2];
+  snprintf(pins[0].name, sizeof(pins[0].name), "driver");
+  snprintf(pins[0].version, sizeof(pins[0].version), "3");
+  snprintf(pins[1].name, sizeof(pins[1].name), "provider");
+  snprintf(pins[1].version, sizeof(pins[1].version), "1");
+  uint64_t pins_seq = 0;
+  assert(wd_session_set_pins(pinned, pins, 2, &pins_seq) == 0);
+  assert(pins_seq > 0);
+  char pinned_id[WD_ID_LEN];
+  snprintf(pinned_id, sizeof(pinned_id), "%s", pinned->id);
+
+  wd_store_close(&store);
+  assert(wd_store_open(&store, dir) == 0);
+  wd_session *found = wd_session_find(&store, pinned_id);
+  assert(found != NULL);
+  assert(found->pins_len == 2);
+  assert(strcmp(found->pins[0].name, "driver") == 0);
+  assert(strcmp(found->pins[0].version, "3") == 0);
+  assert(strcmp(found->pins[1].name, "provider") == 0);
+  assert(strcmp(found->pins[1].version, "1") == 0);
+
   wd_store_close(&store);
 
   printf("session tests passed\n");
