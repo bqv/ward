@@ -1235,3 +1235,16 @@ stops inferring capability from a model's name. `probe_test` covers the key scan
 
 Still to do for §3: the budget arithmetic that consumes `n_ctx` — the 8192-byte prompt budget in the daemon
 is the number this probe exists to replace.
+
+Ninety-fourth: the budget follows the window. `wd_context_budget(n_ctx, max_output)` is the arithmetic the
+note asked the module to own: reserve the output tokens plus 256 of headroom, turn the rest into bytes at four
+per token, clamp to [4 KiB, 1 MiB]. `history_budget()` asks the model's probe for `n_ctx` and applies it, and
+the three places that built history with a literal 8192 now use it — the prompt path, the parent's history and
+a subagent's.
+
+For qwen-local that is 27 KiB of history instead of 8; for deepseek, 258 KiB. The clamp keeps a tiny window
+honest rather than letting the arithmetic go negative.
+
+Not yet measured end to end: the effect is that more history survives trimming, which needs a session with
+tens of kilobytes of turns and a capture of the request body to observe. The arithmetic is tested; the wiring
+is three lines; the observation is owed.

@@ -8,6 +8,18 @@
 #include <stdlib.h>
 #include <string.h>
 
+size_t wd_context_budget(int n_ctx, int max_output_tokens) {
+  if (n_ctx <= 0) return 4096;
+  int reserve = max_output_tokens > 0 ? max_output_tokens : 1024;
+  int headroom = 256;
+  int tokens = n_ctx - reserve - headroom;
+  if (tokens < 1024) tokens = 1024;
+  size_t bytes = (size_t)tokens * 4;
+  if (bytes < 4096) bytes = 4096;
+  if (bytes > (size_t)(1 << 20)) bytes = 1 << 20;
+  return bytes;
+}
+
 int wd_context_from_text(const char *text) {
   if (text == NULL || text[0] == '\0') return 0;
   char *end = NULL;

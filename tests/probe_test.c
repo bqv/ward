@@ -41,6 +41,12 @@ int main(void) {
   assert(slots == 2);
   assert(wd_probe_router_models(models, "absent", &n_ctx, &slots) == -1);
 
+  assert(wd_context_budget(8192, 1024) == (size_t)(8192 - 1024 - 256) * 4);
+  assert(wd_context_budget(65536, 1024) == (size_t)(65536 - 1024 - 256) * 4);
+  assert(wd_context_budget(2048, 1024) == 4096);
+  assert(wd_context_budget(0, 0) == 4096);
+  assert(wd_context_budget(1 << 22, 1024) == (size_t)(1 << 20));
+
   printf("probe tests passed\n");
   return 0;
 }

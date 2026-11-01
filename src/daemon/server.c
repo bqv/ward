@@ -338,6 +338,74 @@ static cbor_item_t *model_to_cbor(const wd_model *model) {
   return item;
 }
 
+static int probe_model(wd_server *srv, const wd_model *model, int *n_ctx,
+                       int *slots, const char **source) {
+  if (model == NULL) return -1;
+  *n_ctx = 0;
+  *slots = 0;
+  *source = "default";
+  const char *endpoint = model->endpoint;
+  if (endpoint != NULL && endpoint[0] != '\0') {
+    const char *key = model->key != NULL
+                          ? wd_credentials_find(srv->credentials, model->key)
+                          : NULL;
+    char url[600];
+    snprintf(url, sizeof(url), "%s/props", endpoint);
+    wd_http_response response;
+    char *err = NULL;
+    if (wd_http_request(url, "GET", NULL, key, 2000, 64 * 1024, &response,
+                        &err) == 0) {
+      if (response.status == 200 && response.body != NULL) {
+        char *body = strndup((const char *)response.body, response.len);
+        if (body != NULL && wd_probe_scan(body, n_ctx, slots) == 0)
+          *source = "server";
+        free(body);
+      }
+      wd_http_response_free(&response);
+    }
+    free(err);
+    if (*n_ctx == 0 && model->model != NULL) {
+      snprintf(url, sizeof(url), "%s/v1/models", endpoint);
+      wd_http_response list_response;
+      char *list_err = NULL;
+      if (wd_http_request(url, "GET", NULL, key, 2000, 256 * 1024,
+                          &list_response, &list_err) == 0) {
+        if (list_response.status == 200 && list_response.body != NULL) {
+          char *body =
+              strndup((const char *)list_response.body, list_response.len);
+          if (body != NULL &&
+              wd_probe_router_models(body, model->model, n_ctx, slots) == 0)
+            *source = "server";
+          free(body);
+        }
+        wd_http_response_free(&list_response);
+      }
+      free(list_err);
+    }
+  }
+  if (*n_ctx == 0) {
+    int parsed = wd_context_from_text(model->context);
+    if (parsed > 0) {
+      *n_ctx = parsed;
+      *source = "config";
+    }
+  }
+  if (*n_ctx == 0) *n_ctx = 8192;
+  if (*slots <= 0) *slots = 1;
+  return 0;
+}
+
+static size_t history_budget(wd_server *srv, wd_session *session) {
+  const wd_model *model = wd_models_find(srv->models, session->model);
+  int n_ctx = 0;
+  int slots = 0;
+  const char *source = "default";
+  if (probe_model(srv, model, &n_ctx, &slots, &source) != 0 || n_ctx <= 0)
+    return 8192;
+  int max_output = model->max_output != NULL ? atoi(model->max_output) : 1024;
+  return wd_context_budget(n_ctx, max_output);
+}
+
 static void handle_model_probe(wd_server *srv, wd_conn *conn, uint64_t id,
                                cbor_item_t *params) {
   char *name = wd_text_copy(wd_get(params, "id"));
@@ -351,54 +419,7 @@ static void handle_model_probe(wd_server *srv, wd_conn *conn, uint64_t id,
   int n_ctx = 0;
   int slots = 0;
   const char *source = "default";
-  const char *endpoint = model->endpoint;
-  if (endpoint != NULL && endpoint[0] != '\0') {
-    char url[600];
-    snprintf(url, sizeof(url), "%s/props", endpoint);
-    const char *key = model->key != NULL
-                          ? wd_credentials_find(srv->credentials, model->key)
-                          : NULL;
-    wd_http_response response;
-    char *err = NULL;
-    if (wd_http_request(url, "GET", NULL, key, 2000, 64 * 1024, &response,
-                        &err) == 0) {
-      if (response.status == 200 && response.body != NULL) {
-        char *body = strndup((const char *)response.body, response.len);
-        if (body != NULL && wd_probe_scan(body, &n_ctx, &slots) == 0)
-          source = "server";
-        free(body);
-      }
-      wd_http_response_free(&response);
-    }
-    free(err);
-    if (n_ctx == 0 && model->model != NULL) {
-      snprintf(url, sizeof(url), "%s/v1/models", endpoint);
-      wd_http_response list_response;
-      char *list_err = NULL;
-      if (wd_http_request(url, "GET", NULL, key, 2000, 256 * 1024,
-                          &list_response, &list_err) == 0) {
-        if (list_response.status == 200 && list_response.body != NULL) {
-          char *body = strndup((const char *)list_response.body,
-                               list_response.len);
-          if (body != NULL &&
-              wd_probe_router_models(body, model->model, &n_ctx, &slots) == 0)
-            source = "server";
-          free(body);
-        }
-        wd_http_response_free(&list_response);
-      }
-      free(list_err);
-    }
-  }
-  if (n_ctx == 0) {
-    int parsed = wd_context_from_text(model->context);
-    if (parsed > 0) {
-      n_ctx = parsed;
-      source = "config";
-    }
-  }
-  if (n_ctx == 0) n_ctx = 8192;
-  if (slots <= 0) slots = 1;
+  (void)probe_model(srv, model, &n_ctx, &slots, &source);
   cbor_item_t *result = wd_map(4);
   wd_put(result, "id", wd_text(model->id));
   wd_put(result, "n_ctx", wd_uint((uint64_t)n_ctx));
@@ -1212,7 +1233,7 @@ static void start_session_turn(wd_server *srv, wd_session *session,
   wd_run *run = run_new(srv, session, &err);
   if (run != NULL) {
     cbor_item_t *history = NULL;
-    if (wd_session_history(session, 8192, &history) == 0)
+    if (wd_session_history(session, history_budget(srv, session), &history) == 0)
       wd_turn_set_history(run->turn, history);
     cbor_item_t *asked = wd_map(1);
     wd_put(asked, "text", wd_text(text));
@@ -2265,7 +2286,7 @@ static void handle_session_prompt(wd_server *srv, wd_conn *conn, uint64_t id,
     return;
   }
   cbor_item_t *history = NULL;
-  if (wd_session_history(session, 8192, &history) == 0)
+  if (wd_session_history(session, history_budget(srv, session), &history) == 0)
     wd_turn_set_history(run->turn, history);
 
   cbor_item_t *asked = wd_map(1);
@@ -2325,7 +2346,7 @@ static void drain_schedules(wd_server *srv, uint64_t now) {
         wd_run *run = run_new(srv, child, &err);
         if (run != NULL) {
           cbor_item_t *history = NULL;
-          if (wd_session_history(child, 8192, &history) == 0)
+          if (wd_session_history(child, history_budget(srv, child), &history) == 0)
             wd_turn_set_history(run->turn, history);
           cbor_item_t *asked = wd_map(1);
           wd_put(asked, "text", wd_text(entry->text));
