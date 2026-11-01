@@ -26,6 +26,7 @@
 #include <unistd.h>
 
 #include "core/approval.h"
+#include "core/models.h"
 #include "core/session.h"
 #include "core/util.h"
 #include "net/pki.h"
@@ -92,6 +93,8 @@ typedef struct {
   wd_pki *pki;
   wd_quic *quic;
   wd_approvals *approvals;
+  wd_models *models;
+  char *default_model;
   char turn_session[WD_ID_LEN];
   uint64_t turn_call;
   uint64_t turn_epoch;
@@ -242,6 +245,94 @@ static bool valid_cwd(const char *path) {
   return stat(path, &sb) == 0 && S_ISDIR(sb.st_mode);
 }
 
+static cbor_item_t *model_to_cbor(const wd_model *model) {
+  cbor_item_t *item = wd_map(5);
+  wd_put(item, "id", wd_text(model->id));
+  wd_put(item, "provider",
+         wd_text(model->provider != NULL ? model->provider : ""));
+  wd_put(item, "model", wd_text(model->model != NULL ? model->model : ""));
+  wd_put(item, "context",
+         wd_text(model->context != NULL ? model->context : ""));
+  wd_put(item, "tags", wd_text(model->tags != NULL ? model->tags : ""));
+  return item;
+}
+
+static void handle_model_list(wd_server *srv, wd_conn *conn, uint64_t id) {
+  size_t count = wd_models_count(srv->models);
+  cbor_item_t *list = wd_array(count);
+  for (size_t i = 0; i < count; i++) {
+    cbor_item_t *item = model_to_cbor(wd_models_at(srv->models, i));
+    bool pushed = cbor_array_push(list, item);
+    cbor_decref(&item);
+    if (!pushed) {
+      conn->closing = true;
+      break;
+    }
+  }
+  cbor_item_t *result = wd_map(1);
+  wd_put(result, "models", list);
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
+static void handle_model_select(wd_server *srv, wd_conn *conn, uint64_t id,
+                                cbor_item_t *params) {
+  char *name = wd_text_copy(wd_get(params, "id"));
+  if (name == NULL) name = wd_text_copy(wd_get(params, "model"));
+  if (name == NULL || wd_models_find(srv->models, name) == NULL) {
+    free(name);
+    conn_send_error(conn, id, WD_ERR_NOT_FOUND, "no such model");
+    conn_arm(srv, conn);
+    return;
+  }
+  free(srv->default_model);
+  srv->default_model = name;
+  cbor_item_t *result = wd_map(1);
+  wd_put(result, "model", wd_text(name));
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
+static void handle_session_set_model(wd_server *srv, wd_conn *conn, uint64_t id,
+                                     cbor_item_t *params) {
+  char *session_id = wd_text_copy(wd_get(params, "id"));
+  char *name = wd_text_copy(wd_get(params, "model"));
+  hs_session *session =
+      session_id != NULL ? hs_find(&srv->store, session_id) : NULL;
+  if (session == NULL) {
+    free(session_id);
+    free(name);
+    conn_send_error(conn, id, WD_ERR_NOT_FOUND, "no such session");
+    conn_arm(srv, conn);
+    return;
+  }
+  if (name == NULL || wd_models_find(srv->models, name) == NULL) {
+    free(session_id);
+    free(name);
+    conn_send_error(conn, id, WD_ERR_NOT_FOUND, "no such model");
+    conn_arm(srv, conn);
+    return;
+  }
+  uint64_t seq = 0;
+  if (hs_set_model(session, name, &seq) != 0) {
+    free(session_id);
+    free(name);
+    respond_internal(srv, conn, id, "cannot record the model change");
+    return;
+  }
+  cbor_item_t *payload = wd_map(1);
+  wd_put(payload, "model", wd_text(name));
+  cbor_item_t *event = wd_map(1);
+  wd_put(event, "model", wd_text(name));
+  conn_broadcast(srv, session, "session.model", seq, event);
+  cbor_item_t *result = wd_map(1);
+  wd_put(result, "session", hs_to_cbor(session));
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+  free(session_id);
+  free(name);
+}
+
 static void handle_session_create(wd_server *srv, wd_conn *conn, uint64_t id,
                                   cbor_item_t *params) {
   char *cwd = wd_text_copy(wd_get(params, "cwd"));
@@ -265,6 +356,16 @@ static void handle_session_create(wd_server *srv, wd_conn *conn, uint64_t id,
   if (model != NULL && model[0] == '\0') {
     free(model);
     model = NULL;
+  }
+  if (model == NULL && srv->default_model != NULL)
+    model = strdup(srv->default_model);
+  if (model != NULL && wd_models_count(srv->models) > 0 &&
+      wd_models_find(srv->models, model) == NULL) {
+    free(cwd);
+    free(model);
+    conn_send_error(conn, id, WD_ERR_NOT_FOUND, "no such model");
+    conn_arm(srv, conn);
+    return;
   }
   hs_session *session = NULL;
   if (hs_create(&srv->store, cwd, model, &session) != 0) {
@@ -843,6 +944,12 @@ static void handle_request(wd_server *srv, wd_conn *conn, uint64_t id,
     handle_session_get(srv, conn, id, params);
   } else if (strcmp(method, "session.resume") == 0) {
     handle_session_resume(srv, conn, id, params);
+  } else if (strcmp(method, "session.set_model") == 0) {
+    handle_session_set_model(srv, conn, id, params);
+  } else if (strcmp(method, "model.list") == 0) {
+    handle_model_list(srv, conn, id);
+  } else if (strcmp(method, "model.select") == 0) {
+    handle_model_select(srv, conn, id, params);
   } else if (strcmp(method, "session.prompt") == 0) {
     handle_session_prompt(srv, conn, id, params);
   } else if (strcmp(method, "device.pair") == 0) {
@@ -1356,6 +1463,18 @@ int wd_up_run(const wd_up_config *cfg) {
   if (srv.signal_fd < 0) goto cleanup;
   srv.approvals = wd_approvals_new();
   if (srv.approvals == NULL) goto cleanup;
+  char *models_path = wd_models_path(srv.state_dir);
+  if (models_path != NULL) {
+    char *models_err = NULL;
+    srv.models = wd_models_load(models_path, &models_err);
+    free(models_path);
+    if (srv.models == NULL) {
+      fprintf(stderr, "ward: models: %s\n",
+              models_err != NULL ? models_err : "cannot read models.toml");
+      free(models_err);
+      goto cleanup;
+    }
+  }
   srv.epoll_fd = epoll_create1(EPOLL_CLOEXEC);
   if (srv.epoll_fd < 0) goto cleanup;
   struct epoll_event ev;
@@ -1467,6 +1586,8 @@ cleanup:
   wd_quic_free(srv.quic);
   wd_pki_free(srv.pki);
   wd_approvals_free(srv.approvals);
+  wd_models_free(srv.models);
+  free(srv.default_model);
   free(srv.quic_endpoint);
   hs_close(&srv.store);
   free(srv.socket_path);

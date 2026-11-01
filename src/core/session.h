@@ -38,6 +38,7 @@ int hs_create(hs_store *st, const char *cwd, const char *model,
 cbor_item_t *hs_to_cbor(const hs_session *s);
 int hs_emit(hs_session *s, const char *kind, cbor_item_t *payload,
             uint64_t *seq_out);
+int hs_set_model(hs_session *s, const char *model, uint64_t *seq_out);
 
 typedef int (*hs_replay_cb)(void *ctx, uint64_t seq, cbor_item_t *event);
 

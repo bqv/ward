@@ -38,6 +38,9 @@ static void usage(FILE *out) {
           "  session get    <id> [--json]\n"
           "  session resume <id> [--from SEQ] [--follow] [--json]\n"
           "  session approve <id> --call N --epoch N (--allow|--deny)\n"
+          "  session set-model <id> <model>\n"
+          "  model list     [--json]\n"
+          "  model select   <id>\n"
           "  device pair    [--scope S] [--json]\n"
           "  device list    [--json]\n"
           "  device revoke  <serial>\n"
@@ -433,6 +436,18 @@ static int command_session(int argc, char **argv) {
       if (!follow) break;
     }
     rc = 0;
+  } else if (strcmp(sub, "set-model") == 0) {
+    if (id == NULL || text == NULL) {
+      fprintf(stderr, "ward: session set-model needs an id and a model\n");
+      goto done;
+    }
+    cbor_item_t *params = wd_map(2);
+    wd_put(params, "id", wd_text(id));
+    wd_put(params, "model", wd_text(text));
+    if (client_request(&client, "session.set_model", params, &result) != 0)
+      goto done;
+    printf("model %s\n", text);
+    rc = 0;
   } else if (strcmp(sub, "prompt") == 0) {
     if (id == NULL || text == NULL) {
       fprintf(stderr, "ward: session prompt needs an id and text\n");
@@ -594,6 +609,84 @@ static int command_session(int argc, char **argv) {
   } else {
     fprintf(stderr, "ward: unknown session command %s\n", sub);
     rc = 2;
+  }
+done:
+  if (result != NULL) wd_free(result);
+  close(client.fd);
+  return rc;
+}
+
+static int command_model(int argc, char **argv) {
+  if (argc == 0) {
+    usage(stderr);
+    return 2;
+  }
+  const char *sub = argv[0];
+  bool json = false;
+  const char *id = NULL;
+  for (int i = 1; i < argc; i++) {
+    if (strcmp(argv[i], "--json") == 0) {
+      json = true;
+    } else if (strcmp(argv[i], "--socket") == 0 && i + 1 < argc) {
+      i++;
+    } else if (argv[i][0] != '-') {
+      id = argv[i];
+    } else {
+      fprintf(stderr, "ward: unknown option %s\n", argv[i]);
+      return 2;
+    }
+  }
+  char *path = socket_from_args(argc, argv);
+  if (path == NULL) return 1;
+  wd_client client;
+  if (client_connect(&client, path) != 0) {
+    free(path);
+    return 1;
+  }
+  free(path);
+  if (client_handshake(&client) != 0) {
+    close(client.fd);
+    return 1;
+  }
+  int rc = 1;
+  cbor_item_t *result = NULL;
+  if (strcmp(sub, "list") == 0) {
+    if (client_request(&client, "model.list", wd_map(0), &result) != 0)
+      goto done;
+    if (json) {
+      print_json(result);
+    } else {
+      cbor_item_t *models = wd_get(result, "models");
+      size_t n = cbor_array_size(models);
+      cbor_item_t **items = cbor_array_handle(models);
+      if (n == 0) printf("no models\n");
+      for (size_t i = 0; i < n; i++) {
+        char *model_id = wd_text_copy(wd_get(items[i], "id"));
+        char *provider = wd_text_copy(wd_get(items[i], "provider"));
+        char *name = wd_text_copy(wd_get(items[i], "model"));
+        char *context = wd_text_copy(wd_get(items[i], "context"));
+        printf("%-24s %-12s %-20s %s\n", model_id != NULL ? model_id : "?",
+               provider != NULL ? provider : "?", name != NULL ? name : "?",
+               context != NULL ? context : "");
+        free(model_id);
+        free(provider);
+        free(name);
+        free(context);
+      }
+    }
+    rc = 0;
+  } else if (strcmp(sub, "select") == 0) {
+    if (id == NULL) {
+      fprintf(stderr, "ward: model select needs an id\n");
+      goto done;
+    }
+    cbor_item_t *params = wd_map(1);
+    wd_put(params, "id", wd_text(id));
+    if (client_request(&client, "model.select", params, &result) != 0) goto done;
+    printf("model %s\n", id);
+    rc = 0;
+  } else {
+    fprintf(stderr, "ward: unknown model command %s\n", sub);
   }
 done:
   if (result != NULL) wd_free(result);
@@ -795,6 +888,7 @@ int main(int argc, char **argv) {
   if (strcmp(command, "-p") == 0) return command_print(argc - 1, argv + 1);
   if (strcmp(command, "session") == 0) return command_session(argc - 2, argv + 2);
   if (strcmp(command, "device") == 0) return command_device(argc - 2, argv + 2);
+  if (strcmp(command, "model") == 0) return command_model(argc - 2, argv + 2);
   fprintf(stderr, "ward: unknown command %s\n", command);
   usage(stderr);
   return 2;

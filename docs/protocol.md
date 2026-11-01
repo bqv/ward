@@ -183,6 +183,23 @@ Scope is enforced by the daemon. A `readonly` device may call the read methods, 
 `session.prompt`, `session.cancel` and `approval.respond` answer `permission_denied`. Device
 administration is local only; a QUIC connection asking for it is `permission_denied`.
 
+### The model catalog
+
+The catalog is data, not code: `models.toml` in the state directory, one `[[model]]` table
+per entry with `id`, `provider`, `model`, `context` and `tags` (all text). It is read at
+start-up; a missing file is an empty catalog, and a duplicate `id` is a start-up error.
+
+**`model.list`** — no params. Returns `{models: [{id, provider, model, context, tags}]}`.
+
+**`model.select`** — params `{id}`. Makes that model the daemon's default for sessions that
+do not name one, or `not_found`. Answers `{model}`.
+
+**`session.set_model`** — params `{id, model}`. Numbers a durable `session.model {model}`
+event, updates the session and answers `{session}`. The event is replayed when the session is
+loaded, so the choice survives a restart. An unknown model is `not_found`.
+
+`session.create` refuses a model the catalog does not hold when the catalog is not empty.
+
 ### Declared, not served in M0
 
 The frozen list, from `README.md`:

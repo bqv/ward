@@ -119,6 +119,16 @@ Two more ABI notes: a CBOR integer wider than 32 bits is skipped rather than ref
 and `wd_r_uint` still truncates such a value, so a guest that needs the whole 64 bits reads
 the text form instead.
 
+Ninth: the model catalog. `src/core/models.c` reads `models.toml` from the state directory —
+one `[[model]]` table per entry, text fields, a duplicate id refused, a missing file an empty
+catalog — and the daemon serves `model.list`, `model.select` and `session.set_model`.
+Selecting sets the default for new sessions; setting a session's model appends a durable
+`session.model` event, and the loader replays the log so the choice survives a restart.
+`ward model list`, `ward model select` and `ward session set-model` are the client side.
+
+What is left of M1 is the worker: a per-session process that owns long-lived children and
+the sandbox, which is also what lets the provider call leave the daemon's loop.
+
 M0's acceptance is 1,000 round-trips/s over UDS and a fuzz-clean decoder. A
 gate that is not measured is not met.
 

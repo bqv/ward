@@ -64,6 +64,21 @@ static void session_free(hs_session *s) {
   free(s);
 }
 
+static int apply_model(void *ctx, uint64_t seq, cbor_item_t *event) {
+  hs_session *s = ctx;
+  (void)seq;
+  char *kind = wd_text_copy(wd_get(event, "kind"));
+  if (kind != NULL && strcmp(kind, "session.model") == 0) {
+    char *model = wd_text_copy(wd_get(wd_get(event, "payload"), "model"));
+    if (model != NULL) {
+      free(s->model);
+      s->model = model;
+    }
+  }
+  free(kind);
+  return 0;
+}
+
 static int session_load(const char *root, const char *id, hs_session **out) {
   hs_session *s = calloc(1, sizeof(*s));
   if (s == NULL) return -1;
@@ -84,6 +99,7 @@ static int session_load(const char *root, const char *id, hs_session **out) {
   s->created_ms = lc.session.created_ms;
   s->last_seq = lc.session.last_seq;
   if (hlog_open_append(&s->log, s->log_path) != 0) goto fail;
+  if (hs_replay(s, 0, apply_model, s) < 0) goto fail;
   *out = s;
   return 0;
 fail:
@@ -224,6 +240,21 @@ int hs_emit(hs_session *s, const char *kind, cbor_item_t *payload,
   if (rc != 0) return -1;
   s->last_seq = seq;
   if (seq_out != NULL) *seq_out = seq;
+  return 0;
+}
+
+int hs_set_model(hs_session *s, const char *model, uint64_t *seq_out) {
+  char *copy = strdup(model);
+  if (copy == NULL) return -1;
+  cbor_item_t *payload = wd_map(1);
+  wd_put(payload, "model", wd_text(model));
+  int rc = hs_emit(s, "session.model", payload, seq_out);
+  if (rc != 0) {
+    free(copy);
+    return -1;
+  }
+  free(s->model);
+  s->model = copy;
   return 0;
 }
 

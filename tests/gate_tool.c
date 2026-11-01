@@ -16,6 +16,7 @@
 #include <unistd.h>
 
 #include "core/util.h"
+#include <sys/stat.h>
 #include "proto/codec.h"
 #include "proto/frame.h"
 
@@ -222,6 +223,15 @@ int main(void) {
   char sock[128];
   snprintf(state, sizeof(state), "%s/state", root);
   snprintf(sock, sizeof(sock), "%s/sock", root);
+  assert(mkdir(state, 0700) == 0);
+  char models_path[512];
+  snprintf(models_path, sizeof(models_path), "%s/models.toml", state);
+  FILE *models = fopen(models_path, "w");
+  assert(models != NULL);
+  assert(fputs("[[model]]\nid = \"local:qwen\"\nprovider = \"stadi\"\n"
+               "model = \"qwen3\"\ncontext = \"32768\"\n",
+               models) >= 0);
+  fclose(models);
 
   int ready[2];
   assert(pipe(ready) == 0);
@@ -263,6 +273,52 @@ int main(void) {
   char *session = wd_text_copy(wd_get(wd_get(created, "session"), "id"));
   assert(session != NULL);
   wd_free(created);
+
+  bool catalog_ok = false;
+  cbor_item_t *listed = NULL;
+  assert(request(&a, a.next_id++, "model.list", wd_map(0), &listed, NULL) == 0);
+  cbor_item_t *catalog = wd_get(listed, "models");
+  assert(cbor_array_size(catalog) == 1);
+  char *catalog_id = wd_text_copy(wd_get(cbor_array_handle(catalog)[0], "id"));
+  assert(catalog_id != NULL && strcmp(catalog_id, "local:qwen") == 0);
+  free(catalog_id);
+  wd_free(listed);
+
+  cbor_item_t *chosen = NULL;
+  cbor_item_t *set = wd_map(2);
+  wd_put(set, "id", wd_text(session));
+  wd_put(set, "model", wd_text("local:qwen"));
+  assert(request(&a, a.next_id++, "session.set_model", set, &chosen,
+                 &catalog_ok) == 0);
+  assert(catalog_ok);
+  char *chosen_model =
+      wd_text_copy(wd_get(wd_get(chosen, "session"), "model"));
+  assert(chosen_model != NULL && strcmp(chosen_model, "local:qwen") == 0);
+  free(chosen_model);
+  wd_free(chosen);
+
+  cbor_item_t *rejected = NULL;
+  cbor_item_t *bad = wd_map(2);
+  wd_put(bad, "id", wd_text(session));
+  wd_put(bad, "model", wd_text("no:such"));
+  catalog_ok = true;
+  assert(request(&a, a.next_id++, "session.set_model", bad, &rejected,
+                 &catalog_ok) == 0);
+  assert(!catalog_ok);
+  char *rejected_name = wd_text_copy(wd_get(rejected, "name"));
+  assert(rejected_name != NULL && strcmp(rejected_name, "not_found") == 0);
+  free(rejected_name);
+  wd_free(rejected);
+
+  cbor_item_t *bad_create = NULL;
+  cbor_item_t *create_bad = wd_map(2);
+  wd_put(create_bad, "cwd", wd_text(root));
+  wd_put(create_bad, "model", wd_text("no:such"));
+  catalog_ok = true;
+  assert(request(&a, a.next_id++, "session.create", create_bad, &bad_create,
+                 &catalog_ok) == 0);
+  assert(!catalog_ok);
+  wd_free(bad_create);
 
   cbor_item_t *resumed = NULL;
   cbor_item_t *resume = wd_map(1);
