@@ -51,23 +51,31 @@ C11 and Meson, debug by default. `meson setup build -Dbuildtype=debug
 options rather than edited build files: debug compiles guests at `-O0 -g` and
 keeps DWARF; release is `-O2` and strips.
 
-The guest toolchain is pinned at `/opt/wasi-sdk-34`: clang 23.1.0-wasi-sdk with
-`share/wasi-sysroot` for `wasm32-wasip1`. Portage does not provide it —
-`llvm-core/clang` and `llvm-core/lld` are installed (22.1.8) and their WebAssembly
-backend is complete, but there is no wasi-libc in the tree, so the host clang
-cannot link a WASI program. Guests use the SDK's compiler, core uses the host
-compiler, and the two are not mixed.
+The guest toolchain is `/opt/wasi-sdk-34`, installed by `dev-util/wasi-sdk-bin`
+from the bqv overlay: clang 23.1.0-wasi-sdk with `share/wasi-sysroot` for
+`wasm32-wasip1`. Portage's own `llvm-core/clang` and `llvm-core/lld` (22.1.8)
+have a complete WebAssembly backend, but the tree carries no wasi-libc, so the
+host clang cannot link a WASI program. Guests use the SDK's compiler, core uses
+the host compiler, and the two are not mixed. `wasi-sdk.pc` exports `clang`,
+`clangxx`, `sysroot` and `target` as pkg-config variables, so the compiler path
+is `pkg-config --variable=clang wasi-sdk` and not a hardcoded `/opt` path.
 
-Wasmtime is pinned at `/opt/wasmtime-50.0.1`: headers in `include/`,
-`libwasmtime.so` and `libwasmtime.a` in `lib/`, CLI at `bin/wasmtime`. It ships
-no pkg-config file and no CMake package, so meson has to use
-`cc.find_library('wasmtime', dirs: ...)` plus `include_directories`, not
-`dependency('wasmtime')`.
+Wasmtime is `/opt/wasmtime-50.0.1`, installed by `dev-util/wasmtime-bin` from the
+same overlay: headers in `include/`, `libwasmtime.so` and `libwasmtime.a` in
+`lib/`, CLI at `bin/wasmtime`. Its `wasmtime.pc` resolves the whole integration
+with `dependency('wasmtime')`, and carries `-Wl,-rpath,/opt/wasmtime-50.0.1/lib`,
+so a linked binary needs no ld.so.conf entry.
 
-It keeps a compilation cache in `$XDG_CACHE_HOME/wasmtime` by default, which a
-sandboxed session cannot create and a `Read-only file system` error kills the
-CLI outright. The daemon must configure the cache to its own `<state>/cache`, not
-inherit the environment.
+Both ebuilds live in the overlay at `/var/db/repos/local/dev-util/`. They install
+their `.pc` into `$(get_libdir)/pkgconfig`, which is `/usr/lib64/pkgconfig` here
+and on pkg-config's default search path; `/usr/lib/pkgconfig` is not searched and
+was the original mistake. Editing an ebuild means regenerating that package's
+`Manifest` too, or portage rejects it and silently falls back to a stale binpkg.
+
+Wasmtime keeps a compilation cache in `$XDG_CACHE_HOME/wasmtime` by default,
+which a sandboxed session cannot create and a `Read-only file system` error kills
+the CLI outright. The daemon must configure the cache to its own `<state>/cache`,
+not inherit the environment.
 
 Dependencies resolve through `dependency()` and pkg-config: Wasmtime C API,
 ngtcp2, OpenSSL, tree-sitter, libcurl, sqlite3, libcbor, yyjson, zstd. Guests:
