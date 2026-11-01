@@ -756,6 +756,26 @@ int main(void) {
                  NULL) == 0);
   wd_free(watch_b);
 
+  cbor_item_t *goal = NULL;
+  cbor_item_t *goal_params = wd_map(2);
+  wd_put(goal_params, "session", wd_text(session));
+  wd_put(goal_params, "text", wd_text("ship M3"));
+  assert(request(&a, a.next_id++, "goal.set", goal_params, &goal, NULL) == 0);
+  char *goal_text = wd_text_copy(wd_get(goal, "goal"));
+  assert(goal_text != NULL && strcmp(goal_text, "ship M3") == 0);
+  free(goal_text);
+  wd_free(goal);
+
+  cbor_item_t *cleared = NULL;
+  cbor_item_t *clear_params = wd_map(1);
+  wd_put(clear_params, "session", wd_text(session));
+  assert(request(&a, a.next_id++, "goal.clear", clear_params, &cleared, NULL) ==
+         0);
+  bool was_cleared = false;
+  assert(wd_bool_of(wd_get(cleared, "cleared"), &was_cleared));
+  assert(was_cleared);
+  wd_free(cleared);
+
   cbor_item_t *jobs = NULL;
   assert(request(&a, a.next_id++, "job.list", wd_map(0), &jobs, NULL) == 0);
   assert(cbor_array_size(wd_get(jobs, "jobs")) >= 2);

@@ -130,6 +130,11 @@ fields stay the same when a real tokenizer replaces the estimate.
 **`stats.global`** — no params. The same counters summed over every session, plus
 `{sessions}`.
 
+**`goal.set`** — params `{session, text}`. Appends a durable `goal.set {text}` and answers
+`{goal}`; `goal.clear` appends `goal.cleared`. The active goal is prepended to the history
+every later prompt sends, as a `system` message, so the model is reminded what the session is
+for without the client repeating it.
+
 **`job.list`** — no params. Answers `{jobs: [{job, session, state}]}` for every turn
 currently running; the job id is the session it runs in.
 

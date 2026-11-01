@@ -304,6 +304,12 @@ reverted rather than committed half-tested; the next attempt should model its te
 `wasm_test`'s loader (`read_file`, `wd_module_load`, a named limits struct) and only then add
 the daemon's `schedule.set/list/delete` and the wheel on top.
 
+Thirtieth: goals. `goal.set` and `goal.clear` append durable events, and the history builder
+prepends the active goal as a `system` message to every later prompt — so it survives a
+restart by replay rather than by a table, and the model is reminded what the session is for
+without the client repeating it. `hs_history` tracks the goal through the replay: set, cleared,
+or replaced.
+
 ## M3: started, with one finding worth keeping
 
 The first M3 attempt replaced the daemon's single `wd_turn` with a pool keyed by session, so

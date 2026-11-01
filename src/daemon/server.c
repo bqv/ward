@@ -926,6 +926,62 @@ static int turn_emit(void *ctx, const char *event, cbor_item_t *payload,
   return 0;
 }
 
+static void handle_goal_set(wd_server *srv, wd_conn *conn, uint64_t id,
+                            cbor_item_t *params) {
+  char *session_id = wd_text_copy(wd_get(params, "session"));
+  char *text = wd_text_copy(wd_get(params, "text"));
+  wd_session *session =
+      session_id != NULL ? wd_session_find(&srv->store, session_id) : NULL;
+  free(session_id);
+  if (session == NULL || text == NULL || text[0] == '\0') {
+    free(text);
+    conn_send_error(conn, id, WD_ERR_INVALID_PARAMS,
+                    "session and text are required");
+    conn_arm(srv, conn);
+    return;
+  }
+  cbor_item_t *record = wd_map(1);
+  wd_put(record, "text", wd_text(text));
+  uint64_t seq = 0;
+  if (wd_session_emit(session, "goal.set", record, &seq) != 0) {
+    free(text);
+    respond_internal(srv, conn, id, "cannot record the goal");
+    return;
+  }
+  cbor_item_t *event = wd_map(1);
+  wd_put(event, "text", wd_text(text));
+  conn_broadcast(srv, session, "goal.set", seq, event);
+  cbor_item_t *result = wd_map(1);
+  wd_put(result, "goal", wd_text(text));
+  free(text);
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
+static void handle_goal_clear(wd_server *srv, wd_conn *conn, uint64_t id,
+                              cbor_item_t *params) {
+  char *session_id = wd_text_copy(wd_get(params, "session"));
+  wd_session *session =
+      session_id != NULL ? wd_session_find(&srv->store, session_id) : NULL;
+  free(session_id);
+  if (session == NULL) {
+    conn_send_error(conn, id, WD_ERR_NOT_FOUND, "no such session");
+    conn_arm(srv, conn);
+    return;
+  }
+  uint64_t seq = 0;
+  if (wd_session_emit(session, "goal.cleared", wd_map(0), &seq) != 0) {
+    respond_internal(srv, conn, id, "cannot record the goal");
+    return;
+  }
+  cbor_item_t *event = wd_map(0);
+  conn_broadcast(srv, session, "goal.cleared", seq, event);
+  cbor_item_t *result = wd_map(1);
+  wd_put(result, "cleared", cbor_build_bool(true));
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
 static void handle_job_list(wd_server *srv, wd_conn *conn, uint64_t id) {
   size_t count = 0;
   for (wd_run *run = srv->runs; run != NULL; run = run->next) count++;
@@ -1604,6 +1660,10 @@ static void handle_request(wd_server *srv, wd_conn *conn, uint64_t id,
     handle_session_undo(srv, conn, id, params);
   } else if (strcmp(method, "session.search") == 0) {
     handle_session_search(srv, conn, id, params);
+  } else if (strcmp(method, "goal.set") == 0) {
+    handle_goal_set(srv, conn, id, params);
+  } else if (strcmp(method, "goal.clear") == 0) {
+    handle_goal_clear(srv, conn, id, params);
   } else if (strcmp(method, "job.list") == 0) {
     handle_job_list(srv, conn, id);
   } else if (strcmp(method, "job.kill") == 0) {

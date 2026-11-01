@@ -377,6 +377,7 @@ typedef struct {
   size_t cap;
   char *pending;
   size_t pending_len;
+  char *goal;
 } hist_ctx;
 
 static int hist_push(hist_ctx *hc, const char *role, const char *text) {
@@ -444,6 +445,15 @@ static int history_record(void *ctx, uint64_t seq, cbor_item_t *event) {
         return 1;
       }
     }
+  } else if (strcmp(kind, "goal.set") == 0) {
+    char *text = wd_text_copy(wd_get(payload, "text"));
+    if (text != NULL) {
+      free(hc->goal);
+      hc->goal = text;
+    }
+  } else if (strcmp(kind, "goal.cleared") == 0) {
+    free(hc->goal);
+    hc->goal = NULL;
   } else if (strcmp(kind, "turn.end") == 0) {
     if (hc->pending != NULL) {
       if (hist_push(hc, "assistant", hc->pending) != 0) {
@@ -470,6 +480,19 @@ int wd_session_history(wd_session *s, size_t budget, cbor_item_t **out) {
     }
     free(hc.turns);
     return -1;
+  }
+  if (hc.goal != NULL) {
+    int pushed = hist_push(&hc, "system", hc.goal);
+    free(hc.goal);
+    hc.goal = NULL;
+    if (pushed != 0) {
+      for (size_t i = 0; i < hc.len; i++) {
+        free(hc.turns[i].role);
+        free(hc.turns[i].text);
+      }
+      free(hc.turns);
+      return -1;
+    }
   }
   size_t first = 0;
   size_t total = 0;
