@@ -140,7 +140,7 @@ int main(void) {
   wd_free(built);
 
   assert(wd_session_history(hist, 30, &built) == 0);
-  assert(cbor_array_size(built) == 2);
+  assert(cbor_array_size(built) == 4);
   wd_free(built);
 
   cbor_item_t *compacted = wd_map(2);

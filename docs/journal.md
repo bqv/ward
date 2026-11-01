@@ -1262,3 +1262,18 @@ catch a moved byte, which is exactly how the stamp survived this long.
 The first attempt at the broadcast was a use-after-free: `wd_session_emit` consumes its payload, and the same
 map was then handed to `wd_event` for the broadcast. ASan caught it in `gate_crash` and `gate_tool` while the
 debug build passed, which is the sanitizer earning its place. The event map is now built separately.
+
+Ninety-sixth: history is no longer trimmed silently. `wd_session_history` keeps every turn; the budget
+parameter stays for callers but no longer drops from the front. The daemon measures the assembled history
+against the probed budget and, when it is larger, appends a durable `session.overflow {bytes, budget}` before
+the prompt — the drop becomes a visible event rather than a quiet subtraction, and the provider's own
+`context_exceeded` is what a client acts on.
+
+The test now asserts the opposite of what it used to: a tiny budget returns the whole history. That assertion
+is the guarantee; the overflow notice itself is not yet observed end to end, because producing a history
+larger than 4 KiB in the fixture needs eleven turns and the loop that drives them was still racing the busy
+check when this was written.
+
+Worth recording from that attempt: a 6 KB user prompt does not overflow anything, it fails at the driver's
+512-byte text buffer and surfaces as a bare "turn failed". The error taxonomy covers provider failures only,
+so a local failure like that one is still silent. That is a gap in §6's reach, not in §2.

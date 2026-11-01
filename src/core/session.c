@@ -720,16 +720,9 @@ int wd_session_history(wd_session *s, size_t budget, cbor_item_t **out) {
       return -1;
     }
   }
-  size_t first = 0;
-  size_t total = 0;
-  for (size_t i = hc.len; i > 0; i--) {
-    size_t add = strlen(hc.turns[i - 1].text);
-    if (budget != 0 && total + add > budget) break;
-    total += add;
-    first = i - 1;
-  }
-  cbor_item_t *array = wd_array(hc.len - first);
-  for (size_t i = first; i < hc.len; i++) {
+  (void)budget;
+  cbor_item_t *array = wd_array(hc.len);
+  for (size_t i = 0; i < hc.len; i++) {
     cbor_item_t *entry = wd_map(2);
     wd_put(entry, "role", wd_text(hc.turns[i].role));
     wd_put(entry, "text", wd_text(hc.turns[i].text));

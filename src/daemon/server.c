@@ -2295,8 +2295,33 @@ static void handle_session_prompt(wd_server *srv, wd_conn *conn, uint64_t id,
     return;
   }
   cbor_item_t *history = NULL;
-  if (wd_session_history(session, history_budget(srv, session), &history) == 0)
+  size_t budget = history_budget(srv, session);
+  if (wd_session_history(session, budget, &history) == 0) {
     wd_turn_set_history(run->turn, history);
+    size_t bytes = 0;
+    for (size_t i = 0; i < cbor_array_size(history); i++) {
+      cbor_item_t *entry = cbor_array_get(history, i);
+      if (entry == NULL) continue;
+      char *text = wd_text_copy(wd_get(entry, "text"));
+      if (text != NULL) {
+        bytes += strlen(text);
+        free(text);
+      }
+      cbor_decref(&entry);
+    }
+    if (bytes > budget) {
+      cbor_item_t *over_payload = wd_map(2);
+      wd_put(over_payload, "bytes", wd_uint((uint64_t)bytes));
+      wd_put(over_payload, "budget", wd_uint((uint64_t)budget));
+      cbor_item_t *over_event = wd_map(2);
+      wd_put(over_event, "bytes", wd_uint((uint64_t)bytes));
+      wd_put(over_event, "budget", wd_uint((uint64_t)budget));
+      uint64_t over_seq = 0;
+      if (wd_session_emit(session, "session.overflow", over_payload, &over_seq) ==
+          0)
+        conn_broadcast(srv, session, "session.overflow", over_seq, over_event);
+    }
+  }
 
   cbor_item_t *asked = wd_map(1);
   wd_put(asked, "text", wd_text(text));
