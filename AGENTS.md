@@ -36,11 +36,13 @@ with a fuzz gate; `ward up` with handshake, `session.create/list/get/resume`
 and replay; a CLI client; and the M0 gate, which measures round-trips rather
 than assuming them.
 
-M1 is under way: the SSE framer (`src/proto/sse.c`) is written, bounded and fuzzed;
-it is the transport half of the provider, and the guest still decides what an event
-means.
+M1 is under way, with two pieces done and gated: the SSE framer (`src/proto/sse.c`),
+bounded and fuzzed, which is the transport half of the provider; and the Wasmtime
+host (`src/wasm/host.c`) with the module ABI frozen in `docs/modules.md` — engine,
+store limits, fuel, the single `ward.cap` import, pure-module import enforcement and
+state export/import, proven by `wasm-test` against real guests.
 
-Next: the Wasmtime host and the `engine`/`driver` pair (M1). A method is served only when
+Next: the `engine`/`driver` pair and the dispatcher that routes their actions. A method is served only when
 `docs/protocol.md` says it is served — the rest of the frozen list answers
 `not_supported`.
 
@@ -98,7 +100,7 @@ Never build release or `clean` on a guess.
 ## Layout
 
 `src/core/` loop, sessions, capabilities, scheduler · `src/proto/` frames, CBOR,
-method table · `src/wasm/` registry, instance pool, migration, ABI ·
+method table · `src/wasm/` host, limits, instance pool, migration, ABI ·
 `src/daemon/` socket, auth, subscriptions · `src/cli/` command line, headless ·
 `modules/<name>/` first-party guests · `clients/` test client, then `dsh-native`
 · `tests/` unit, golden transcripts, fuzz corpus · `docs/`.

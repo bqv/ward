@@ -10,6 +10,10 @@ project('ward', 'c',
 
 libcbor = dependency('libcbor', version: '>=0.10')
 libzstd = dependency('libzstd', version: '>=1.4')
+wasmtime = dependency('wasmtime')
+wasi = dependency('wasi-sdk')
+
+deps = [libcbor, libzstd, wasmtime]
 
 add_project_arguments('-D_GNU_SOURCE', language: 'c')
 
@@ -31,9 +35,10 @@ core = static_library('ward-core',
     'src/core/ids.c',
     'src/core/log.c',
     'src/core/session.c',
+    'src/wasm/host.c',
   ),
   include_directories: inc,
-  dependencies: [libcbor, libzstd],
+  dependencies: deps,
   install: false,
 )
 
@@ -41,7 +46,7 @@ ward = executable('ward',
   files('src/cli/main.c', 'src/daemon/server.c'),
   include_directories: inc,
   link_with: core,
-  dependencies: [libcbor, libzstd],
+  dependencies: deps,
   install: true,
 )
 
@@ -58,7 +63,7 @@ foreach t : [
   exe = executable(t[0] + '-test', t[1],
     include_directories: inc,
     link_with: core,
-    dependencies: [libcbor, libzstd],
+    dependencies: deps,
   )
   test(t[0], exe, timeout: 60)
 endforeach
@@ -66,20 +71,52 @@ endforeach
 fuzz = executable('fuzz-codec-test', 'tests/fuzz_codec.c',
   include_directories: inc,
   link_with: core,
-  dependencies: [libcbor, libzstd],
+  dependencies: deps,
 )
 test('fuzz', fuzz, timeout: 180)
 
 fuzz_sse = executable('fuzz-sse-test', 'tests/fuzz_sse.c',
   include_directories: inc,
   link_with: core,
-  dependencies: [libcbor, libzstd],
+  dependencies: deps,
 )
 test('fuzz-sse', fuzz_sse, timeout: 180)
 
 gate = executable('gate-m0-test', 'tests/gate_m0.c',
   include_directories: inc,
   link_with: core,
-  dependencies: [libcbor, libzstd],
+  dependencies: deps,
 )
 test('m0', gate, env: test_env, timeout: 120)
+
+wasm_cc = wasi.get_variable('clang')
+guest_opt = get_option('guest_profile') == 'debug' ? ['-O0', '-g'] : ['-O2']
+guest_flags = ['--target=wasm32-wasip1', '-nostdlib', '-Wl,--no-entry',
+               '-Wl,--export-memory'] + guest_opt
+
+guest_echo = custom_target('guest-echo',
+  input: 'tests/guest/echo.c',
+  output: 'echo.wasm',
+  command: [wasm_cc, guest_flags, '@INPUT@', '-o', '@OUTPUT@'],
+)
+guest_wasi = custom_target('guest-wasi',
+  input: 'tests/guest/wasi.c',
+  output: 'wasi.wasm',
+  command: [wasm_cc, guest_flags, '@INPUT@', '-o', '@OUTPUT@'],
+)
+guest_importer = custom_target('guest-importer',
+  input: 'tests/guest/importer.c',
+  output: 'importer.wasm',
+  command: [wasm_cc, guest_flags, '@INPUT@', '-o', '@OUTPUT@'],
+)
+alias_target('guests', guest_echo, guest_wasi, guest_importer)
+
+wasm_env = environment()
+wasm_env.set('WARD_GUEST_DIR', meson.current_build_dir())
+wasm_test = executable('wasm-test', 'tests/wasm_test.c',
+  include_directories: inc,
+  link_with: core,
+  dependencies: deps,
+)
+test('wasm', wasm_test, env: wasm_env, timeout: 120,
+     depends: [guest_echo, guest_wasi, guest_importer])
