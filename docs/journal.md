@@ -959,3 +959,18 @@ which is the cheapest kind of catching there is.
 
 `code.defs` — the method that searches the index by name and reports its generation — is the next
 slice, and it is what the milestone's acceptance line names.
+
+Seventy-seventh: `code.defs`. Core builds the index on first use into `<state>/cache/index`, then
+answers `{ok, text, generation}` — `text` is `path:line name` per match, so the caller can act on it
+without knowing the sidecar's shape. The skills guest answers `/defs <symbol>` through it, which
+completes the row: outline the file, index the root, find the symbol.
+
+The test prompts `/defs helper` against a written C file and asserts `sample.c:5 helper`.
+
+One thing did not work, and it is worth recording rather than hiding: indexing this repository's own
+`src/core` finds almost nothing, because the code guest's text buffer is 4 KiB and most core files
+are larger — the guest truncates, and the truncated prefix often contains no complete definition.
+A turn's file read is capped at 256 KiB and the index at 200 files, but the *guest* is the actual
+limit. Raising its buffers is the next step for the index, and the acceptance line "finds a symbol
+in the harness" cannot be claimed until it lands. The scanner also now crosses a wrapped signature
+(`wd_turn *wd_turn_new(...)` split over two lines), which the earlier version missed.

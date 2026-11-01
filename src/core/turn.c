@@ -14,6 +14,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "core/index.h"
 #include "core/judge.h"
 #include "core/proc.h"
 #include "core/worker.h"
@@ -283,6 +284,62 @@ static int resolve_path(wd_turn *turn, const char *rel, bool parent, char *out,
   if (strlen(resolved) >= cap) return -1;
   snprintf(out, cap, "%s", resolved);
   return 0;
+}
+
+static int code_defs(wd_turn *turn, const uint8_t *in, size_t in_len,
+                     uint8_t **out, size_t *out_len) {
+  cbor_item_t *request = wd_decode(in, in_len);
+  if (request == NULL) return tool_fail("code.defs: bad parameters", out, out_len);
+  char *name = wd_text_copy(wd_get(request, "name"));
+  wd_free(request);
+  if (name == NULL || name[0] == '\0') {
+    free(name);
+    return tool_fail("code.defs: a symbol name is needed", out, out_len);
+  }
+  const char *state = wd_engine_state_dir(turn->engine);
+  if (state == NULL || turn->root == NULL) {
+    free(name);
+    return tool_fail("code.defs: no state directory", out, out_len);
+  }
+  char cache[1024];
+  snprintf(cache, sizeof(cache), "%s/cache", state);
+  mkdir(cache, 0700);
+  snprintf(cache, sizeof(cache), "%s/cache/index", state);
+  mkdir(cache, 0700);
+  char gen_path[1200];
+  snprintf(gen_path, sizeof(gen_path), "%s/symbols.gen", cache);
+  uint64_t generation = 0;
+  if (access(gen_path, R_OK) != 0) {
+    char *err = NULL;
+    if (wd_index_build(turn->root, cache, turn->code, &generation, &err) != 0) {
+      free(err);
+      free(name);
+      return tool_fail("code.defs: cannot build the index", out, out_len);
+    }
+    free(err);
+  } else {
+    FILE *g = fopen(gen_path, "r");
+    if (g != NULL) {
+      if (fscanf(g, "%llu", (unsigned long long *)&generation) != 1) generation = 0;
+      fclose(g);
+    }
+  }
+  char text[4096];
+  int found = wd_index_find(cache, name, text, sizeof(text));
+  free(name);
+  if (found < 0) return tool_fail("code.defs: the index is unreadable", out, out_len);
+  char summary[4200];
+  if (found == 0)
+    snprintf(summary, sizeof(summary), "no symbol named that");
+  else
+    snprintf(summary, sizeof(summary), "%s", text);
+  cbor_item_t *result = wd_map(3);
+  wd_put(result, "ok", cbor_build_bool(true));
+  wd_put(result, "text", wd_text(summary));
+  char gen[32];
+  snprintf(gen, sizeof(gen), "%llu", (unsigned long long)generation);
+  wd_put(result, "generation", wd_text(gen));
+  return tool_reply(result, out, out_len);
 }
 
 static int code_outline(wd_turn *turn, const uint8_t *in, size_t in_len,
@@ -1034,6 +1091,8 @@ static int turn_capability(void *ctx, const char *capability,
     return net_request(turn, in, in_len, out, out_len, err);
   if (strcmp(capability, "code.outline") == 0)
     return code_outline(turn, in, in_len, out, out_len);
+  if (strcmp(capability, "code.defs") == 0)
+    return code_defs(turn, in, in_len, out, out_len);
   if (strcmp(capability, "fs.read") == 0)
     return fs_read(turn, in, in_len, out, out_len);
   if (strcmp(capability, "fs.write") == 0)
@@ -1109,11 +1168,11 @@ wd_turn *wd_turn_new_pinned(wd_engine *engine, const char *module_dir,
   static const char *const provider_caps[] = {"net.request"};
   static const char *const no_caps[] = {NULL};
   static const char *const skills_caps[] = {"web.search", "mcp.call",
-                                            "recall.search", "code.outline"};
+                                            "recall.search", "code.outline", "code.defs"};
   wd_module_spec engine_spec = {"engine", no_caps, 0, true};
   wd_module_spec driver_spec = {"driver", driver_caps, 3, false};
   wd_module_spec policy_spec = {"policy", no_caps, 0, true};
-  wd_module_spec skills_spec = {"skills", skills_caps, 4, false};
+  wd_module_spec skills_spec = {"skills", skills_caps, 5, false};
   wd_module_spec provider_spec = {"provider", provider_caps, 1, false};
   wd_module_spec tools_spec = {"tools", no_caps, 0, true};
 
@@ -1160,7 +1219,7 @@ wd_turn *wd_turn_new_pinned(wd_engine *engine, const char *module_dir,
   turn->policy = wd_instance_new(turn->policy_module, no_caps, 0, &TURN_LIMITS,
                                  turn_capability, turn, err);
   if (turn->policy == NULL) goto fail;
-  turn->skills = wd_instance_new(turn->skills_module, skills_caps, 4,
+  turn->skills = wd_instance_new(turn->skills_module, skills_caps, 5,
                                  &TURN_LIMITS, turn_capability, turn, err);
   if (turn->skills == NULL) goto fail;
   turn->judge = wd_instance_new(turn->judge_module, no_caps, 0, &TURN_LIMITS,

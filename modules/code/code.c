@@ -70,7 +70,9 @@ static uint32_t scan(const char *text, uint32_t cap,
     if (j < cap && text[j] == '(' && len < NAME_MAX &&
         !keyword(text + start, len) && found < SYMBOL_MAX) {
       uint32_t k = j;
-      while (k < cap && text[k] != ')' && text[k] != '\n') k++;
+      while (k < cap && text[k] != ')' && text[k] != ';' && text[k] != '}' &&
+             k - j < 400)
+        k++;
       if (k < cap && text[k] == ')') {
         uint32_t m = k + 1;
         while (m < cap && is_space(text[m])) m++;

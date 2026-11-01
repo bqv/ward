@@ -103,6 +103,12 @@ int main(void) {
   assert(strstr(outline_seen.text, "main:1") != NULL);
   assert(strstr(outline_seen.text, "helper:5") != NULL);
 
+  seen defs_seen = {{0}, 0, 0, 0, 0, {0}};
+  assert(wd_turn_prompt(turn, "/defs helper", emit, &defs_seen, &err) ==
+         WD_TURN_OK);
+  assert(defs_seen.deltas > 0);
+  assert(strstr(defs_seen.text, "sample.c:5 helper") != NULL);
+
   seen read_seen = {{0}, 0, 0, 0, 0, {0}};
   assert(wd_turn_prompt(turn, "/read hello.txt", emit, &read_seen, &err) ==
          WD_TURN_OK);
