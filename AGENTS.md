@@ -455,6 +455,19 @@ anything about its head, and two in-process tests had been running their turns i
 repository root — where the rules now apply — so they were moved to an empty root, which is
 what a test should have used from the start.
 
+Forty-fifth: the PTY primitive. `src/core/pty.c` opens a child under a pseudo-terminal —
+`forkpty` with a window size, the command exec'd directly with a scrubbed environment and a
+`TERM`, the master end non-blocking — and offers write, resize (`TIOCSWINSZ`), a read and a
+close that hangs the process group up before the kill. `tests/pty_test` opens `cat`, resizes
+the window, writes a line and reads it back through the terminal, which is the whole contract
+in one test.
+
+This is the core half of the terminal row: authority over a descriptor and a child. The daemon
+side — `terminal.{open,write,resize,close}` and the `terminal.output` event the frozen
+protocol already names, with its own epoll token and a `wd_term` table on the server — is the
+next slice, and it is deliberately not bolted on in the same round as the primitive that it
+needs to be correct.
+
 ## M3: started, with one finding worth keeping
 
 The first M3 attempt replaced the daemon's single `wd_turn` with a pool keyed by session, so

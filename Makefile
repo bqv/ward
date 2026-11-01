@@ -49,6 +49,7 @@ CORE_SRC := \
   src/core/labels.c \
   src/core/schedule.c \
   src/core/proc.c \
+           src/core/pty.c \
   src/wasm/host.c \
   src/net/http.c \
   src/net/pki.c \
