@@ -1019,3 +1019,21 @@ The three causes, each masked by the one before it:
 The earlier note in §79 that the call was succeeding was wrong: the instrument had been placed in a
 test that did not make the failing call. The lesson is the one this repository keeps relearning —
 put the probe where the failure happens, not where it is convenient.
+
+Eighty-first: where M5 ends. Met and gated: module identity through the registry and manifests;
+`module.list` and `module.reload`; `ward_state_migrate` in the host; pinning, moving a pin over the
+protocol with its busy and not-found refusals; the handover between two instances; demotion after two
+traps; modules resolved through a session's pins at turn creation; state exported when a run ends and
+re-imported — migrating if needed — into the next turn, with `migration_failed` returning the pin and
+the run continuing on the version that worked; `code.outline` end to end through the skills guest; the
+symbol index with its generation; and `code.defs` finding a symbol in this repository's own source.
+
+Not met: trap reporting from the turn path. `wd_registry_trap` exists and is tested on the registry, but
+nothing in the turn calls it, so a version that traps at runtime is never demoted in practice. That is
+the one row the milestone names that is still open, and closing it needs a module that traps on demand
+plus the call-site wiring in `turn.c` and the daemon — a slice in its own right, not a footnote.
+
+Also unmeasured, and said plainly: no shipped guest carries state across a turn, so "upgrade a stateful
+module mid-session with no data loss" is proven between two instances and across a stored blob, but not
+with a real stateful module in the pipeline. The mechanism is there and the fixture proves each half;
+what is missing is a guest that needs it.
