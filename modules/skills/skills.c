@@ -4,6 +4,9 @@
 
 #include "wd_abi.h"
 
+__attribute__((import_module("ward"), import_name("cap")))
+extern void ward_cap(uint32_t at, uint32_t len, uint32_t out);
+
 #define HEAP_SIZE (64u * 1024u)
 #define REPLY_SIZE 2048u
 #define TEXT_SIZE 1024u
@@ -46,7 +49,9 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
   wd_r r = {(const uint8_t *)(uintptr_t)at, len, 0, 0};
   uint32_t n = 0;
   char command[TEXT_SIZE];
+  char args[TEXT_SIZE];
   command[0] = '\0';
+  args[0] = '\0';
   if (wd_r_map(&r, &n) != 0) return;
   for (uint32_t i = 0; i < n; i++) {
     const uint8_t *kp = 0;
@@ -54,11 +59,14 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
     if (wd_r_text_ptr(&r, &kp, &kn) != 0) return;
     if (wd_key_eq(kp, kn, "command")) {
       if (wd_r_text(&r, command, sizeof(command), 0) != 0) return;
+    } else if (wd_key_eq(kp, kn, "args")) {
+      if (wd_r_text(&r, args, sizeof(args), 0) != 0) return;
     } else if (wd_r_skip(&r) != 0) {
       return;
     }
   }
 
+  static char search_text[REPLY_SIZE];
   int handled = 0;
   const char *text = "";
   if (wd_key_eq((const uint8_t *)command, wd_len(command), "help")) {
@@ -70,6 +78,49 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
   } else if (wd_key_eq((const uint8_t *)command, wd_len(command), "rules")) {
     handled = 1;
     text = "project rules are read from AGENTS.md in the session's cwd";
+  }
+  if (wd_key_eq((const uint8_t *)command, wd_len(command), "search")) {
+    handled = 1;
+    if (args[0] == '\0') {
+      text = "usage: /search <terms>";
+    } else {
+      static uint8_t callbuf[1024];
+      wd_put32(callbuf, 10);
+      static const char cap_name[] = "web.search";
+      for (uint32_t i = 0; i < 10; i++) callbuf[4 + i] = (uint8_t)cap_name[i];
+      wd_w cw;
+      wd_w_init(&cw, callbuf + 14, sizeof(callbuf) - 14);
+      wd_w_map(&cw, 2);
+      wd_w_textz(&cw, "query");
+      wd_w_textz(&cw, args);
+      wd_w_textz(&cw, "k");
+      wd_w_textz(&cw, "5");
+      uint32_t desc[2];
+      search_text[0] = '\0';
+      if (!cw.failed) {
+        ward_cap((uint32_t)(uintptr_t)callbuf, 14 + cw.at, (uint32_t)(uintptr_t)desc);
+        const uint8_t *res = (const uint8_t *)(uintptr_t)desc[0];
+        wd_r rr = {res, desc[1], 0, 0};
+        uint32_t rn = 0;
+        if (wd_r_map(&rr, &rn) == 0) {
+          for (uint32_t i = 0; i < rn; i++) {
+            const uint8_t *kp2 = 0;
+            uint32_t kn2 = 0;
+            if (wd_r_text_ptr(&rr, &kp2, &kn2) != 0) break;
+            if (wd_key_eq(kp2, kn2, "text")) {
+              wd_r_text(&rr, search_text, sizeof(search_text), 0);
+            } else if (wd_r_skip(&rr) != 0) {
+              break;
+            }
+          }
+        }
+      }
+      if (search_text[0] == '\0') {
+        static const char none[] = "search returned nothing";
+        for (uint32_t i = 0; i < sizeof(none); i++) search_text[i] = none[i];
+      }
+      text = search_text;
+    }
   }
 
   wd_w w;

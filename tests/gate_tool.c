@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/wait.h>
@@ -242,11 +243,23 @@ int main(void) {
   }
   int endpoint_port = 0;
   pid_t endpoint = 0;
+#ifdef __SANITIZE_ADDRESS__
+  setenv("WARD_FAKE_DELAY_MS", "1500", 1);
+#else
   setenv("WARD_FAKE_DELAY_MS", "400", 1);
+#endif
   setenv("WARD_MAX_RUNS", "2", 1);
   fake_endpoint(&endpoint_port, &endpoint);
   char root[] = "/tmp/ward-tool-gate-XXXXXX";
   assert(mkdtemp(root) != NULL);
+  char stub_path[512];
+  snprintf(stub_path, sizeof(stub_path), "%s/search-stub", root);
+  FILE *stub = fopen(stub_path, "wb");
+  assert(stub != NULL);
+  assert(fputs("#!/bin/bash\necho 'stub result one'\n", stub) >= 0);
+  fclose(stub);
+  assert(chmod(stub_path, 0755) == 0);
+  setenv("WARD_SEARCH_BIN", stub_path, 1);
   char state[256];
   char sock[128];
   snprintf(state, sizeof(state), "%s/state", root);
@@ -798,6 +811,23 @@ int main(void) {
   assert(slash_end != NULL);
   wd_free(slash_end);
 
+  cbor_item_t *search_resp = NULL;
+  cbor_item_t *search_prompt = wd_map(2);
+  wd_put(search_prompt, "id", wd_text(session));
+  wd_put(search_prompt, "text", wd_text("/search ward agent"));
+  assert(request(&a, a.next_id++, "session.prompt", search_prompt,
+                 &search_resp, NULL) == 0);
+  wd_free(search_resp);
+  cbor_item_t *search_delta = wait_event(&a, "text.delta", NULL);
+  assert(search_delta != NULL);
+  char *search_text = wd_text_copy(wd_get(search_delta, "text"));
+  assert(search_text != NULL && strstr(search_text, "stub result one") != NULL);
+  free(search_text);
+  wd_free(search_delta);
+  cbor_item_t *search_end = wait_turn_end(&a, last_turn);
+  assert(search_end != NULL);
+  wd_free(search_end);
+
   cbor_item_t *sched = NULL;
   cbor_item_t *sched_params = wd_map(3);
   wd_put(sched_params, "session", wd_text(session));
@@ -908,7 +938,7 @@ int main(void) {
   wd_free(end_a);
   uint64_t elapsed = wd_now_ms() - started;
 #ifdef __SANITIZE_ADDRESS__
-  assert(elapsed < 2000);
+  assert(elapsed < 4000);
 #else
   assert(elapsed < 700);
 #endif

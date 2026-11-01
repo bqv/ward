@@ -392,9 +392,13 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
       uint8_t payload[256];
       wd_w w2;
       wd_w_init(&w2, payload, sizeof(payload));
-      wd_w_map(&w2, 1);
+      wd_w_map(&w2, 2);
       wd_w_textz(&w2, "command");
       wd_w_textz(&w2, command);
+      wd_w_textz(&w2, "args");
+      const char *arg_start = text + start;
+      while (*arg_start == ' ') arg_start++;
+      wd_w_textz(&w2, arg_start);
       uint8_t answer[REPLY_SIZE];
       uint32_t answer_len = 0;
       if (!w2.failed && cap_call("skills.expand", payload, w2.at, answer,

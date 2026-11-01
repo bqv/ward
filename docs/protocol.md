@@ -130,6 +130,12 @@ fields stay the same when a real tokenizer replaces the estimate.
 **`stats.global`** — no params. The same counters summed over every session, plus
 `{sessions}`.
 
+**Web search.** `/search <terms>` is handled by the `skills` guest, which calls core's
+`web.search` capability with `{query, k}`. Core runs the local `srchdsh` binary
+(`search -q … -max … -json`) as a child with no shell, a 20 s timeout and a 64 KiB cap, and
+answers `{ok, status, text}`. The module decides what to search for and which result to trust;
+core only runs the binary and returns its words.
+
 **Slash commands.** A prompt beginning `/` that no tool command claims is offered to the
 `skills` guest, which answers `{handled, text}`. `/help`, `/rules` and `/skills` are handled
 there today; anything unhandled falls through to the model as an ordinary prompt.

@@ -397,6 +397,17 @@ spec must say `false`, its granted list must name `web.search`, and the instance
 created with those grants — the same shape `driver` already has. Read the host's import
 enforcement before adding an import to a guest that was pure yesterday.
 
+Fortieth: web.search. The skills guest calls core's `web.search` for `/search <terms>`;
+core runs the local `srchdsh` binary as a child (`search -q … -max … -json`, no shell, 20 s,
+64 KiB) and answers `{ok, status, text}`. The module owns the judgement — what to search for,
+which result to trust — and core owns only the child process, which is exactly the split the
+README asks for.
+
+The previous round's hang was the pure-module spec: `skills` is loaded `false` with
+`{"web.search"}` granted now, and the same code that stalled then passes. Two lessons kept:
+a guest that gains an import is no longer pure, and the gate's stub binary (`WARD_SEARCH_BIN`)
+keeps the test off the network.
+
 ## M3: started, with one finding worth keeping
 
 The first M3 attempt replaced the daemon's single `wd_turn` with a pool keyed by session, so
