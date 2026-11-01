@@ -74,13 +74,15 @@ static int clock_text(char *out, uint32_t cap) {
   return 0;
 }
 
-static int policy_check(const char *tool) {
-  uint8_t payload[256];
+static int policy_check(const char *tool, const char *args) {
+  uint8_t payload[768];
   wd_w w;
   wd_w_init(&w, payload, sizeof(payload));
-  wd_w_map(&w, 1);
+  wd_w_map(&w, 2);
   wd_w_textz(&w, "tool");
   wd_w_textz(&w, tool);
+  wd_w_textz(&w, "payload");
+  wd_w_textz(&w, args != 0 ? args : "");
   if (w.failed) return 0;
   uint8_t answer[REPLY_SIZE];
   uint32_t answer_len = 0;
@@ -306,7 +308,7 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
   }
   if (step) {
     if (text_prefix(text, "/read ")) {
-      int verdict = policy_check("read");
+      int verdict = policy_check("read", text + 6);
       if (verdict == 0) {
         emit_text_delta(out, "the policy denied read");
         return;
@@ -327,7 +329,7 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
       while (text[at] != '\0' && i + 1 < sizeof(body)) body[i++] = text[at++];
       body[i] = '\0';
       if (path[0] != '\0') {
-        int verdict = policy_check("write");
+        int verdict = policy_check("write", text + 7);
         if (verdict == 0) {
           emit_text_delta(out, "the policy denied write");
           return;
@@ -337,7 +339,7 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
       }
     }
     if (text_prefix(text, "/grep ")) {
-      int verdict = policy_check("grep");
+      int verdict = policy_check("grep", text + 6);
       if (verdict == 0) {
         emit_text_delta(out, "the policy denied grep");
         return;
@@ -356,7 +358,7 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
         emit_text_delta(out, "edit needs a path, a find and a replace");
         return;
       }
-      int verdict = policy_check("edit");
+      int verdict = policy_check("edit", text + 6);
       if (verdict == 0) {
         emit_text_delta(out, "the policy denied edit");
         return;
@@ -365,7 +367,7 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
       return;
     }
     if (text_prefix(text, "/plan ")) {
-      int verdict = policy_check("plan");
+      int verdict = policy_check("plan", text + 6);
       if (verdict == 0) {
         emit_text_delta(out, "the policy denied the plan");
         return;
@@ -374,7 +376,7 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
       return;
     }
     if (text_prefix(text, "/run ")) {
-      int verdict = policy_check("exec");
+      int verdict = policy_check("exec", text + 5);
       if (verdict == 0) {
         emit_text_delta(out, "the policy denied exec");
         return;

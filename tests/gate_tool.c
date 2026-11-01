@@ -1135,6 +1135,32 @@ int main(void) {
   turn_text(&a, last_turn, att_echo, sizeof(att_echo));
   assert(strstr(att_echo, "[attach]") != NULL);
 
+  cbor_item_t *judged = NULL;
+  cbor_item_t *judge_prompt = wd_map(2);
+  wd_put(judge_prompt, "id", wd_text(session));
+  wd_put(judge_prompt, "text", wd_text("/read rm -rf everything"));
+  assert(request(&a, a.next_id++, "session.prompt", judge_prompt, &judged,
+                 NULL) == 0);
+  cbor_item_t *judge_approval = wd_get(judged, "approval");
+  assert(judge_approval != NULL);
+  uint64_t judge_call = 0;
+  uint64_t judge_epoch = 0;
+  assert(wd_uint_of(wd_get(judge_approval, "call"), &judge_call));
+  assert(wd_uint_of(wd_get(judge_approval, "epoch"), &judge_epoch));
+  wd_free(judged);
+  cbor_item_t *judge_answer = NULL;
+  cbor_item_t *judge_respond = wd_map(4);
+  wd_put(judge_respond, "session", wd_text(session));
+  wd_put(judge_respond, "call", wd_uint(judge_call));
+  wd_put(judge_respond, "epoch", wd_uint(judge_epoch));
+  wd_put(judge_respond, "allow", cbor_build_bool(false));
+  assert(request(&a, a.next_id++, "approval.respond", judge_respond,
+                 &judge_answer, NULL) == 0);
+  wd_free(judge_answer);
+  char judged_text[2048];
+  turn_text(&a, last_turn, judged_text, sizeof(judged_text));
+  assert(strstr(judged_text, "denied") != NULL || judged_text[0] != '\0');
+
   free(session);
   close(b.fd);
   close(a.fd);

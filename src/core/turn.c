@@ -14,9 +14,16 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "core/judge.h"
 #include "core/proc.h"
 #include "core/worker.h"
 #include "core/util.h"
+
+static int policy_check(wd_turn *turn, const uint8_t *in, size_t in_len,
+                        uint8_t **out, size_t *out_len, char **err);
+static uint8_t *encode_keep(cbor_item_t *item, size_t *len);
+static int invoke(wd_instance *instance, cbor_item_t *payload,
+                  cbor_item_t **result, char **err);
 #include "net/http.h"
 #include "proto/codec.h"
 
@@ -44,6 +51,9 @@ struct wd_turn {
   uint64_t id;
   cbor_item_t *history;
   char *context;
+  wd_instance *judge;
+  wd_module *judge_module;
+  wd_judge *judge_cache;
   char *worker_root;
   wd_instance *policy;
   wd_instance *skills;
@@ -756,6 +766,94 @@ static int fs_write(wd_turn *turn, const uint8_t *in, size_t in_len,
   return tool_ok_count(len, out, out_len);
 }
 
+typedef struct {
+  wd_turn *turn;
+  const char *payload;
+} judge_ctx;
+
+static int judge_ask(void *ctx, const char *tool, const uint8_t *args,
+                     size_t args_len, wd_verdict *out) {
+  (void)args;
+  (void)args_len;
+  judge_ctx *jc = ctx;
+  if (jc->turn->judge == NULL) return -1;
+  cbor_item_t *request = wd_map(2);
+  wd_put(request, "tool", wd_text(tool));
+  wd_put(request, "payload", wd_text(jc->payload));
+  size_t in_len = 0;
+  uint8_t *in = encode_keep(request, &in_len);
+  wd_free(request);
+  if (in == NULL) return -1;
+  cbor_item_t *parsed = wd_decode(in, in_len);
+  cbor_item_t *reply = NULL;
+  int rc = parsed != NULL ? invoke(jc->turn->judge, parsed, &reply, NULL) : -1;
+  wd_free(parsed);
+  free(in);
+  if (rc != 0 || reply == NULL) return -1;
+  char *verdict = wd_text_copy(wd_get(reply, "verdict"));
+  wd_free(reply);
+  if (verdict == NULL) return -1;
+  int result = -1;
+  if (strcmp(verdict, "allow") == 0) {
+    *out = WD_VERDICT_ALLOW;
+    result = 0;
+  } else if (strcmp(verdict, "ask") == 0) {
+    *out = WD_VERDICT_ASK;
+    result = 0;
+  } else if (strcmp(verdict, "deny") == 0) {
+    *out = WD_VERDICT_DENY;
+    result = 0;
+  }
+  free(verdict);
+  return result;
+}
+
+static int policy_check(wd_turn *turn, const uint8_t *in, size_t in_len,
+                        uint8_t **out, size_t *out_len, char **err) {
+  if (wd_instance_call(turn->policy, in, in_len, out, out_len, err) != 0)
+    return -1;
+  if (turn->judge == NULL) return 0;
+  cbor_item_t *request = wd_decode(in, in_len);
+  cbor_item_t *reply = wd_decode(*out, *out_len);
+  if (request == NULL || reply == NULL) {
+    wd_free(request);
+    wd_free(reply);
+    return 0;
+  }
+  char *tool = wd_text_copy(wd_get(request, "tool"));
+  char *payload = wd_text_copy(wd_get(request, "payload"));
+  char *decision = wd_text_copy(wd_get(reply, "decision"));
+  if (tool != NULL && decision != NULL && strcmp(decision, "allow") == 0) {
+    judge_ctx jc = {turn, payload != NULL ? payload : ""};
+    bool consulted = false;
+    wd_verdict merged =
+        wd_judge_decide(turn->judge_cache, WD_VERDICT_ALLOW, tool,
+                        (const uint8_t *)(payload != NULL ? payload : ""),
+                        payload != NULL ? strlen(payload) : 0, judge_ask, &jc,
+                        &consulted);
+    if (merged != WD_VERDICT_ALLOW) {
+      cbor_item_t *rewritten = wd_map(3);
+      wd_put(rewritten, "decision", wd_text(wd_verdict_name(merged)));
+      wd_put(rewritten, "judge", cbor_build_bool(true));
+      wd_put(rewritten, "reason", wd_text("the judge escalated this call"));
+      size_t len = 0;
+      uint8_t *bytes = encode_keep(rewritten, &len);
+      wd_free(rewritten);
+      if (bytes != NULL) {
+        free(*out);
+        *out = bytes;
+        *out_len = len;
+      }
+    }
+  }
+  free(tool);
+  free(payload);
+  free(decision);
+  wd_free(request);
+  wd_free(reply);
+  return 0;
+}
+
 static int turn_capability(void *ctx, const char *capability,
                            const uint8_t *in, size_t in_len, uint8_t **out,
                            size_t *out_len, char **err) {
@@ -806,7 +904,7 @@ static int turn_capability(void *ctx, const char *capability,
   if (strcmp(capability, "skills.expand") == 0)
     return wd_instance_call(turn->skills, in, in_len, out, out_len, err);
   if (strcmp(capability, "policy.check") == 0)
-    return wd_instance_call(turn->policy, in, in_len, out, out_len, err);
+    return policy_check(turn, in, in_len, out, out_len, err);
   *err = strdup("unknown capability");
   return -1;
 }
@@ -857,6 +955,11 @@ wd_turn *wd_turn_new(wd_engine *engine, const char *module_dir, const char *root
   turn->skills_module = load_module(engine, module_dir, "skills.wasm",
                                     &skills_spec, err);
   if (turn->skills_module == NULL) goto fail;
+  static const char *const judge_caps[] = {NULL};
+  wd_module_spec judge_spec = {"judge", judge_caps, 0, true};
+  turn->judge_module = load_module(engine, module_dir, "judge.wasm",
+                                   &judge_spec, err);
+  if (turn->judge_module == NULL) goto fail;
 
   turn->eng = wd_instance_new(turn->engine_module, no_caps, 0, &TURN_LIMITS,
                               NULL, NULL, err);
@@ -876,6 +979,11 @@ wd_turn *wd_turn_new(wd_engine *engine, const char *module_dir, const char *root
   turn->skills = wd_instance_new(turn->skills_module, skills_caps, 3,
                                  &TURN_LIMITS, turn_capability, turn, err);
   if (turn->skills == NULL) goto fail;
+  turn->judge = wd_instance_new(turn->judge_module, no_caps, 0, &TURN_LIMITS,
+                                NULL, NULL, err);
+  if (turn->judge == NULL) goto fail;
+  turn->judge_cache = wd_judge_new(64);
+  if (turn->judge_cache == NULL) goto fail;
   return turn;
 
 fail:
@@ -911,6 +1019,9 @@ void wd_turn_free(wd_turn *turn) {
   wd_instance_free(turn->policy);
   wd_instance_free(turn->skills);
   wd_module_free(turn->skills_module);
+  wd_instance_free(turn->judge);
+  wd_module_free(turn->judge_module);
+  wd_judge_free(turn->judge_cache);
   wd_instance_free(turn->eng);
   wd_module_free(turn->driver_module);
   wd_module_free(turn->provider_module);

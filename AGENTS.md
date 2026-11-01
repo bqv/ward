@@ -555,6 +555,19 @@ prompt hash, latency and verdict — is the next slice. The guest is rule-shaped
 model-backed judge arrives it keeps this ABI and replaces the body with a `net` call, which is
 the same shape `skills` took for search.
 
+Fifty-third: the judge in the policy path. `policy.check` now asks the rule guest first and, when
+it answers `allow`, hands `{tool, payload}` to the `judge` guest and merges the verdict through
+`wd_judge_decide`. The driver sends the payload with the tool, so the classifier sees the words
+it is judging rather than a bare name — `/read rm -rf everything` is the case the gate uses: the
+rule allows `read`, the judge raises it to `ask`, and the client gets an ordinary
+`approval.requested`. Denying it ends the turn; a plain `/read` still passes untouched.
+
+Two pieces are still missing from the README's judge row and the note says so: the
+`judge.decision` event (model, prompt hash, latency, verdict) is not emitted yet — `policy.check`
+is a capability and has no emit path — and the guest is still rule-shaped. The merge, the cache
+and the fail-closed rule are core's and are tested; the audit event and the model-backed guest
+are the next two steps.
+
 ## M3: started, with one finding worth keeping
 
 The first M3 attempt replaced the daemon's single `wd_turn` with a pool keyed by session, so
