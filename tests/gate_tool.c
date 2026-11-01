@@ -394,6 +394,38 @@ int main(void) {
   fclose(file);
   assert(strcmp(content, "hello there") == 0);
 
+  cbor_item_t *forked = NULL;
+  cbor_item_t *fork_params = wd_map(1);
+  wd_put(fork_params, "id", wd_text(session));
+  assert(request(&a, a.next_id++, "session.fork", fork_params, &forked, NULL) ==
+         0);
+  char *forked_id = wd_text_copy(wd_get(wd_get(forked, "session"), "id"));
+  assert(forked_id != NULL && strcmp(forked_id, session) != 0);
+  wd_free(forked);
+
+  cbor_item_t *forked_get = NULL;
+  cbor_item_t *get_fork = wd_map(1);
+  wd_put(get_fork, "id", wd_text(forked_id));
+  assert(request(&a, a.next_id++, "session.get", get_fork, &forked_get, NULL) ==
+         0);
+  uint64_t forked_seq = 0;
+  assert(wd_uint_of(wd_get(wd_get(forked_get, "session"), "last_seq"),
+                    &forked_seq));
+  assert(forked_seq >= 4);
+  wd_free(forked_get);
+
+  cbor_item_t *forked_replay = NULL;
+  cbor_item_t *replay_fork = wd_map(2);
+  wd_put(replay_fork, "id", wd_text(forked_id));
+  wd_put(replay_fork, "from", wd_uint(0));
+  assert(request(&a, a.next_id++, "session.resume", replay_fork,
+                 &forked_replay, NULL) == 0);
+  wd_free(forked_replay);
+  cbor_item_t *seen_turn = wait_event(&a, "turn.end", NULL);
+  assert(seen_turn != NULL);
+  wd_free(seen_turn);
+  free(forked_id);
+
   cbor_item_t *second = NULL;
   cbor_item_t *prompt2 = wd_map(2);
   wd_put(prompt2, "id", wd_text(session));

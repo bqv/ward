@@ -76,6 +76,21 @@ int main(void) {
   assert(reloaded->last_seq == 1);
   assert(strcmp(reloaded->cwd, "/tmp") == 0);
   assert(strcmp(reloaded->model, "deepseek") == 0);
+  hs_session *child = NULL;
+  assert(hs_fork(&store, reloaded, 0, &child) == 0);
+  assert(child != NULL);
+  assert(strcmp(child->id, reloaded->id) != 0);
+  assert(strcmp(child->cwd, reloaded->cwd) == 0);
+  assert(strcmp(child->model, reloaded->model) == 0);
+  assert(child->last_seq == 2);
+  seen fork_seen = {0};
+  assert(hs_replay(child, 0, note, &fork_seen) == 2);
+  assert(strcmp(fork_seen.kinds[0], "session.updated") == 0);
+  assert(strcmp(fork_seen.kinds[1], "session.forked") == 0);
+
+  hs_session *cut = NULL;
+  assert(hs_fork(&store, reloaded, 1, &cut) == 0);
+  assert(cut->last_seq == 2);
   hs_close(&store);
 
   printf("session tests passed\n");

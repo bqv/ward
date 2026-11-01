@@ -116,6 +116,11 @@ to `"unset"`. The id is minted by the daemon, never supplied by the client.
 
 **`session.get`** — params `{id: text}`. Returns `{session: <session>}`, or `not_found`.
 
+**`session.fork`** — params `{id, from?: uint}`. Copies the parent's durable events with
+`seq <= from` (all of them when `from` is absent) into a new session with its own id and
+sequence numbers, then appends `session.forked {from, at}` so the transcript records the
+lineage. Answers `{session}`.
+
 **`session.resume`** — params `{id: text, from?: uint}`. Attaches this connection to the
 session's event stream under a freshly allocated `sub`, and returns
 `{session: <session>, sub: <uint>, last_seq: <uint>}`. The response is queued before any

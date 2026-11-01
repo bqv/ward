@@ -38,6 +38,7 @@ static void usage(FILE *out) {
           "  session get    <id> [--json]\n"
           "  session resume <id> [--from SEQ] [--follow] [--json]\n"
           "  session approve <id> --call N --epoch N (--allow|--deny)\n"
+          "  session fork   <id> [--from SEQ] [--json]\n"
           "  session set-model <id> <model>\n"
           "  model list     [--json]\n"
           "  model select   <id>\n"
@@ -434,6 +435,23 @@ static int command_session(int argc, char **argv) {
       free(kind);
       wd_free(root);
       if (!follow) break;
+    }
+    rc = 0;
+  } else if (strcmp(sub, "fork") == 0) {
+    if (id == NULL) {
+      fprintf(stderr, "ward: session fork needs an id\n");
+      goto done;
+    }
+    cbor_item_t *params = wd_map(have_from ? 2 : 1);
+    wd_put(params, "id", wd_text(id));
+    if (have_from) wd_put(params, "from", wd_uint(from));
+    if (client_request(&client, "session.fork", params, &result) != 0) goto done;
+    if (json) {
+      print_json(result);
+    } else {
+      char *forked = wd_text_copy(wd_get(wd_get(result, "session"), "id"));
+      printf("forked %s\n", forked != NULL ? forked : "?");
+      free(forked);
     }
     rc = 0;
   } else if (strcmp(sub, "set-model") == 0) {

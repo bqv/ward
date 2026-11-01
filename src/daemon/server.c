@@ -293,6 +293,32 @@ static void handle_model_select(wd_server *srv, wd_conn *conn, uint64_t id,
   conn_arm(srv, conn);
 }
 
+static void handle_session_fork(wd_server *srv, wd_conn *conn, uint64_t id,
+                                cbor_item_t *params) {
+  char *session_id = wd_text_copy(wd_get(params, "id"));
+  uint64_t from = 0;
+  wd_uint_of(wd_get(params, "from"), &from);
+  hs_session *parent =
+      session_id != NULL ? hs_find(&srv->store, session_id) : NULL;
+  if (parent == NULL) {
+    free(session_id);
+    conn_send_error(conn, id, WD_ERR_NOT_FOUND, "no such session");
+    conn_arm(srv, conn);
+    return;
+  }
+  hs_session *child = NULL;
+  if (hs_fork(&srv->store, parent, from, &child) != 0) {
+    free(session_id);
+    respond_internal(srv, conn, id, "cannot fork the session");
+    return;
+  }
+  free(session_id);
+  cbor_item_t *result = wd_map(1);
+  wd_put(result, "session", hs_to_cbor(child));
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
 static void handle_session_set_model(wd_server *srv, wd_conn *conn, uint64_t id,
                                      cbor_item_t *params) {
   char *session_id = wd_text_copy(wd_get(params, "id"));
@@ -944,6 +970,8 @@ static void handle_request(wd_server *srv, wd_conn *conn, uint64_t id,
     handle_session_get(srv, conn, id, params);
   } else if (strcmp(method, "session.resume") == 0) {
     handle_session_resume(srv, conn, id, params);
+  } else if (strcmp(method, "session.fork") == 0) {
+    handle_session_fork(srv, conn, id, params);
   } else if (strcmp(method, "session.set_model") == 0) {
     handle_session_set_model(srv, conn, id, params);
   } else if (strcmp(method, "model.list") == 0) {

@@ -133,6 +133,14 @@ its own process group and replying with the wait status, flags and output. A wor
 died is replaced by the next call, which is the containment the design asks for; exec no
 longer runs as a direct child of the daemon.
 
+Eleventh: `session.fork`. The copy is over the log, not over memory: `hs_fork` creates a
+fresh session with the parent's cwd and model, replays the parent's durable events up to the
+chosen sequence, re-emits them under the child's own sequence numbering and appends
+`session.forked {from, at}` so the lineage is in the transcript rather than only in a table.
+`session.fork` serves it and `ward session fork <id> [--from SEQ]` drives it; the tool gate
+forks a session that has run a turn, checks the child's sequence and replays the child's
+`turn.end`.
+
 What is still missing from M1 is the asynchronous half: a tool call and the provider request
 both still block the daemon's loop while they run, so the worker is isolation and lifetime,
 not yet a second thread of execution.

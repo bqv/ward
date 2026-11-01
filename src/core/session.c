@@ -258,6 +258,55 @@ int hs_set_model(hs_session *s, const char *model, uint64_t *seq_out) {
   return 0;
 }
 
+static cbor_item_t *dup_item(cbor_item_t *item) {
+  size_t need = cbor_serialized_size(item);
+  if (need == 0) return NULL;
+  uint8_t *buf = malloc(need);
+  if (buf == NULL) return NULL;
+  size_t written = cbor_serialize(item, buf, need);
+  cbor_item_t *copy = written == 0 ? NULL : wd_decode(buf, written);
+  free(buf);
+  return copy;
+}
+
+typedef struct {
+  uint64_t upto;
+  hs_session *child;
+} fork_ctx;
+
+static int fork_record(void *ctx, uint64_t seq, cbor_item_t *event) {
+  fork_ctx *fc = ctx;
+  if (fc->upto != 0 && seq > fc->upto) return 1;
+  char *kind = wd_text_copy(wd_get(event, "kind"));
+  cbor_item_t *payload = wd_get(event, "payload");
+  int stop = 0;
+  if (kind != NULL && payload != NULL) {
+    cbor_item_t *copy = dup_item(payload);
+    if (copy == NULL)
+      stop = 1;
+    else if (hs_emit(fc->child, kind, copy, NULL) != 0)
+      stop = 1;
+  }
+  free(kind);
+  return stop;
+}
+
+int hs_fork(hs_store *st, hs_session *parent, uint64_t upto,
+            hs_session **out) {
+  if (parent == NULL) return -1;
+  if (upto == 0 || upto > parent->last_seq) upto = parent->last_seq;
+  hs_session *child = NULL;
+  if (hs_create(st, parent->cwd, parent->model, &child) != 0) return -1;
+  fork_ctx fc = {.upto = upto, .child = child};
+  if (hs_replay(parent, 0, fork_record, &fc) < 0) return -1;
+  cbor_item_t *link = wd_map(2);
+  wd_put(link, "from", wd_text(parent->id));
+  wd_put(link, "at", wd_uint(upto));
+  if (hs_emit(child, "session.forked", link, NULL) != 0) return -1;
+  *out = child;
+  return 0;
+}
+
 typedef struct {
   uint64_t from;
   hs_replay_cb cb;
