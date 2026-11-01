@@ -606,14 +606,18 @@ static void handle_stats_session(wd_server *srv, wd_conn *conn, uint64_t id,
   double out_price = 0;
   bool priced = model != NULL && model->price != NULL &&
                 sscanf(model->price, "%lf,%lf", &in_price, &out_price) == 2;
-  cbor_item_t *result = wd_map(priced ? 10 : 7);
+  cbor_item_t *result = wd_map(priced ? 13 : 10);
   wd_put(result, "session", wd_text(session->id));
   wd_put(result, "model", wd_text(session->model));
   wd_put(result, "events", wd_uint(stats.events));
   wd_put(result, "turns", wd_uint(stats.turns));
   wd_put(result, "text_bytes", wd_uint(stats.text_bytes));
   wd_put(result, "prompt_bytes", wd_uint(stats.prompt_bytes));
-  wd_put(result, "tokens_estimated", cbor_build_bool(true));
+  wd_put(result, "prompt_tokens", wd_uint(stats.prompt_tokens));
+  wd_put(result, "predicted_tokens", wd_uint(stats.predicted_tokens));
+  wd_put(result, "cache_tokens", wd_uint(stats.cache_tokens));
+  wd_put(result, "tokens_estimated",
+         cbor_build_bool(stats.predicted_tokens == 0));
   if (priced) {
     double prompt_tokens = (double)stats.prompt_bytes / 4.0;
     double text_tokens = (double)stats.text_bytes / 4.0;
@@ -637,14 +641,20 @@ static void handle_stats_global(wd_server *srv, wd_conn *conn, uint64_t id) {
       total.turns += one.turns;
       total.text_bytes += one.text_bytes;
       total.prompt_bytes += one.prompt_bytes;
+      total.prompt_tokens += one.prompt_tokens;
+      total.predicted_tokens += one.predicted_tokens;
+      total.cache_tokens += one.cache_tokens;
     }
   }
-  cbor_item_t *result = wd_map(5);
+  cbor_item_t *result = wd_map(8);
   wd_put(result, "sessions", wd_uint(srv->store.len));
   wd_put(result, "events", wd_uint(total.events));
   wd_put(result, "turns", wd_uint(total.turns));
   wd_put(result, "text_bytes", wd_uint(total.text_bytes));
   wd_put(result, "prompt_bytes", wd_uint(total.prompt_bytes));
+  wd_put(result, "prompt_tokens", wd_uint(total.prompt_tokens));
+  wd_put(result, "predicted_tokens", wd_uint(total.predicted_tokens));
+  wd_put(result, "cache_tokens", wd_uint(total.cache_tokens));
   conn_send_cached(conn, id, wd_response_ok(id, result));
   conn_arm(srv, conn);
 }

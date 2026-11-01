@@ -253,6 +253,21 @@ int main(void) {
       free(a_bytes);
       free(b_bytes);
     }
+    cbor_item_t *timing = wd_map(5);
+    wd_put(timing, "prompt_n", wd_uint(120));
+    wd_put(timing, "prompt_ms", wd_uint(40));
+    wd_put(timing, "predicted_n", wd_uint(7));
+    wd_put(timing, "predicted_ms", wd_uint(90));
+    wd_put(timing, "cache_n", wd_uint(64));
+    assert(wd_session_emit(stable, "turn.timings", timing, NULL) == 0);
+    wd_session_stats stats;
+    assert(wd_session_measure(stable, &stats) == 0);
+    assert(stats.prompt_tokens == 120);
+    assert(stats.predicted_tokens == 7);
+    assert(stats.cache_tokens == 64);
+    assert(stats.prompt_ms == 40);
+    assert(stats.predicted_ms == 90);
+
     wd_free(first);
     wd_free(second);
 

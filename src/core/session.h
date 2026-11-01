@@ -74,6 +74,11 @@ typedef struct {
   uint64_t turns;
   uint64_t text_bytes;
   uint64_t prompt_bytes;
+  uint64_t prompt_tokens;
+  uint64_t predicted_tokens;
+  uint64_t cache_tokens;
+  uint64_t prompt_ms;
+  uint64_t predicted_ms;
 } wd_session_stats;
 
 int wd_session_measure(wd_session *s, wd_session_stats *out);

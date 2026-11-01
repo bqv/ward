@@ -1340,3 +1340,15 @@ prefix-cache is actually being reused (cache_n > 0) and the number that makes a 
 
 Still open in §5: the response is still read whole before a single `text.delta` is emitted. The buffer work in
 §6's fix made that safe (64 KiB body, static arrays), not streamed.
+
+Hundred-and-first: the router's own tokens are now the stats. `wd_session_stats` sums `turn.timings` over the
+log — prompt, predicted and cache tokens, and both millisecond figures — and `stats.session` reports them
+beside the byte counts. `tokens_estimated` stays true only when no timings were recorded, so a local model's
+numbers are measured and a cloud model's remain a labelled estimate until its provider returns the same fields.
+
+That is the last piece of §5 short of true streaming, and it closes the loop on §2: the `cache_n` a turn records
+is the evidence that a frozen head is being reused rather than re-prefilled.
+
+The map-size trap bit again, in the same place it always does: adding three keys to a `wd_map` built for seven
+silently dropped `cost_total`, and the gate caught it with `cbor_isa_float_ctrl`. Ten keys, thirteen when
+priced — counted rather than guessed.
