@@ -658,6 +658,24 @@ core-owned table of purity and grants is the next step, and it needs this undern
 and grants stay out of the manifest on purpose — a file a client can edit must never widen its
 own authority.
 
+Fifty-ninth: the registry. `src/core/registry.c` scans a directory, keys one entry per
+`(name, version)` — `echo.wasm` is version `1`, `echo@2.wasm` is version `2` — records a hash
+and a size, and marks an entry `changed` only when the bytes differ from what was seen before. A
+first sighting is new, not changed; that distinction is what makes a reload report meaningful
+rather than noisy. `wd_registry_resolve` answers the highest valid version, or a named one;
+an invalid file is skipped, so a corrupt `echo@2` falls back to `echo` instead of breaking
+everything.
+
+`wd_registry_validate` checks the wasm container (`\0asm` and version 1) and refuses anything
+else. It validates the format, not the semantics — the honest limit is written down rather than
+implied.
+
+`tests/registry_test` copies real modules into a temporary directory and measures it all: two
+versions, resolution to the highest, a named version, a missing version, an unchanged rescan
+reporting zero changes, a corrupted v2 marked invalid with its error, and resolution falling
+back to v1. The daemon side — `module.list` and `module.reload` on top of this — is the next
+slice, and its gate will point a second daemon at a copied module directory, never at `out/`.
+
 ## M3: started, with one finding worth keeping
 
 The first M3 attempt replaced the daemon's single `wd_turn` with a pool keyed by session, so

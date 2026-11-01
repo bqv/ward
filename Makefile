@@ -52,6 +52,7 @@ CORE_SRC := \
            src/core/pty.c \
            src/core/judge.c \
            src/core/manifest.c \
+           src/core/registry.c \
   src/wasm/host.c \
   src/net/http.c \
   src/net/pki.c \
