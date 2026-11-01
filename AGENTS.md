@@ -728,6 +728,18 @@ This is the session layer only. The daemon method — with the busy check that r
 while a run is live, and the CLI verb — is the next slice, and the instance swap behind it is
 the one after that.
 
+Sixty-fourth: session.upgrade over the protocol. The daemon serves it: it refuses while a run is
+live (`busy`, the same check everything else uses), refuses a version the registry cannot
+resolve (`not_found`), and otherwise moves the pin and answers the session object with
+`upgraded: true`. Repeating the call answers `upgraded: false` and appends nothing.
+
+That repeat exposed a real bug in the session layer: `wd_session_upgrade` only updated a pin
+that already existed, so the first upgrade of a module the session had never pinned emitted the
+event but never recorded the pin — and every later call emitted again. It now appends the pin
+when it is new, which is what the replay path had been doing all along.
+
+The gate drives both calls and asserts the difference.
+
 ## M3: started, with one finding worth keeping
 
 The first M3 attempt replaced the daemon's single `wd_turn` with a pool keyed by session, so

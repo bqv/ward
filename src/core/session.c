@@ -147,12 +147,21 @@ int wd_session_upgrade(wd_session *s, const char *name, const char *version,
   if (name == NULL || version == NULL || name[0] == '\0' || version[0] == '\0')
     return -1;
   const char *was = "";
+  bool found = false;
   for (size_t i = 0; i < s->pins_len; i++) {
     if (strcmp(s->pins[i].name, name) != 0) continue;
     if (strcmp(s->pins[i].version, version) == 0) return 0;
     was = s->pins[i].version;
     snprintf(s->pins[i].version, sizeof(s->pins[i].version), "%s", version);
+    found = true;
     break;
+  }
+  if (!found) {
+    if (s->pins_len >= WD_PIN_MAX) return -1;
+    snprintf(s->pins[s->pins_len].name, sizeof(s->pins[0].name), "%s", name);
+    snprintf(s->pins[s->pins_len].version, sizeof(s->pins[0].version), "%s",
+             version);
+    s->pins_len++;
   }
   cbor_item_t *payload = wd_map(3);
   wd_put(payload, "module", wd_text(name));

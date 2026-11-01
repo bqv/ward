@@ -1210,6 +1210,29 @@ int main(void) {
   cbor_decref(&first_mod);
   wd_free(mods);
 
+  cbor_item_t *upgraded = NULL;
+  cbor_item_t *upgrade_params = wd_map(3);
+  wd_put(upgrade_params, "id", wd_text(session));
+  wd_put(upgrade_params, "module", wd_text("judge"));
+  wd_put(upgrade_params, "version", wd_text("1"));
+  assert(request(&a, a.next_id++, "session.upgrade", upgrade_params, &upgraded,
+                 NULL) == 0);
+  bool was_upgraded = false;
+  assert(wd_bool_of(wd_get(upgraded, "upgraded"), &was_upgraded));
+  assert(was_upgraded);
+  wd_free(upgraded);
+  cbor_item_t *again_reply = NULL;
+  cbor_item_t *again_params = wd_map(3);
+  wd_put(again_params, "id", wd_text(session));
+  wd_put(again_params, "module", wd_text("judge"));
+  wd_put(again_params, "version", wd_text("1"));
+  assert(request(&a, a.next_id++, "session.upgrade", again_params,
+                 &again_reply, NULL) == 0);
+  bool again_upgraded = false;
+  assert(wd_bool_of(wd_get(again_reply, "upgraded"), &again_upgraded));
+  assert(!again_upgraded);
+  wd_free(again_reply);
+
   cbor_item_t *reload = NULL;
   assert(request(&a, a.next_id++, "module.reload", wd_map(0), &reload, NULL) ==
          0);

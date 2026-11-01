@@ -1381,6 +1381,51 @@ static void handle_terminal_close(wd_server *srv, wd_conn *conn, uint64_t id,
   conn_arm(srv, conn);
 }
 
+static void handle_session_upgrade(wd_server *srv, wd_conn *conn, uint64_t id,
+                                   cbor_item_t *params) {
+  char *session_id = wd_text_copy(wd_get(params, "id"));
+  char *module = wd_text_copy(wd_get(params, "module"));
+  char *version = wd_text_copy(wd_get(params, "version"));
+  wd_session *session =
+      session_id != NULL ? wd_session_find(&srv->store, session_id) : NULL;
+  if (session == NULL || module == NULL || version == NULL) {
+    free(session_id);
+    free(module);
+    free(version);
+    conn_send_error(conn, id, WD_ERR_INVALID_PARAMS,
+                    "a session, a module and a version are needed");
+    return;
+  }
+  if (run_find(srv, session_id) != NULL) {
+    free(session_id);
+    free(module);
+    free(version);
+    conn_send_error(conn, id, WD_ERR_BUSY, "the session is already busy");
+    return;
+  }
+  if (wd_registry_resolve(&srv->registry, module, version) == NULL) {
+    free(session_id);
+    free(module);
+    free(version);
+    conn_send_error(conn, id, WD_ERR_NOT_FOUND, "no such module version");
+    return;
+  }
+  uint64_t seq = 0;
+  int rc = wd_session_upgrade(session, module, version, &seq);
+  free(session_id);
+  free(module);
+  free(version);
+  if (rc != 0) {
+    conn_send_error(conn, id, WD_ERR_INTERNAL, "cannot upgrade the session");
+    return;
+  }
+  cbor_item_t *result = wd_map(2);
+  wd_put(result, "session", wd_session_to_cbor(session));
+  wd_put(result, "upgraded", cbor_build_bool(seq != 0));
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
 static void handle_module_list(wd_server *srv, wd_conn *conn, uint64_t id) {
   cbor_item_t *items = wd_array(srv->registry.len);
   for (size_t i = 0; i < srv->registry.len; i++) {
@@ -2409,6 +2454,8 @@ static void handle_request(wd_server *srv, wd_conn *conn, uint64_t id,
     handle_subagent_interrupt(srv, conn, id, params);
   } else if (strcmp(method, "session.cancel") == 0) {
     handle_session_cancel(srv, conn, id, params);
+  } else if (strcmp(method, "session.upgrade") == 0) {
+    handle_session_upgrade(srv, conn, id, params);
   } else if (strcmp(method, "module.list") == 0) {
     handle_module_list(srv, conn, id);
   } else if (strcmp(method, "module.reload") == 0) {
