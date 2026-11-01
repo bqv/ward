@@ -100,6 +100,16 @@ static int wd_r_head(wd_r *r, uint8_t *major, uint32_t *v) {
     uint32_t acc = 0;
     for (int i = 0; i < 4; i++) acc = (acc << 8) | wd_r_byte(r);
     *v = acc;
+  } else if (info == 27) {
+    uint32_t high = 0;
+    uint32_t acc = 0;
+    for (int i = 0; i < 4; i++) high = (high << 8) | wd_r_byte(r);
+    for (int i = 0; i < 4; i++) acc = (acc << 8) | wd_r_byte(r);
+    if (high != 0) {
+      r->failed = 1;
+      return -1;
+    }
+    *v = acc;
   } else {
     r->failed = 1;
     return -1;

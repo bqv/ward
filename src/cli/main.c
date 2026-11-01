@@ -36,6 +36,7 @@ static void usage(FILE *out) {
           "  session list   [--limit N] [--json]\n"
           "  session get    <id> [--json]\n"
           "  session resume <id> [--from SEQ] [--follow] [--json]\n"
+          "  session approve <id> --call N --epoch N (--allow|--deny)\n"
           "  device pair    [--scope S] [--json]\n"
           "  device list    [--json]\n"
           "  device revoke  <serial>\n"
@@ -282,6 +283,9 @@ static int command_session(int argc, char **argv) {
   uint64_t from = 0;
   bool have_from = false;
   uint64_t limit = 100;
+  uint64_t call = 0;
+  uint64_t epoch = 0;
+  int allow = -1;
   for (int i = 1; i < argc; i++) {
     if (strcmp(argv[i], "--json") == 0) {
       json = true;
@@ -296,6 +300,14 @@ static int command_session(int argc, char **argv) {
       have_from = true;
     } else if (strcmp(argv[i], "--limit") == 0 && i + 1 < argc) {
       limit = strtoull(argv[++i], NULL, 10);
+    } else if (strcmp(argv[i], "--call") == 0 && i + 1 < argc) {
+      call = strtoull(argv[++i], NULL, 10);
+    } else if (strcmp(argv[i], "--epoch") == 0 && i + 1 < argc) {
+      epoch = strtoull(argv[++i], NULL, 10);
+    } else if (strcmp(argv[i], "--allow") == 0) {
+      allow = 1;
+    } else if (strcmp(argv[i], "--deny") == 0) {
+      allow = 0;
     } else if (strcmp(argv[i], "--socket") == 0 && i + 1 < argc) {
       i++;
     } else if (argv[i][0] != '-') {
@@ -494,10 +506,77 @@ static int command_session(int argc, char **argv) {
         wd_free(root);
         break;
       }
+      cbor_item_t *pending = wd_get(value, "approval");
+      if (pending != NULL) {
+        uint64_t pending_call = 0;
+        uint64_t pending_epoch = 0;
+        wd_uint_of(wd_get(pending, "call"), &pending_call);
+        wd_uint_of(wd_get(pending, "epoch"), &pending_epoch);
+        char *reason = wd_text_copy(wd_get(pending, "reason"));
+        printf("approval %llu %llu %s\n", (unsigned long long)pending_call,
+               (unsigned long long)pending_epoch,
+               reason != NULL ? reason : "");
+        free(reason);
+      }
       wd_free(root);
       rc = 0;
       break;
     }
+  } else if (strcmp(sub, "approve") == 0) {
+    if (id == NULL || allow < 0) {
+      fprintf(stderr, "ward: session approve needs an id and --allow or --deny\n");
+      goto done;
+    }
+    cbor_item_t *focus = wd_map(1);
+    wd_put(focus, "id", wd_text(id));
+    if (client_request(&client, "session.resume", focus, &result) != 0) goto done;
+    wd_free(result);
+    result = NULL;
+    cbor_item_t *params = wd_map(4);
+    wd_put(params, "session", wd_text(id));
+    wd_put(params, "call", wd_uint(call));
+    wd_put(params, "epoch", wd_uint(epoch));
+    wd_put(params, "allow", cbor_build_bool(allow == 1));
+    if (client_request(&client, "approval.respond", params, &result) != 0)
+      goto done;
+    wd_free(result);
+    result = NULL;
+    for (;;) {
+      wd_frame frame;
+      uint8_t *body = client_read_frame(client.fd, &frame);
+      if (body == NULL) break;
+      cbor_item_t *root = wd_decode(body, frame.len);
+      free(body);
+      if (root == NULL) break;
+      if (frame.type != WD_FRAME_EVENT) {
+        wd_free(root);
+        continue;
+      }
+      char *kind = NULL;
+      cbor_item_t *payload = NULL;
+      bool end = false;
+      if (wd_read_event(root, &kind, &payload)) {
+        if (json) {
+          print_json(root);
+        } else if (strcmp(kind, "text.delta") == 0) {
+          char *piece = wd_text_copy(wd_get(payload, "text"));
+          if (piece != NULL) {
+            fputs(piece, stdout);
+            fflush(stdout);
+            free(piece);
+          }
+        } else if (strcmp(kind, "turn.end") == 0) {
+          end = true;
+        }
+      }
+      free(kind);
+      wd_free(root);
+      if (end) {
+        if (!json) putchar('\n');
+        break;
+      }
+    }
+    rc = 0;
   } else {
     fprintf(stderr, "ward: unknown session command %s\n", sub);
     rc = 2;

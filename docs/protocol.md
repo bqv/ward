@@ -139,6 +139,28 @@ A prompt is synchronous: the request is answered after the turn ends, and the ev
 arrive before the response. A second prompt on the same session is served after the
 first returns.
 
+A turn that reaches a tool call the driver wants approved suspends instead of running it.
+`session.prompt` then answers `{session, approval: {call, epoch, reason}}`, and the turn
+resumes when `approval.respond` answers that pair. The rest of the turn's events arrive
+after the response to `approval.respond`, before its `{resolved: true}`.
+
+The three M1 driver commands are scripted stand-ins for a model's tool calls: `/read
+<path>` runs the `read` tool, and `/write <path> <text>` runs `write`, which the driver
+marks as needing approval. The rest of the prompt goes to the provider.
+
+### approval.respond
+
+`approval.respond {session, call, epoch, allow}` answers the parked request and resumes
+the turn. The first valid answer wins; a second answers `already_resolved`, and an
+unknown or expired pair answers `not_found`. Its events, all durable, are:
+
+- `approval.requested` — payload `{call, epoch, reason}`; the turn is now parked.
+- `approval.resolved` — payload `{call, epoch, allow}`; the answer, recorded before the
+  turn continues.
+
+Because both are durable, a client that attaches after the fact still sees the request on
+replay and can answer it, provided it has not expired.
+
 ### Device pairing
 
 **`device.pair`** — params `{scope?: text}`, default `desktop`, one of `readonly`, `phone`,

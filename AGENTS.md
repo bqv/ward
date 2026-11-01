@@ -79,10 +79,20 @@ flow-control-blocked write is never retried and the peer waits forever — it pr
 one-in-five hang. And the ALPN constant carries its length byte: `"\4ward"` with
 `WD_QUIC_ALPN_LEN 5`, not the bare name.
 
-Still open in M1: `approval.respond` and its durable events. The table is in
-`src/core/approval.c` and tested, but nothing raises a request yet. A method is served only when
-`docs/protocol.md` says it is served — the rest of the frozen list answers
-`not_supported`.
+Seventh: tools and approvals. `modules/tools` is one guest with one shape, `{tool, args}`,
+which forwards to a capability and returns its reply; core implements `fs.read` and
+`fs.write` against the turn's tool root, refusing `..`, absolute paths and symlinks, and
+capping a read at 64 KiB. The driver decides which calls need approval — in M1 `write` does
+— and core parks the action keyed `(session, call, epoch)`, emits `approval.requested` as a
+durable event and answers `session.prompt` with `{session, approval: {call, epoch, reason}}`.
+`approval.respond` records the answer, emits `approval.resolved`, resumes the turn and the
+driver finishes with `turn.end`. A client that attaches later sees the request on replay; a
+second answer is `already_resolved`, an unknown one `not_found`. `tool-test` drives the turn
+directly and `gate-tool-test` drives the daemon, late attach included.
+
+Policy is currently a driver decision and a core gate, not a `policy` module: the README's
+judge and plan gate are M2. A method is served only when `docs/protocol.md` says it is
+served — the rest of the frozen list answers `not_supported`.
 
 M0's acceptance is 1,000 round-trips/s over UDS and a fuzz-clean decoder. A
 gate that is not measured is not met.

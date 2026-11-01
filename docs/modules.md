@@ -67,6 +67,19 @@ rather than a value: the reply is a little-endian `u32` HTTP status followed by 
 response body. The request is `{path, body}`; core owns the host, so a guest names a
 path and never an origin, and core refuses an endpoint that is not loopback.
 
+## fs.read and fs.write
+
+The first-party `tools` module reads and writes files through core, never directly: the
+request is `{path}` for `fs.read` and `{path, text}` for `fs.write`, and the reply is
+`{ok: true, text}` or `{ok: true, written}` on success and `{ok: false, error}` otherwise.
+A path is relative to the turn's tool root, may not contain `..` or start with `/`, is
+resolved with `realpath` and checked against the root again after resolution, and the file
+is opened `O_NOFOLLOW`. Reads stop at 64 KiB and refuse a file containing a NUL byte.
+
+The tools module's only inputs are `{tool, args}`; it forwards to the capability named by
+the tool and returns the capability's reply unchanged. Core decides what a capability may
+do; the module decides which one to ask.
+
 ## Limits
 
 Core owns the fences, and a module cannot widen them:

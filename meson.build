@@ -139,17 +139,32 @@ module_provider = custom_target('provider.wasm',
   output: 'provider.wasm',
   command: [wasm_cc, guest_flags, '-I', abi_inc, '@INPUT@', '-o', '@OUTPUT@'],
 )
-alias_target('modules', module_engine, module_driver, module_provider)
+module_tools = custom_target('tools.wasm',
+  input: 'modules/tools/tools.c',
+  output: 'tools.wasm',
+  command: [wasm_cc, guest_flags, '-I', abi_inc, '@INPUT@', '-o', '@OUTPUT@'],
+)
+alias_target('modules', module_engine, module_driver, module_provider,
+             module_tools)
 
 module_env = environment()
 module_env.set('WARD_MODULE_DIR', meson.current_build_dir())
+module_env.set('WARD_BIN', ward.full_path())
 turn_test = executable('turn-test', 'tests/turn_test.c',
   include_directories: inc,
   link_with: core,
   dependencies: deps,
 )
 test('turn', turn_test, env: module_env, timeout: 120,
-     depends: [module_engine, module_driver, module_provider])
+     depends: [module_engine, module_driver, module_provider, module_tools])
+
+tool_test = executable('tool-test', 'tests/tool_test.c',
+  include_directories: inc,
+  link_with: core,
+  dependencies: deps,
+)
+test('tools', tool_test, env: module_env, timeout: 120,
+     depends: [module_engine, module_driver, module_provider, module_tools])
 
 gate_m1 = executable('gate-m1-test', 'tests/gate_m1.c',
   include_directories: inc,
@@ -157,7 +172,15 @@ gate_m1 = executable('gate-m1-test', 'tests/gate_m1.c',
   dependencies: deps,
 )
 test('m1', gate_m1, env: module_env, timeout: 300,
-     depends: [module_engine, module_driver, module_provider])
+     depends: [module_engine, module_driver, module_provider, module_tools])
+
+gate_tool = executable('gate-tool-test', 'tests/gate_tool.c',
+  include_directories: inc,
+  link_with: core,
+  dependencies: deps,
+)
+test('tool-gate', gate_tool, env: module_env, timeout: 180,
+     depends: [module_engine, module_driver, module_provider, module_tools])
 
 gate_quic = executable('gate-quic-test', 'tests/gate_quic.c',
   include_directories: inc,

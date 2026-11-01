@@ -46,7 +46,7 @@ int main(void) {
   wd_engine *engine = wd_engine_new(getenv("WARD_STATE"));
   assert(engine != NULL);
   char *err = NULL;
-  wd_turn *turn = wd_turn_new(engine, dir, &err);
+  wd_turn *turn = wd_turn_new(engine, dir, ".", &err);
   if (turn == NULL) {
     fprintf(stderr, "ward turn: %s\n", err != NULL ? err : "failed");
     return 1;

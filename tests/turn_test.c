@@ -45,7 +45,7 @@ int main(void) {
   wd_engine *engine = wd_engine_new(NULL);
   assert(engine != NULL);
   char *err = NULL;
-  wd_turn *turn = wd_turn_new(engine, dir, &err);
+  wd_turn *turn = wd_turn_new(engine, dir, ".", &err);
   if (turn == NULL) {
     fprintf(stderr, "wd_turn_new: %s\n", err != NULL ? err : "failed");
     return 1;

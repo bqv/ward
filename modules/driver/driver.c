@@ -95,6 +95,49 @@ static void invoke_provider(uint32_t out, const char *text) {
   if (!w.failed) pair(out, reply, w.at);
 }
 
+static int text_prefix(const char *text, const char *prefix) {
+  for (uint32_t i = 0; prefix[i] != '\0'; i++)
+    if (text[i] != prefix[i]) return 0;
+  return 1;
+}
+
+static void invoke_tool(uint32_t out, const char *tool, const char *path,
+                        const char *text, int approve) {
+  wd_w w;
+  wd_w_init(&w, reply, REPLY_SIZE);
+  wd_w_map(&w, 1);
+  wd_w_textz(&w, "actions");
+  wd_w_array(&w, 1);
+  wd_w_map(&w, approve ? 7 : 5);
+  wd_w_textz(&w, "kind");
+  wd_w_textz(&w, "invoke");
+  wd_w_textz(&w, "module");
+  wd_w_textz(&w, "tools");
+  wd_w_textz(&w, "name");
+  wd_w_textz(&w, tool);
+  wd_w_textz(&w, "call");
+  wd_w_uint(&w, 1);
+  if (approve) {
+    wd_w_textz(&w, "approve");
+    wd_w_bool(&w, 1);
+    wd_w_textz(&w, "reason");
+    wd_w_textz(&w, "write a file in the session directory");
+  }
+  wd_w_textz(&w, "payload");
+  wd_w_map(&w, 2);
+  wd_w_textz(&w, "tool");
+  wd_w_textz(&w, tool);
+  wd_w_textz(&w, "args");
+  wd_w_map(&w, text[0] != '\0' ? 2 : 1);
+  wd_w_textz(&w, "path");
+  wd_w_textz(&w, path);
+  if (text[0] != '\0') {
+    wd_w_textz(&w, "text");
+    wd_w_textz(&w, text);
+  }
+  if (!w.failed) pair(out, reply, w.at);
+}
+
 __attribute__((export_name("ward_call")))
 void ward_call(uint32_t at, uint32_t len, uint32_t out) {
   heap_at = 0;
@@ -131,6 +174,8 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
         if (wd_r_text_ptr(&r, &pk, &pl) != 0) return;
         if (wd_key_eq(pk, pl, "text")) {
           if (wd_r_text(&r, payload, sizeof(payload), &plen) != 0) return;
+        } else if (wd_key_eq(pk, pl, "error")) {
+          if (wd_r_text(&r, payload, sizeof(payload), &plen) != 0) return;
         } else if (wd_r_skip(&r) != 0) {
           return;
         }
@@ -140,6 +185,27 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
     }
   }
   if (step) {
+    if (text_prefix(text, "/read ")) {
+      invoke_tool(out, "read", text + 6, "", 0);
+      return;
+    }
+    if (text_prefix(text, "/write ")) {
+      char path[TEXT_SIZE];
+      char body[TEXT_SIZE];
+      uint32_t at = 7;
+      uint32_t i = 0;
+      while (text[at] != '\0' && text[at] != ' ' && i + 1 < sizeof(path))
+        path[i++] = text[at++];
+      path[i] = '\0';
+      while (text[at] == ' ') at++;
+      i = 0;
+      while (text[at] != '\0' && i + 1 < sizeof(body)) body[i++] = text[at++];
+      body[i] = '\0';
+      if (path[0] != '\0') {
+        invoke_tool(out, "write", path, body, 1);
+        return;
+      }
+    }
     wd_w w;
     uint8_t message[1024];
     wd_w_init(&w, message, sizeof(message));

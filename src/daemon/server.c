@@ -25,6 +25,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "core/approval.h"
 #include "core/session.h"
 #include "core/util.h"
 #include "net/pki.h"
@@ -39,6 +40,7 @@
 #define WD_HANDSHAKE_MS 5000u
 #define WD_QUIC_DEFAULT_BIND "127.0.0.1:0"
 #define WD_PAIR_TTL_MS 300000u
+#define WD_APPROVAL_TTL_MS 300000u
 
 typedef struct wd_out {
   struct wd_out *next;
@@ -89,6 +91,10 @@ typedef struct {
   wd_turn *turn;
   wd_pki *pki;
   wd_quic *quic;
+  wd_approvals *approvals;
+  char turn_session[WD_ID_LEN];
+  uint64_t turn_call;
+  uint64_t turn_epoch;
   char *quic_endpoint;
   int quic_port;
   wd_conn *conns[WD_MAX_CONNS];
@@ -450,7 +456,12 @@ static wd_turn *server_turn(wd_server *srv, char **err) {
     snprintf(path, sizeof(path), "%s/modules", srv->state_dir);
     dir = path;
   }
-  srv->turn = wd_turn_new(srv->engine, dir, err);
+  char root[PATH_MAX];
+  const char *tool_root = getenv("WARD_TOOL_ROOT");
+  if (tool_root == NULL && getcwd(root, sizeof(root)) == NULL) root[0] = '\0';
+  srv->turn = wd_turn_new(srv->engine, dir,
+                          tool_root != NULL ? tool_root : (root[0] != '\0' ? root : NULL),
+                          err);
   return srv->turn;
 }
 
@@ -487,14 +498,125 @@ static void handle_session_prompt(wd_server *srv, wd_conn *conn, uint64_t id,
   int rc = wd_turn_prompt(turn, text, turn_emit, &tc, &err);
   free(session_id);
   free(text);
-  if (rc != 0) {
+  if (rc != 0 && rc != WD_TURN_PENDING) {
     respond_internal(srv, conn, id, err != NULL ? err : "turn failed");
     free(err);
     return;
   }
-  cbor_item_t *result = wd_map(1);
+  cbor_item_t *result = wd_map(rc == WD_TURN_PENDING ? 2 : 1);
   wd_put(result, "session", wd_text(session->id));
+  if (rc == WD_TURN_PENDING) {
+    uint64_t call = 0;
+    uint64_t epoch = 0;
+    char *reason = NULL;
+    if (wd_turn_pending(turn, &call, &epoch, &reason) != 0) {
+      wd_free(result);
+      respond_internal(srv, conn, id, "the turn asked for an unnamed approval");
+      return;
+    }
+    wd_approval_request(srv->approvals, session->id, call, epoch, wu_now_ms(),
+                        WD_APPROVAL_TTL_MS);
+    snprintf(srv->turn_session, sizeof(srv->turn_session), "%s", session->id);
+    srv->turn_call = call;
+    srv->turn_epoch = epoch;
+    cbor_item_t *notice = wd_map(3);
+    wd_put(notice, "call", wd_uint(call));
+    wd_put(notice, "epoch", wd_uint(epoch));
+    wd_put(notice, "reason", wd_text(reason != NULL ? reason : ""));
+    wd_put(result, "approval", notice);
+    free(reason);
+  }
   conn_send_cached(conn, id, wd_response_ok(id, result));
+}
+
+static bool resume_turn(wd_server *srv, const char *session_id, bool allow,
+                        char **err) {
+  if (srv->turn == NULL ||
+      strcmp(srv->turn_session, session_id) != 0)
+    return false;
+  hs_session *session = hs_find(&srv->store, session_id);
+  if (session == NULL) return false;
+  wd_turn_ctx tc = {srv, session};
+  int rc = wd_turn_resume(srv->turn, allow, turn_emit, &tc, err);
+  srv->turn_session[0] = '\0';
+  if (rc == WD_TURN_PENDING) {
+    uint64_t call = 0;
+    uint64_t epoch = 0;
+    char *reason = NULL;
+    if (wd_turn_pending(srv->turn, &call, &epoch, &reason) == 0) {
+      wd_approval_request(srv->approvals, session->id, call, epoch,
+                          wu_now_ms(), WD_APPROVAL_TTL_MS);
+      snprintf(srv->turn_session, sizeof(srv->turn_session), "%s",
+               session->id);
+      srv->turn_call = call;
+      srv->turn_epoch = epoch;
+      free(reason);
+    }
+  }
+  return rc == 0 || rc == WD_TURN_PENDING;
+}
+
+static void handle_approval_respond(wd_server *srv, wd_conn *conn, uint64_t id,
+                                    cbor_item_t *params) {
+  char *session_id = wd_text_copy(wd_get(params, "session"));
+  uint64_t call = 0;
+  uint64_t epoch = 0;
+  bool allow = false;
+  if (session_id == NULL || !wd_uint_of(wd_get(params, "call"), &call) ||
+      !wd_uint_of(wd_get(params, "epoch"), &epoch) ||
+      !wd_bool_of(wd_get(params, "allow"), &allow)) {
+    free(session_id);
+    conn_send_error(conn, id, WD_ERR_INVALID_PARAMS,
+                    "session, call, epoch and allow are required");
+    conn_arm(srv, conn);
+    return;
+  }
+  wd_approval_state state =
+      wd_approval_answer(srv->approvals, session_id, call, epoch, allow,
+                         wu_now_ms());
+  if (state == WD_APPROVAL_ALREADY_RESOLVED) {
+    free(session_id);
+    conn_send_error(conn, id, WD_ERR_ALREADY_RESOLVED,
+                    "this approval was already answered");
+    conn_arm(srv, conn);
+    return;
+  }
+  if (state != WD_APPROVAL_GRANTED && state != WD_APPROVAL_DENIED) {
+    free(session_id);
+    conn_send_error(conn, id, WD_ERR_NOT_FOUND, "no such approval");
+    conn_arm(srv, conn);
+    return;
+  }
+  hs_session *session = hs_find(&srv->store, session_id);
+  if (session != NULL) {
+    wd_turn_ctx tc = {srv, session};
+    cbor_item_t *resolved = wd_map(3);
+    wd_put(resolved, "call", wd_uint(call));
+    wd_put(resolved, "epoch", wd_uint(epoch));
+    wd_put(resolved, "allow", cbor_build_bool(allow));
+    char *err = NULL;
+    if (turn_emit(&tc, "approval.resolved", resolved, &err) != 0) {
+      free(err);
+      wd_free(resolved);
+      free(session_id);
+      respond_internal(srv, conn, id, "cannot record the resolution");
+      return;
+    }
+    wd_free(resolved);
+  }
+  char *err = NULL;
+  bool resumed =
+      session != NULL && resume_turn(srv, session_id, allow, &err);
+  if (!resumed && err != NULL) {
+    respond_internal(srv, conn, id, err);
+    free(err);
+    free(session_id);
+    return;
+  }
+  cbor_item_t *result = wd_map(1);
+  wd_put(result, "resolved", cbor_build_bool(true));
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  free(session_id);
 }
 
 static bool admin_method(const char *method) {
@@ -728,6 +850,8 @@ static void handle_request(wd_server *srv, wd_conn *conn, uint64_t id,
     handle_device_enrol(srv, conn, id, params);
   } else if (strcmp(method, "device.list") == 0) {
     handle_device_list(srv, conn, id);
+  } else if (strcmp(method, "approval.respond") == 0) {
+    handle_approval_respond(srv, conn, id, params);
   } else if (strcmp(method, "device.revoke") == 0) {
     handle_device_revoke(srv, conn, id, params);
   } else {
@@ -1229,6 +1353,8 @@ int wd_up_run(const wd_up_config *cfg) {
   }
   srv.signal_fd = setup_signals();
   if (srv.signal_fd < 0) goto cleanup;
+  srv.approvals = wd_approvals_new();
+  if (srv.approvals == NULL) goto cleanup;
   srv.epoll_fd = epoll_create1(EPOLL_CLOEXEC);
   if (srv.epoll_fd < 0) goto cleanup;
   struct epoll_event ev;
@@ -1339,6 +1465,7 @@ cleanup:
   wd_engine_free(srv.engine);
   wd_quic_free(srv.quic);
   wd_pki_free(srv.pki);
+  wd_approvals_free(srv.approvals);
   free(srv.quic_endpoint);
   hs_close(&srv.store);
   free(srv.socket_path);
