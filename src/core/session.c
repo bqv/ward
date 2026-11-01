@@ -126,6 +126,14 @@ static void store_push(hs_store *st, hs_session *s) {
   st->items[st->len++] = s;
 }
 
+static bool valid_id(const char *name) {
+  if (strlen(name) != WD_ID_LEN - 1) return false;
+  for (const char *p = name; *p != '\0'; p++) {
+    if (!((*p >= '0' && *p <= '9') || (*p >= 'a' && *p <= 'f'))) return false;
+  }
+  return true;
+}
+
 int hs_open(hs_store *st, const char *root) {
   memset(st, 0, sizeof(*st));
   st->root = strdup(root);
@@ -136,6 +144,7 @@ int hs_open(hs_store *st, const char *root) {
   struct dirent *entry;
   while ((entry = readdir(dir)) != NULL) {
     if (entry->d_name[0] == '.') continue;
+    if (!valid_id(entry->d_name)) continue;
     char *path = wu_path_join(st->root, entry->d_name);
     if (path == NULL) continue;
     struct stat sb;

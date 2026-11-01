@@ -164,6 +164,16 @@ it submitted to, not whatever `worker_for` returns afterwards, because a killed 
 exactly like a worker that needs replacing and the reply would then be awaited on a socket
 that was never written to.
 
+Fourteenth: M2's acceptance, measured. `gate_crash` runs a turn to completion, parks a
+second one on an approval, kills the daemon with SIGKILL, restarts it on the same state and
+replays from zero: every durable event is there, sequence numbers are contiguous from 1 to
+`last_seq`, `turn.end` and `approval.requested` both survived, the lock file was reclaimed
+from the dead pid, and a new prompt runs against the restarted daemon.
+
+Writing it found a small but real bug: `hs_open` scanned every directory under the state
+root as a session, so `cache/` and `pki/` produced "skipping unreadable session" warnings on
+every start. It now treats only a 16-hex-character name as a session id.
+
 What is still missing from M1 is therefore the provider half of the asynchronous split.
 
 M0's acceptance is 1,000 round-trips/s over UDS and a fuzz-clean decoder. A
