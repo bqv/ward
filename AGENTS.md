@@ -740,6 +740,20 @@ when it is new, which is what the replay path had been doing all along.
 
 The gate drives both calls and asserts the difference.
 
+Sixty-fifth: the handover. `wd_state_handover(from, to, from_schema, to_schema)` is the upgrade
+order from the README in one function: export the state of the live instance, run
+`ward_state_migrate` on the new instance when the schemas differ, import into it, and report
+failure without touching the old instance if any step refuses.
+
+The conformance test drives both paths: same schema is a plain export/import and the new
+instance answers with the old value; a schema change runs the migrate and the new instance holds
+the migrated bytes — the prefixed blob the echo guest produces, checked byte for byte.
+
+This is the mechanism, not yet the daemon. Making a turn use it — resolve the pinned versions,
+hand over to the new module, record `migration_failed` when it refuses — is the last step of the
+M5 chain, and the one that turns the acceptance line from "proven with a fixture" into "the
+session really moved".
+
 ## M3: started, with one finding worth keeping
 
 The first M3 attempt replaced the daemon's single `wd_turn` with a pool keyed by session, so

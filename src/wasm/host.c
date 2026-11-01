@@ -668,6 +668,35 @@ int wd_instance_state_export(wd_instance *instance, uint8_t **out,
   return 0;
 }
 
+int wd_state_handover(wd_instance *from, wd_instance *to,
+                      uint32_t from_schema, uint32_t to_schema, char **err) {
+  if (from == NULL || to == NULL) {
+    set_err(err, "no instances to hand over between");
+    return -1;
+  }
+  uint8_t *blob = NULL;
+  size_t blob_len = 0;
+  if (wd_instance_state_export(from, &blob, &blob_len, err) != 0) return -1;
+  if (from_schema != to_schema) {
+    uint8_t *migrated = NULL;
+    size_t migrated_len = 0;
+    if (wd_instance_state_migrate(to, from_schema, blob, blob_len, &migrated,
+                                  &migrated_len, err) != 0) {
+      free(blob);
+      return -1;
+    }
+    free(blob);
+    blob = migrated;
+    blob_len = migrated_len;
+  }
+  if (wd_instance_state_import(to, blob, blob_len, err) != 0) {
+    free(blob);
+    return -1;
+  }
+  free(blob);
+  return 0;
+}
+
 int wd_instance_state_migrate(wd_instance *instance, uint32_t from_schema,
                               const uint8_t *in, size_t in_len, uint8_t **out,
                               size_t *out_len, char **err) {

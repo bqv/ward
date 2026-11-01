@@ -162,6 +162,17 @@ static void test_state(void) {
   assert(memcmp(migrated + 1, "state", 5) == 0);
   free(migrated);
   wd_instance_free(m);
+  wd_instance *h = instantiate(module, GRANTED, 1, &calls, &err);
+  assert(h != NULL);
+  assert(wd_state_handover(a, h, 1, 1, &err) == 0);
+  expect_call(h, get, 1, (const uint8_t *)"state", 5);
+  wd_instance *t = instantiate(module, GRANTED, 1, &calls, &err);
+  assert(t != NULL);
+  assert(wd_state_handover(a, t, 1, 2, &err) == 0);
+  static const uint8_t migrated_expected[] = {2, 's', 't', 'a', 't', 'e'};
+  expect_call(t, get, 1, migrated_expected, sizeof(migrated_expected));
+  wd_instance_free(h);
+  wd_instance_free(t);
   free(state);
   wd_instance_free(a);
   wd_instance_free(b);
