@@ -535,8 +535,8 @@ suite every guest language must pass: allocate, call, export, import, migrate, t
 
 ## Build
 
-C11 and Meson. Dependencies: Wasmtime C API, ngtcp2, OpenSSL, tree-sitter, libcurl, sqlite3, libcbor, yyjson, zstd,
-resolved through `dependency()` and pkg-config where available.
+C11 and GNU make. Dependencies: Wasmtime C API, ngtcp2, OpenSSL, tree-sitter, libcurl, sqlite3, libcbor, yyjson, zstd,
+resolved through pkg-config.
 
 Guests are built per language: C and C++ through `clang --target=wasm32-wasip1` against
 `wasi-sdk`, Zig through `zig build-lib -target wasm32-wasip1` (pin the Zig version; the language
@@ -545,12 +545,12 @@ The `python` guest additionally needs a cross-built `libpython` for `wasm32-wasi
 trimmed standard library zip.
 
 ```
-meson setup build -Dbuildtype=debug -Dguest_profile=debug
-meson compile -C build
+make -j4
+make test
 ```
 
 Two profiles: a debug profile compiling guests at `-O0 -g` with DWARF retained, and a release
-profile at `-O2` with symbols stripped. Both are Meson options, not edited build files.
+profile at `-O2`. Both are make variables, not edited build files.
 
 ## Repo layout
 
@@ -569,7 +569,7 @@ ward/
 
 ## First two weeks
 
-1. `meson.build` and `meson_options.txt`, pinned deps, CI with the sanitizers.
+1. `Makefile` and pkg-config deps, CI with the sanitizers.
 2. `docs/protocol.md`: freeze the frame table and method list before writing code.
 3. `src/proto`: frame codec, CBOR wrapper, fuzz harness.
 4. `ward up` serving the socket with handshake and `session.create`, plus a CLI client

@@ -31,7 +31,7 @@ Three tenants are on notice (tokenizer, judge, recall); the README says why.
 
 ## Where the work stands
 
-Done, in the README's own order: `meson.build` and options with libcbor and zstd;
+Done, in the README's own order: `Makefile` and pkg-config deps with libcbor and zstd;
 `docs/protocol.md`, frozen before the codec; `src/proto` frame and message codecs
 with a fuzz gate; `ward up` with handshake, `session.create/list/get/resume`
 and replay; a CLI client; and the M0 gate, which measures round-trips rather
@@ -103,10 +103,10 @@ gate that is not measured is not met.
 
 ## Build
 
-C11 and Meson, debug by default. `meson setup build -Dbuildtype=debug
--Dguest_profile=debug && meson compile -C build`. Two profiles, both Meson
-options rather than edited build files: debug compiles guests at `-O0 -g` and
-keeps DWARF; release is `-O2` and strips.
+C11 and GNU make, debug by default. `make -j4` builds into `out/`, and
+`make test` builds the suite and runs it. Two profiles, make variables rather
+than edited build files: `make GUEST_PROFILE=release` compiles guests at `-O2`,
+and `make MODE=release` does the same for the host. Debug guests keep DWARF.
 
 The guest toolchain is `/opt/wasi-sdk-34`, installed by `dev-util/wasi-sdk-bin`
 from the bqv overlay: clang 23.1.0-wasi-sdk with `share/wasi-sysroot` for
@@ -120,7 +120,7 @@ is `pkg-config --variable=clang wasi-sdk` and not a hardcoded `/opt` path.
 Wasmtime is `/opt/wasmtime-50.0.1`, installed by `dev-util/wasmtime-bin` from the
 same overlay: headers in `include/`, `libwasmtime.so` and `libwasmtime.a` in
 `lib/`, CLI at `bin/wasmtime`. Its `wasmtime.pc` resolves the whole integration
-with `dependency('wasmtime')`, and carries `-Wl,-rpath,/opt/wasmtime-50.0.1/lib`,
+with `pkg-config --libs wasmtime`, and carries `-Wl,-rpath,/opt/wasmtime-50.0.1/lib`,
 so a linked binary needs no ld.so.conf entry.
 
 Both ebuilds live in the overlay at `/var/db/repos/local/dev-util/`. They install
@@ -134,15 +134,16 @@ which a sandboxed session cannot create and a `Read-only file system` error kill
 the CLI outright. The daemon must configure the cache to its own `<state>/cache`,
 not inherit the environment.
 
-Dependencies resolve through `dependency()` and pkg-config: Wasmtime C API,
+Dependencies resolve through pkg-config: Wasmtime C API,
 ngtcp2, OpenSSL, tree-sitter, libcurl, sqlite3, libcbor, yyjson, zstd. Guests:
 `clang --target=wasm32-wasip1` against wasi-sdk for C and C++, Zig for Zig (pin
 the version — the language still breaks between releases), a thin C module
 embedding Janet for policy.
 
-`meson test -C build` runs the suite. Sanitizer builds are the options, not edits:
-`meson setup build-asan -Dsanitize=address`, likewise `undefined` and `thread`,
-then `meson test` in each. `gate-m0-test` is the bench — 2,000 round-trips, and
+`make test` runs the suite, one binary at a time, each under `timeout`.
+Sanitizer builds are variables, not edits: `make BUILDDIR=build-asan
+SANITIZE=address`, likewise `undefined` and `thread`, then `make test` with the
+same `BUILDDIR` in each. `gate_m0` is the bench — 2,000 round-trips, and
 it asserts 1,000/s unless it was built with ASan.
 
 One build at a time, at the top level. A subagent edits and reasons; the
