@@ -20,6 +20,8 @@ typedef struct {
   size_t size;
   bool changed;
   bool valid;
+  unsigned traps;
+  bool bad;
   char error[128];
 } wd_module_info;
 
@@ -34,6 +36,10 @@ const wd_module_info *wd_registry_resolve(const wd_registry *registry,
                                           const char *name, const char *want);
 const wd_module_info *wd_registry_find(const wd_registry *registry,
                                        const char *name, const char *version);
+void wd_registry_trap(wd_registry *registry, const char *name,
+                      const char *version);
+void wd_registry_clear(wd_registry *registry, const char *name,
+                       const char *version);
 int wd_registry_validate(const char *dir, const char *name, const char *version,
                          char **err);
 uint64_t wd_registry_hash(const uint8_t *bytes, size_t len);

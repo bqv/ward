@@ -71,6 +71,38 @@ int main(void) {
   latest = wd_registry_resolve(&registry, "echo", NULL);
   assert(latest != NULL && strcmp(latest->version, "1") == 0);
 
+  write_text(dir, "echo@2.wasm", "");
+  {
+    char from[1024];
+    snprintf(from, sizeof(from), "%s/echo.wasm", module_dir);
+    char to[1024];
+    snprintf(to, sizeof(to), "%s/echo@2.wasm", dir);
+    FILE *in = fopen(from, "rb");
+    assert(in != NULL);
+    FILE *out = fopen(to, "wb");
+    assert(out != NULL);
+    char buf[4096];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), in)) > 0)
+      assert(fwrite(buf, 1, n, out) == n);
+    fclose(in);
+    fclose(out);
+  }
+  wd_registry fresh;
+  wd_registry_init(&fresh);
+  (void)wd_registry_scan(&fresh, dir);
+  wd_registry_trap(&fresh, "echo", "2");
+  latest = wd_registry_resolve(&fresh, "echo", NULL);
+  assert(latest != NULL && strcmp(latest->version, "2") == 0);
+  wd_registry_trap(&fresh, "echo", "2");
+  latest = wd_registry_resolve(&fresh, "echo", NULL);
+  assert(latest != NULL && strcmp(latest->version, "1") == 0);
+  wd_registry_clear(&fresh, "echo", "2");
+  latest = wd_registry_resolve(&fresh, "echo", NULL);
+  assert(latest != NULL && strcmp(latest->version, "2") == 0);
+  write_text(dir, "echo@2.wasm", "not a wasm module");
+  (void)wd_registry_scan(&registry, dir);
+
   char *err = NULL;
   assert(wd_registry_validate(dir, "echo", "2", &err) != 0);
   assert(err != NULL && strstr(err, "not a wasm") != NULL);

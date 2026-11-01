@@ -754,6 +754,20 @@ hand over to the new module, record `migration_failed` when it refuses — is th
 M5 chain, and the one that turns the acceptance line from "proven with a fixture" into "the
 session really moved".
 
+Sixty-sixth: a trapping version is demoted. `wd_registry_trap` counts a trap per `(name,
+version)` and marks the entry bad at two, which is the README's "repeated traps" — one bad input
+should not condemn a module, and a fuel exhaustion caused by a pathological model output is
+exactly the case that made a threshold necessary. `wd_registry_resolve` skips a bad entry, so a
+third turn lands on the previous version instead. `wd_registry_clear` resets the count and the
+flag, which is the administrative half.
+
+The test takes a registry with two versions of the same module, traps v2 once and sees it still
+resolve, traps it again and sees resolution fall back to v1, then clears it and sees v2 return.
+
+Nothing calls `wd_registry_trap` from the turn path yet; that wiring belongs with the slice that
+swaps instances, because that is where a trap is observable as a module's failure rather than a
+caller's.
+
 ## M3: started, with one finding worth keeping
 
 The first M3 attempt replaced the daemon's single `wd_turn` with a pool keyed by session, so

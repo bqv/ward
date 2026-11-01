@@ -147,13 +147,35 @@ const wd_module_info *wd_registry_resolve(const wd_registry *registry,
   for (size_t i = 0; i < registry->len; i++) {
     const wd_module_info *info = &registry->items[i];
     if (strcmp(info->name, name) != 0) continue;
-    if (!info->valid) continue;
+    if (!info->valid || info->bad) continue;
     if (want != NULL && strcmp(info->version, want) != 0) continue;
     if (best == NULL ||
         wd_manifest_compare_version(info->version, best->version) > 0)
       best = info;
   }
   return best;
+}
+
+void wd_registry_trap(wd_registry *registry, const char *name,
+                      const char *version) {
+  for (size_t i = 0; i < registry->len; i++) {
+    wd_module_info *info = &registry->items[i];
+    if (strcmp(info->name, name) != 0) continue;
+    if (version != NULL && strcmp(info->version, version) != 0) continue;
+    info->traps++;
+    if (info->traps >= 2) info->bad = true;
+  }
+}
+
+void wd_registry_clear(wd_registry *registry, const char *name,
+                       const char *version) {
+  for (size_t i = 0; i < registry->len; i++) {
+    wd_module_info *info = &registry->items[i];
+    if (strcmp(info->name, name) != 0) continue;
+    if (version != NULL && strcmp(info->version, version) != 0) continue;
+    info->traps = 0;
+    info->bad = false;
+  }
 }
 
 int wd_registry_validate(const char *dir, const char *name, const char *version,
