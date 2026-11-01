@@ -134,6 +134,13 @@ int main(void) {
   snprintf(path, sizeof(path), "%s/blocked.txt", root);
   assert(access(path, F_OK) != 0);
 
+  seen refused = {{0}, 0, 0, 0, 0, {0}};
+  assert(wd_turn_prompt(turn, "/run rm -rf /", emit, &refused, &err) ==
+         WD_TURN_OK);
+  assert(refused.deltas >= 1);
+  assert(strstr(refused.text, "denied") != NULL);
+  assert(refused.approvals == 0);
+
   wd_turn_free(turn);
   wd_engine_free(engine);
   unlink(path);

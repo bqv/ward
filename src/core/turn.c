@@ -29,10 +29,12 @@ struct wd_turn {
   wd_module *provider_module;
   wd_module *engine_module;
   wd_module *tools_module;
+  wd_module *policy_module;
   wd_instance *driver;
   wd_instance *provider;
   wd_instance *eng;
   wd_instance *tools;
+  wd_instance *policy;
   cbor_item_t *parked;
   uint64_t park_call;
   uint64_t park_epoch;
@@ -42,7 +44,7 @@ struct wd_turn {
 
 static const wd_limits TURN_LIMITS = {.fuel = WD_TURN_FUEL,
                                       .max_memory = WD_TURN_MEMORY,
-                                      .max_instances = 5};
+                                      .max_instances = 6};
 
 #define WD_TOOL_MAX (64u * 1024u)
 
@@ -304,6 +306,8 @@ static int turn_capability(void *ctx, const char *capability,
     return fs_read(turn, in, in_len, out, out_len);
   if (strcmp(capability, "fs.write") == 0)
     return fs_write(turn, in, in_len, out, out_len);
+  if (strcmp(capability, "policy.check") == 0)
+    return wd_instance_call(turn->policy, in, in_len, out, out_len, err);
   *err = strdup("unknown capability");
   return -1;
 }
@@ -323,12 +327,13 @@ wd_turn *wd_turn_new(wd_engine *engine, const char *module_dir, const char *root
     turn->root = realpath(root, resolved) != NULL ? strdup(resolved)
                                                   : strdup(root);
   }
-  static const char *const driver_caps[] = {"engine.call"};
+  static const char *const driver_caps[] = {"engine.call", "policy.check"};
   static const char *const provider_caps[] = {"net.request"};
   static const char *const tools_caps[] = {"fs.read", "fs.write"};
   static const char *const no_caps[] = {NULL};
   wd_module_spec engine_spec = {"engine", no_caps, 0, true};
-  wd_module_spec driver_spec = {"driver", driver_caps, 1, false};
+  wd_module_spec driver_spec = {"driver", driver_caps, 2, false};
+  wd_module_spec policy_spec = {"policy", no_caps, 0, true};
   wd_module_spec provider_spec = {"provider", provider_caps, 1, false};
   wd_module_spec tools_spec = {"tools", tools_caps, 2, false};
 
@@ -344,6 +349,9 @@ wd_turn *wd_turn_new(wd_engine *engine, const char *module_dir, const char *root
   turn->tools_module = load_module(engine, module_dir, "tools.wasm",
                                    &tools_spec, err);
   if (turn->tools_module == NULL) goto fail;
+  turn->policy_module = load_module(engine, module_dir, "policy.wasm",
+                                    &policy_spec, err);
+  if (turn->policy_module == NULL) goto fail;
 
   turn->eng = wd_instance_new(turn->engine_module, no_caps, 0, &TURN_LIMITS,
                               NULL, NULL, err);
@@ -351,12 +359,15 @@ wd_turn *wd_turn_new(wd_engine *engine, const char *module_dir, const char *root
   turn->provider = wd_instance_new(turn->provider_module, provider_caps, 1,
                                    &TURN_LIMITS, turn_capability, turn, err);
   if (turn->provider == NULL) goto fail;
-  turn->driver = wd_instance_new(turn->driver_module, driver_caps, 1,
+  turn->driver = wd_instance_new(turn->driver_module, driver_caps, 2,
                                  &TURN_LIMITS, turn_capability, turn, err);
   if (turn->driver == NULL) goto fail;
   turn->tools = wd_instance_new(turn->tools_module, tools_caps, 2,
                                 &TURN_LIMITS, turn_capability, turn, err);
   if (turn->tools == NULL) goto fail;
+  turn->policy = wd_instance_new(turn->policy_module, no_caps, 0, &TURN_LIMITS,
+                                 turn_capability, turn, err);
+  if (turn->policy == NULL) goto fail;
   return turn;
 
 fail:
@@ -369,10 +380,12 @@ void wd_turn_free(wd_turn *turn) {
   wd_instance_free(turn->driver);
   wd_instance_free(turn->provider);
   wd_instance_free(turn->tools);
+  wd_instance_free(turn->policy);
   wd_instance_free(turn->eng);
   wd_module_free(turn->driver_module);
   wd_module_free(turn->provider_module);
   wd_module_free(turn->tools_module);
+  wd_module_free(turn->policy_module);
   wd_module_free(turn->engine_module);
   if (turn->parked != NULL) wd_free(turn->parked);
   free(turn->park_reason);

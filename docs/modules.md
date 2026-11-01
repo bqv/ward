@@ -80,6 +80,15 @@ The tools module's only inputs are `{tool, args}`; it forwards to the capability
 the tool and returns the capability's reply unchanged. Core decides what a capability may
 do; the module decides which one to ask.
 
+## policy.check
+
+`policy.check {tool}` returns `{decision}` where the decision is `allow`, `ask` or `deny`.
+The first-party `policy` module is pure — no imports at all, enforced like `engine` — so the
+rules it holds cannot reach a file, a socket or the model. `driver` asks through this
+capability before every tool call; core dispatches the call into the module and turns `ask`
+into an approval, which is the only part of the decision core owns. An unknown answer is
+treated as `deny`.
+
 ## Limits
 
 Core owns the fences, and a module cannot widen them:

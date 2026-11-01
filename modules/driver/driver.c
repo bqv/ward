@@ -32,6 +32,54 @@ static void pair(uint32_t out, const uint8_t *data, uint32_t n) {
   wd_put32(o + 4, n);
 }
 
+static int cap_call(const char *capability, const uint8_t *payload, uint32_t len,
+                    uint8_t *out, uint32_t *out_len) {
+  uint32_t name_len = wd_len(capability);
+  if (4 + name_len + len > sizeof(callbuf)) return -1;
+  wd_put32(callbuf, name_len);
+  for (uint32_t i = 0; i < name_len; i++) callbuf[4 + i] = (uint8_t)capability[i];
+  for (uint32_t i = 0; i < len; i++) callbuf[4 + name_len + i] = payload[i];
+  uint32_t desc[2];
+  ward_cap((uint32_t)(uintptr_t)callbuf, 4 + name_len + len,
+           (uint32_t)(uintptr_t)desc);
+  if (desc[1] > REPLY_SIZE) return -1;
+  *out_len = desc[1];
+  const uint8_t *p = (const uint8_t *)(uintptr_t)desc[0];
+  for (uint32_t i = 0; i < desc[1]; i++) out[i] = p[i];
+  return 0;
+}
+
+static int policy_check(const char *tool) {
+  uint8_t payload[256];
+  wd_w w;
+  wd_w_init(&w, payload, sizeof(payload));
+  wd_w_map(&w, 1);
+  wd_w_textz(&w, "tool");
+  wd_w_textz(&w, tool);
+  if (w.failed) return 0;
+  uint8_t answer[REPLY_SIZE];
+  uint32_t answer_len = 0;
+  if (cap_call("policy.check", payload, w.at, answer, &answer_len) != 0) return 0;
+  wd_r r = {answer, answer_len, 0, 0};
+  uint32_t n = 0;
+  char decision[TEXT_SIZE];
+  decision[0] = '\0';
+  if (wd_r_map(&r, &n) != 0) return 0;
+  for (uint32_t i = 0; i < n; i++) {
+    const uint8_t *kp = 0;
+    uint32_t kn = 0;
+    if (wd_r_text_ptr(&r, &kp, &kn) != 0) return 0;
+    if (wd_key_eq(kp, kn, "decision")) {
+      if (wd_r_text(&r, decision, sizeof(decision), 0) != 0) return 0;
+    } else if (wd_r_skip(&r) != 0) {
+      return 0;
+    }
+  }
+  if (wd_key_eq((const uint8_t *)decision, wd_len(decision), "allow")) return 1;
+  if (wd_key_eq((const uint8_t *)decision, wd_len(decision), "ask")) return 2;
+  return 0;
+}
+
 static int engine_call(const uint8_t *payload, uint32_t len, uint8_t *out,
                        uint32_t *out_len) {
   static const char name[] = "engine.call";
@@ -186,7 +234,12 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
   }
   if (step) {
     if (text_prefix(text, "/read ")) {
-      invoke_tool(out, "read", text + 6, "", 0);
+      int verdict = policy_check("read");
+      if (verdict == 0) {
+        emit_text_delta(out, "the policy denied read");
+        return;
+      }
+      invoke_tool(out, "read", text + 6, "", verdict == 2);
       return;
     }
     if (text_prefix(text, "/write ")) {
@@ -202,9 +255,18 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
       while (text[at] != '\0' && i + 1 < sizeof(body)) body[i++] = text[at++];
       body[i] = '\0';
       if (path[0] != '\0') {
-        invoke_tool(out, "write", path, body, 1);
+        int verdict = policy_check("write");
+        if (verdict == 0) {
+          emit_text_delta(out, "the policy denied write");
+          return;
+        }
+        invoke_tool(out, "write", path, body, verdict == 2);
         return;
       }
+    }
+    if (text_prefix(text, "/run ")) {
+      emit_text_delta(out, "the policy denied exec");
+      return;
     }
     wd_w w;
     uint8_t message[1024];

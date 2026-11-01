@@ -90,9 +90,13 @@ driver finishes with `turn.end`. A client that attaches later sees the request o
 second answer is `already_resolved`, an unknown one `not_found`. `tool-test` drives the turn
 directly and `gate-tool-test` drives the daemon, late attach included.
 
-Policy is currently a driver decision and a core gate, not a `policy` module: the README's
-judge and plan gate are M2. A method is served only when `docs/protocol.md` says it is
-served — the rest of the frozen list answers `not_supported`.
+Policy is its own guest again: `modules/policy` is pure, with an empty import section like
+`engine`, and answers `{tool}` with `{decision}` of `allow`, `ask` or `deny`. The driver asks
+it through `policy.check`, a core capability that dispatches into the module, and core owns
+only the gate that turns `ask` into a parked approval. `read` is allowed, `write` asks, and
+`/run` — an exec-shaped prompt — is denied, which is the fail-closed path with no tool
+behind it. The README's judge and plan gate are M2. A method is served only when
+`docs/protocol.md` says it is served — the rest of the frozen list answers `not_supported`.
 
 M0's acceptance is 1,000 round-trips/s over UDS and a fuzz-clean decoder. A
 gate that is not measured is not met.
