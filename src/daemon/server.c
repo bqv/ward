@@ -51,6 +51,24 @@ typedef struct wd_out {
   uint8_t *data;
 } wd_out;
 
+typedef struct wd_run wd_run;
+
+struct wd_run {
+  struct wd_run *next;
+  char session_id[WD_ID_LEN];
+  wd_turn *turn;
+  int worker_fd;
+  int http_fd;
+};
+
+
+typedef struct {
+  wd_run *run;
+  int kind;
+} wd_run_token;
+
+#define WD_MAX_RUNS 16
+
 typedef struct {
   uint64_t id;
   char session_id[WD_ID_LEN];
@@ -90,18 +108,13 @@ typedef struct {
   char *lock_path;
   wd_store store;
   wd_engine *engine;
-  wd_turn *turn;
+  wd_run *runs;
   wd_pki *pki;
   wd_quic *quic;
   wd_approvals *approvals;
-  int worker_fd;
-  int http_fd;
   wd_models *models;
   wd_labels *labels;
   char *default_model;
-  char turn_session[WD_ID_LEN];
-  uint64_t turn_call;
-  uint64_t turn_epoch;
   char *quic_endpoint;
   int quic_port;
   wd_conn *conns[WD_MAX_CONNS];
@@ -111,19 +124,16 @@ typedef struct {
 static int token_listen;
 static int token_signal;
 static int token_quic;
-static int token_worker;
-static int token_http;
+static wd_run_token run_tokens[WD_MAX_RUNS];
 
 static void conn_close(wd_server *srv, wd_conn *conn);
 static void conn_release(wd_server *srv, wd_conn *conn);
 static cbor_item_t *session_cbor(wd_server *srv, wd_session *session);
-static wd_turn *server_turn(wd_server *srv, char **err);
-static void watch_worker(wd_server *srv);
-static void unwatch_worker(wd_server *srv);
-static void watch_http(wd_server *srv);
-static void unwatch_http(wd_server *srv);
-static void park_or_finish(wd_server *srv, wd_session *session, int rc,
-                           char *err);
+static wd_run *run_new(wd_server *srv, wd_session *session, char **err);
+static wd_run *run_find(wd_server *srv, const char *session_id);
+static void run_free(wd_server *srv, wd_run *run);
+static void run_park(wd_server *srv, wd_run *run, int kind);
+static void run_after(wd_server *srv, wd_run *run, int rc, char *err);
 static int conn_arm(wd_server *srv, wd_conn *conn);
 static int conn_flush(wd_conn *conn);
 static int conn_read(wd_server *srv, wd_conn *conn);
@@ -311,10 +321,11 @@ static void handle_session_cancel(wd_server *srv, wd_conn *conn, uint64_t id,
                                   cbor_item_t *params) {
   char *session_id = wd_text_copy(wd_get(params, "id"));
   bool cancelled = false;
-  if (session_id != NULL && srv->turn != NULL &&
-      strcmp(srv->turn_session, session_id) == 0 &&
-      wd_turn_pending_kind(srv->turn) == 2)
-    cancelled = wd_turn_cancel_tool(srv->turn) != 0;
+  if (session_id != NULL) {
+    wd_run *run = run_find(srv, session_id);
+    if (run != NULL && wd_turn_pending_kind(run->turn) == 2)
+      cancelled = wd_turn_cancel_tool(run->turn) != 0;
+  }
   free(session_id);
   cbor_item_t *result = wd_map(1);
   wd_put(result, "cancelled", cbor_build_bool(cancelled));
@@ -544,17 +555,23 @@ static void handle_session_compact(wd_server *srv, wd_conn *conn, uint64_t id,
     conn_arm(srv, conn);
     return;
   }
+  if (run_find(srv, session->id) != NULL) {
+    wd_free(history);
+    conn_send_error(conn, id, WD_ERR_CONFLICT, "the session is busy");
+    conn_arm(srv, conn);
+    return;
+  }
   char *err = NULL;
-  wd_turn *turn = server_turn(srv, &err);
-  if (turn == NULL) {
+  wd_run *run = run_new(srv, session, &err);
+  if (run == NULL) {
     wd_free(history);
     respond_internal(srv, conn, id, err != NULL ? err : "no modules");
     free(err);
     return;
   }
-  wd_turn_set_root(turn, session->cwd);
   char *summary = NULL;
-  int rc = wd_turn_compact(turn, history, &summary, &err);
+  int rc = wd_turn_compact(run->turn, history, &summary, &err);
+  run_free(srv, run);
   wd_free(history);
   if (rc != 0) {
     respond_internal(srv, conn, id,
@@ -907,8 +924,7 @@ static int turn_emit(void *ctx, const char *event, cbor_item_t *payload,
   return 0;
 }
 
-static wd_turn *server_turn(wd_server *srv, char **err) {
-  if (srv->turn != NULL) return srv->turn;
+static wd_run *run_new(wd_server *srv, wd_session *session, char **err) {
   if (srv->engine == NULL) srv->engine = wd_engine_new(srv->state_dir);
   if (srv->engine == NULL) {
     *err = strdup("cannot create the wasm engine");
@@ -920,13 +936,121 @@ static wd_turn *server_turn(wd_server *srv, char **err) {
     snprintf(path, sizeof(path), "%s/modules", srv->state_dir);
     dir = path;
   }
-  char root[PATH_MAX];
-  const char *tool_root = getenv("WARD_TOOL_ROOT");
-  if (tool_root == NULL && getcwd(root, sizeof(root)) == NULL) root[0] = '\0';
-  srv->turn = wd_turn_new(srv->engine, dir,
-                          tool_root != NULL ? tool_root : (root[0] != '\0' ? root : NULL),
-                          err);
-  return srv->turn;
+  wd_run *run = calloc(1, sizeof(*run));
+  if (run == NULL) {
+    *err = strdup("out of memory");
+    return NULL;
+  }
+  run->worker_fd = -1;
+  run->http_fd = -1;
+  snprintf(run->session_id, sizeof(run->session_id), "%s", session->id);
+  run->turn = wd_turn_new(srv->engine, dir, session->cwd, err);
+  if (run->turn == NULL) {
+    free(run);
+    return NULL;
+  }
+  wd_turn_set_root(run->turn, session->cwd);
+  run->next = srv->runs;
+  srv->runs = run;
+  return run;
+}
+
+static wd_run *run_find(wd_server *srv, const char *session_id) {
+  for (wd_run *run = srv->runs; run != NULL; run = run->next) {
+    if (strcmp(run->session_id, session_id) == 0) return run;
+  }
+  return NULL;
+}
+
+static void run_unwatch(wd_server *srv, wd_run *run, int kind) {
+  int *fd = kind == 2 ? &run->worker_fd : &run->http_fd;
+  if (*fd < 0) return;
+  (void)epoll_ctl(srv->epoll_fd, EPOLL_CTL_DEL, *fd, NULL);
+  for (int i = 0; i < WD_MAX_RUNS; i++) {
+    if (run_tokens[i].run == run && run_tokens[i].kind == kind) {
+      run_tokens[i].run = NULL;
+      run_tokens[i].kind = 0;
+    }
+  }
+  *fd = -1;
+}
+
+static void run_watch(wd_server *srv, wd_run *run, int kind) {
+  int fd = kind == 2 ? wd_turn_worker_fd(run->turn) : wd_turn_http_fd(run->turn);
+  int *slot = kind == 2 ? &run->worker_fd : &run->http_fd;
+  if (fd < 0) {
+    run_unwatch(srv, run, kind);
+    return;
+  }
+  if (*slot == fd) return;
+  run_unwatch(srv, run, kind);
+  for (int i = 0; i < WD_MAX_RUNS; i++) {
+    if (run_tokens[i].run != NULL) continue;
+    run_tokens[i].run = run;
+    run_tokens[i].kind = kind;
+    struct epoll_event ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.events = EPOLLIN;
+    ev.data.ptr = &run_tokens[i];
+    if (epoll_ctl(srv->epoll_fd, EPOLL_CTL_ADD, fd, &ev) != 0) {
+      run_tokens[i].run = NULL;
+      run_tokens[i].kind = 0;
+      return;
+    }
+    *slot = fd;
+    return;
+  }
+}
+
+static void run_free(wd_server *srv, wd_run *run) {
+  run_unwatch(srv, run, 2);
+  run_unwatch(srv, run, 3);
+  for (wd_run **at = &srv->runs; *at != NULL; at = &(*at)->next) {
+    if (*at == run) {
+      *at = run->next;
+      break;
+    }
+  }
+  wd_turn_free(run->turn);
+  free(run);
+}
+
+static void run_park(wd_server *srv, wd_run *run, int kind) {
+  if (kind == 3) {
+    run_unwatch(srv, run, 2);
+    run_watch(srv, run, 3);
+  } else if (kind == 2) {
+    run_unwatch(srv, run, 3);
+    run_watch(srv, run, 2);
+  } else {
+    run_unwatch(srv, run, 2);
+    run_unwatch(srv, run, 3);
+  }
+}
+
+static void run_after(wd_server *srv, wd_run *run, int rc, char *err) {
+  if (rc == WD_TURN_PENDING) {
+    int kind = wd_turn_pending_kind(run->turn);
+    if (kind == 1) {
+      wd_session *session = wd_session_find(&srv->store, run->session_id);
+      uint64_t call = 0;
+      uint64_t epoch = 0;
+      char *reason = NULL;
+      if (session != NULL &&
+          wd_turn_pending(run->turn, &call, &epoch, &reason) == 0) {
+        wd_approval_request(srv->approvals, session->id, call, epoch,
+                            wd_now_ms(), WD_APPROVAL_TTL_MS);
+        free(reason);
+      }
+    }
+    run_park(srv, run, kind);
+    return;
+  }
+  if (rc != 0)
+    fprintf(stderr, "ward: the turn failed: %s\n",
+            err != NULL ? err : "unknown");
+  free(err);
+  run_free(srv, run);
 }
 
 static void handle_session_prompt(wd_server *srv, wd_conn *conn, uint64_t id,
@@ -949,9 +1073,16 @@ static void handle_session_prompt(wd_server *srv, wd_conn *conn, uint64_t id,
     conn_arm(srv, conn);
     return;
   }
+  if (run_find(srv, session->id) != NULL) {
+    free(session_id);
+    free(text);
+    conn_send_error(conn, id, WD_ERR_CONFLICT, "the session is already busy");
+    conn_arm(srv, conn);
+    return;
+  }
   char *err = NULL;
-  wd_turn *turn = server_turn(srv, &err);
-  if (turn == NULL) {
+  wd_run *run = run_new(srv, session, &err);
+  if (run == NULL) {
     free(session_id);
     free(text);
     respond_internal(srv, conn, id, err != NULL ? err : "no modules");
@@ -960,7 +1091,7 @@ static void handle_session_prompt(wd_server *srv, wd_conn *conn, uint64_t id,
   }
   cbor_item_t *history = NULL;
   if (wd_session_history(session, 8192, &history) == 0)
-    wd_turn_set_history(turn, history);
+    wd_turn_set_history(run->turn, history);
 
   cbor_item_t *asked = wd_map(1);
   wd_put(asked, "text", wd_text(text));
@@ -970,43 +1101,30 @@ static void handle_session_prompt(wd_server *srv, wd_conn *conn, uint64_t id,
     wd_put(event, "text", wd_text(text));
     conn_broadcast(srv, session, "session.prompted", asked_seq, event);
   }
-  wd_turn_set_root(turn, session->cwd);
   wd_turn_ctx tc = {srv, session};
-  int rc = wd_turn_prompt(turn, text, turn_emit, &tc, &err);
+  int rc = wd_turn_prompt(run->turn, text, turn_emit, &tc, &err);
   free(session_id);
   free(text);
   if (rc != 0 && rc != WD_TURN_PENDING) {
-    respond_internal(srv, conn, id, err != NULL ? err : "turn failed");
-    free(err);
+    run_after(srv, run, rc, err);
+    respond_internal(srv, conn, id, "turn failed");
     return;
   }
-  int pending_kind =
-      rc == WD_TURN_PENDING ? wd_turn_pending_kind(turn) : 0;
-  cbor_item_t *result = wd_map(pending_kind == 1 ? 3 : 2);
+  int kind = rc == WD_TURN_PENDING ? wd_turn_pending_kind(run->turn) : 0;
+  cbor_item_t *result = wd_map(kind == 1 ? 3 : 2);
   wd_put(result, "session", wd_text(session->id));
-  wd_put(result, "turn", wd_uint(wd_turn_id(turn)));
-  if (pending_kind == 2) {
-    snprintf(srv->turn_session, sizeof(srv->turn_session), "%s", session->id);
-    watch_worker(srv);
-  }
-  if (pending_kind == 3) {
-    snprintf(srv->turn_session, sizeof(srv->turn_session), "%s", session->id);
-    watch_http(srv);
-  }
-  if (pending_kind == 1) {
+  wd_put(result, "turn", wd_uint(wd_turn_id(run->turn)));
+  if (kind == 1) {
     uint64_t call = 0;
     uint64_t epoch = 0;
     char *reason = NULL;
-    if (wd_turn_pending(turn, &call, &epoch, &reason) != 0) {
+    if (wd_turn_pending(run->turn, &call, &epoch, &reason) != 0) {
       wd_free(result);
       respond_internal(srv, conn, id, "the turn asked for an unnamed approval");
       return;
     }
     wd_approval_request(srv->approvals, session->id, call, epoch, wd_now_ms(),
                         WD_APPROVAL_TTL_MS);
-    snprintf(srv->turn_session, sizeof(srv->turn_session), "%s", session->id);
-    srv->turn_call = call;
-    srv->turn_epoch = epoch;
     cbor_item_t *notice = wd_map(3);
     wd_put(notice, "call", wd_uint(call));
     wd_put(notice, "epoch", wd_uint(epoch));
@@ -1014,153 +1132,51 @@ static void handle_session_prompt(wd_server *srv, wd_conn *conn, uint64_t id,
     wd_put(result, "approval", notice);
     free(reason);
   }
+  if (kind == 0)
+    run_free(srv, run);
+  else
+    run_park(srv, run, kind);
   conn_send_cached(conn, id, wd_response_ok(id, result));
 }
 
-static void unwatch_worker(wd_server *srv) {
-  if (srv->worker_fd < 0) return;
-  (void)epoll_ctl(srv->epoll_fd, EPOLL_CTL_DEL, srv->worker_fd, NULL);
-  srv->worker_fd = -1;
-}
-
-static void watch_worker(wd_server *srv) {
-  int fd = wd_turn_worker_fd(srv->turn);
-  if (fd < 0) {
-    unwatch_worker(srv);
-    return;
-  }
-  if (srv->worker_fd == fd) return;
-  unwatch_worker(srv);
-  struct epoll_event ev;
-  memset(&ev, 0, sizeof(ev));
-  ev.events = EPOLLIN;
-  ev.data.ptr = &token_worker;
-  if (epoll_ctl(srv->epoll_fd, EPOLL_CTL_ADD, fd, &ev) == 0) srv->worker_fd = fd;
-}
-
-static void unwatch_http(wd_server *srv) {
-  if (srv->http_fd < 0) return;
-  (void)epoll_ctl(srv->epoll_fd, EPOLL_CTL_DEL, srv->http_fd, NULL);
-  srv->http_fd = -1;
-}
-
-static void watch_http(wd_server *srv) {
-  int fd = wd_turn_http_fd(srv->turn);
-  if (fd < 0) {
-    unwatch_http(srv);
-    return;
-  }
-  if (srv->http_fd == fd) return;
-  unwatch_http(srv);
-  struct epoll_event ev;
-  memset(&ev, 0, sizeof(ev));
-  ev.events = EPOLLIN;
-  ev.data.ptr = &token_http;
-  if (epoll_ctl(srv->epoll_fd, EPOLL_CTL_ADD, fd, &ev) == 0) srv->http_fd = fd;
-}
-
-static void park_or_finish(wd_server *srv, wd_session *session, int rc,
-                           char *err) {
-  if (rc == WD_TURN_PENDING) {
-    int kind = wd_turn_pending_kind(srv->turn);
-    snprintf(srv->turn_session, sizeof(srv->turn_session), "%s", session->id);
-    if (kind == 3) {
-      unwatch_worker(srv);
-      watch_http(srv);
-      return;
-    }
-    if (kind == 2) {
-      unwatch_http(srv);
-      watch_worker(srv);
-      return;
-    }
-    if (kind == 1) {
-      uint64_t call = 0;
-      uint64_t epoch = 0;
-      char *reason = NULL;
-      if (wd_turn_pending(srv->turn, &call, &epoch, &reason) == 0) {
-        wd_approval_request(srv->approvals, session->id, call, epoch,
-                            wd_now_ms(), WD_APPROVAL_TTL_MS);
-        srv->turn_call = call;
-        srv->turn_epoch = epoch;
-        free(reason);
-      }
-      unwatch_worker(srv);
-      unwatch_http(srv);
-      return;
-    }
-  }
-  unwatch_worker(srv);
-  unwatch_http(srv);
-  srv->turn_session[0] = '\0';
-  if (rc != 0) {
-    fprintf(stderr, "ward: the turn failed: %s\n",
-            err != NULL ? err : "unknown");
-  }
-  free(err);
-}
-
-static void tool_done(wd_server *srv) {
-  wd_session *session = wd_session_find(&srv->store, srv->turn_session);
-  if (srv->turn == NULL || session == NULL) {
-    unwatch_worker(srv);
-    srv->turn_session[0] = '\0';
+static void tool_done(wd_server *srv, wd_run *run) {
+  wd_session *session = wd_session_find(&srv->store, run->session_id);
+  if (session == NULL) {
+    run_free(srv, run);
     return;
   }
   wd_turn_ctx tc = {srv, session};
   char *err = NULL;
-  int rc = wd_turn_resume_tool(srv->turn, turn_emit, &tc, &err);
-  park_or_finish(srv, session, rc, err);
+  int rc = wd_turn_resume_tool(run->turn, turn_emit, &tc, &err);
+  run_after(srv, run, rc, err);
 }
 
-static void http_done(wd_server *srv) {
-  wd_session *session = wd_session_find(&srv->store, srv->turn_session);
-  if (srv->turn == NULL || session == NULL) {
-    unwatch_http(srv);
-    srv->turn_session[0] = '\0';
+static void http_done(wd_server *srv, wd_run *run) {
+  wd_session *session = wd_session_find(&srv->store, run->session_id);
+  if (session == NULL) {
+    run_free(srv, run);
     return;
   }
   wd_turn_ctx tc = {srv, session};
   char *err = NULL;
-  int rc = wd_turn_resume_http(srv->turn, turn_emit, &tc, &err);
-  park_or_finish(srv, session, rc, err);
+  int rc = wd_turn_resume_http(run->turn, turn_emit, &tc, &err);
+  run_after(srv, run, rc, err);
 }
 
 static bool resume_turn(wd_server *srv, const char *session_id, bool allow,
                         char **err) {
-  if (srv->turn == NULL ||
-      strcmp(srv->turn_session, session_id) != 0)
-    return false;
+  wd_run *run = run_find(srv, session_id);
+  if (run == NULL) return false;
   wd_session *session = wd_session_find(&srv->store, session_id);
   if (session == NULL) return false;
   wd_turn_ctx tc = {srv, session};
-  int rc = wd_turn_resume(srv->turn, allow, turn_emit, &tc, err);
-  srv->turn_session[0] = '\0';
-  if (rc == WD_TURN_PENDING && wd_turn_pending_kind(srv->turn) == 2) {
-    snprintf(srv->turn_session, sizeof(srv->turn_session), "%s", session->id);
-    watch_worker(srv);
-    return true;
+  int rc = wd_turn_resume(run->turn, allow, turn_emit, &tc, err);
+  run_after(srv, run, rc, *err != NULL ? strdup(*err) : NULL);
+  if (*err != NULL) {
+    free(*err);
+    *err = NULL;
   }
-  if (rc == WD_TURN_PENDING && wd_turn_pending_kind(srv->turn) == 3) {
-    snprintf(srv->turn_session, sizeof(srv->turn_session), "%s", session->id);
-    watch_http(srv);
-    return true;
-  }
-  if (rc == WD_TURN_PENDING) {
-    uint64_t call = 0;
-    uint64_t epoch = 0;
-    char *reason = NULL;
-    if (wd_turn_pending(srv->turn, &call, &epoch, &reason) == 0) {
-      wd_approval_request(srv->approvals, session->id, call, epoch,
-                          wd_now_ms(), WD_APPROVAL_TTL_MS);
-      snprintf(srv->turn_session, sizeof(srv->turn_session), "%s",
-               session->id);
-      srv->turn_call = call;
-      srv->turn_epoch = epoch;
-      free(reason);
-    }
-  }
-  return rc == 0 || rc == WD_TURN_PENDING;
+  return true;
 }
 
 static void handle_approval_respond(wd_server *srv, wd_conn *conn, uint64_t id,
@@ -2062,12 +2078,15 @@ int wd_up_run(const wd_up_config *cfg) {
         server_accept(&srv);
         continue;
       }
-      if (ptr == &token_worker) {
-        tool_done(&srv);
-        continue;
-      }
-      if (ptr == &token_http) {
-        http_done(&srv);
+      if ((uintptr_t)ptr >= (uintptr_t)&run_tokens[0] &&
+          (uintptr_t)ptr < (uintptr_t)&run_tokens[WD_MAX_RUNS]) {
+        wd_run_token *tok = ptr;
+        if (tok->run != NULL) {
+          if (tok->kind == 2)
+            tool_done(&srv, tok->run);
+          else
+            http_done(&srv, tok->run);
+        }
         continue;
       }
       if (ptr == &token_quic) {
@@ -2124,7 +2143,7 @@ cleanup:
   if (srv.listen_fd >= 0) close(srv.listen_fd);
   if (srv.epoll_fd >= 0) close(srv.epoll_fd);
   if (srv.signal_fd >= 0) close(srv.signal_fd);
-  wd_turn_free(srv.turn);
+  while (srv.runs != NULL) run_free(&srv, srv.runs);
   wd_engine_free(srv.engine);
   wd_quic_free(srv.quic);
   wd_pki_free(srv.pki);

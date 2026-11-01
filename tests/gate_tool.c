@@ -109,6 +109,8 @@ static cbor_item_t *next_frame(int fd, wd_frame *frame) {
   return root;
 }
 
+static uint64_t last_turn;
+
 static int request(client *c, uint64_t id, const char *method,
                    cbor_item_t *params, cbor_item_t **result, bool *ok_out) {
   if (send_item(c->fd, WD_FRAME_REQUEST, 0, 0, wd_request(id, method, params)) !=
@@ -142,6 +144,8 @@ static int request(client *c, uint64_t id, const char *method,
     }
     wd_free(root);
     *result = value;
+    uint64_t turn = 0;
+    if (wd_uint_of(wd_get(value, "turn"), &turn)) last_turn = turn;
     if (ok_out != NULL) *ok_out = ok;
     return 0;
   }
@@ -196,8 +200,6 @@ static cbor_item_t *next_event(client *c, char **kind, uint64_t *seq) {
     return payload;
   }
 }
-
-static uint64_t last_turn;
 
 static cbor_item_t *wait_turn_end(client *c, uint64_t turn) {
   for (;;) {

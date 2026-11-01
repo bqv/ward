@@ -258,6 +258,12 @@ tool gate now waits for the end of the turn it started, which is what its old `w
 should always have meant — before this it could consume a previous turn's end, and that is
 exactly how the M1/M2 daemon's habit of clobbering a parked turn stayed invisible.
 
+Twenty-fifth: the run pool. The daemon no longer owns one `wd_turn`: `run_new` gives each
+prompt its own turn, `run_find` keys them by session, and the epoll tokens name the run they
+belong to, so a worker or provider completion resumes the turn that asked for it. A session
+with a live run answers `conflict: the session is already busy` rather than clobbering it,
+which is the bug the first attempt found. Compaction borrows a run and frees it.
+
 ## M3: started, with one finding worth keeping
 
 The first M3 attempt replaced the daemon's single `wd_turn` with a pool keyed by session, so
