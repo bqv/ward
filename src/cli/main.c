@@ -47,6 +47,7 @@ static void usage(FILE *out) {
           "  model list     [--json]\n"
           "  model select   <id>\n"
           "  stats          [<id>] [--json]\n"
+          "  job list|kill  [<id>] [--json]\n"
           "  device pair    [--scope S] [--json]\n"
           "  device list    [--json]\n"
           "  device revoke  <serial>\n"
@@ -706,6 +707,67 @@ done:
   return rc;
 }
 
+static int command_job(int argc, char **argv) {
+  const char *sub = argc > 0 ? argv[0] : "list";
+  const char *job = argc > 1 ? argv[1] : NULL;
+  bool json = false;
+  for (int i = 0; i < argc; i++) {
+    if (strcmp(argv[i], "--json") == 0) json = true;
+  }
+  char *path = socket_from_args(argc, argv);
+  if (path == NULL) return 1;
+  wd_client client;
+  if (client_connect(&client, path) != 0) {
+    free(path);
+    return 1;
+  }
+  free(path);
+  if (client_handshake(&client) != 0) {
+    close(client.fd);
+    return 1;
+  }
+  int rc = 1;
+  cbor_item_t *result = NULL;
+  if (strcmp(sub, "list") == 0) {
+    if (client_request(&client, "job.list", wd_map(0), &result) != 0) goto done;
+    if (json) {
+      print_json(result);
+    } else {
+      cbor_item_t *jobs = wd_get(result, "jobs");
+      size_t n = cbor_array_size(jobs);
+      cbor_item_t **items = cbor_array_handle(jobs);
+      if (n == 0) printf("no jobs running\n");
+      for (size_t i = 0; i < n; i++) {
+        char *id = wd_text_copy(wd_get(items[i], "job"));
+        char *state = wd_text_copy(wd_get(items[i], "state"));
+        printf("%-16s %s\n", id != NULL ? id : "?",
+               state != NULL ? state : "?");
+        free(id);
+        free(state);
+      }
+    }
+    rc = 0;
+  } else if (strcmp(sub, "kill") == 0) {
+    if (job == NULL) {
+      fprintf(stderr, "ward: job kill needs an id\n");
+      goto done;
+    }
+    cbor_item_t *params = wd_map(1);
+    wd_put(params, "job", wd_text(job));
+    if (client_request(&client, "job.kill", params, &result) != 0) goto done;
+    bool killed = false;
+    wd_bool_of(wd_get(result, "killed"), &killed);
+    printf("%s %s\n", job, killed ? "killed" : "not running");
+    rc = killed ? 0 : 1;
+  } else {
+    fprintf(stderr, "ward: job list|kill\n");
+  }
+done:
+  if (result != NULL) wd_free(result);
+  close(client.fd);
+  return rc;
+}
+
 static int command_stats(int argc, char **argv) {
   const char *id = NULL;
   bool json = false;
@@ -1047,6 +1109,7 @@ int main(int argc, char **argv) {
   if (strcmp(command, "device") == 0) return command_device(argc - 2, argv + 2);
   if (strcmp(command, "model") == 0) return command_model(argc - 2, argv + 2);
   if (strcmp(command, "stats") == 0) return command_stats(argc - 2, argv + 2);
+  if (strcmp(command, "job") == 0) return command_job(argc - 2, argv + 2);
   fprintf(stderr, "ward: unknown command %s\n", command);
   usage(stderr);
   return 2;

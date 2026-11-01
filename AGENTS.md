@@ -334,6 +334,11 @@ The lesson is the one worth keeping: a guest test needs the loader pattern from 
 (`read_file`, a named `wd_limits`, `wd_engine_new(NULL)` is fine) and the reply buffer is
 written by `wd_w_*` and nothing else — scratch text belongs in a local array.
 
+Thirty-fourth: the job client. `ward job list` prints the running runs and `ward job kill <id>`
+aborts one, so the two methods the gate proves through the protocol are reachable from the
+client as well. The CLI is a thin client of tested methods here rather than a new surface;
+the gate remains the authority on behaviour.
+
 ## M3: started, with one finding worth keeping
 
 The first M3 attempt replaced the daemon's single `wd_turn` with a pool keyed by session, so
