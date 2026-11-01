@@ -1154,6 +1154,50 @@ int wd_turn_resume_http(wd_turn *turn, wd_turn_emit emit, void *ctx,
   return drive(turn, message, emit, ctx, err);
 }
 
+int wd_turn_compact(wd_turn *turn, cbor_item_t *history, char **summary,
+                    char **err) {
+  static const char ask[] =
+      "Summarise the conversation so far in at most two hundred words, keeping "
+      "decisions, facts and open threads.";
+  cbor_item_t *payload = wd_map(2);
+  wd_put(payload, "prompt", wd_text(ask));
+  if (history != NULL && cbor_incref(history))
+    wd_put(payload, "history", history);
+  cbor_item_t *request = NULL;
+  int rc = provider_phase(turn, payload, &request, err);
+  wd_free(payload);
+  if (rc != 0) return -1;
+  rc = net_submit(turn, request, err);
+  wd_free(request);
+  if (rc != 1) return -1;
+  turn->pending_kind = 0;
+  wd_http_response response;
+  if (wd_http_job_finish(turn->http_job, &response, err) != 0) {
+    wd_http_job_free(turn->http_job);
+    turn->http_job = NULL;
+    return -1;
+  }
+  wd_http_job_free(turn->http_job);
+  turn->http_job = NULL;
+  cbor_item_t *phase = wd_map(2);
+  wd_put(phase, "status", wd_uint((uint64_t)response.status));
+  wd_put(phase, "body", wd_text_len((const char *)response.body, response.len));
+  cbor_item_t *reply = NULL;
+  rc = provider_phase(turn, phase, &reply, err);
+  wd_free(phase);
+  wd_http_response_free(&response);
+  if (rc != 0) return -1;
+  *summary = wd_text_copy(wd_get(reply, "text"));
+  wd_free(reply);
+  if (*summary == NULL || (*summary)[0] == '\0') {
+    free(*summary);
+    *summary = NULL;
+    *err = strdup("the provider returned no summary");
+    return -1;
+  }
+  return 0;
+}
+
 int wd_turn_http_fd(wd_turn *turn) {
   if (turn == NULL || turn->http_job == NULL) return -1;
   return wd_http_job_fd(turn->http_job);

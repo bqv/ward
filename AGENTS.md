@@ -234,6 +234,17 @@ The token count is bytes over four and the answer says so with `tokens_estimated
 a labelled estimate, not a measured price, until the tokenizer the README reserves a core
 budget for exists. The field shape will not change when it does.
 
+Twenty-second: compaction. `session.compact {id}` builds the session's history, asks the
+provider through the same guest and job machinery a turn uses — `wd_turn_compact` runs it
+with a fixed summarise instruction — appends `session.compacted {through, summary}` and
+answers the summary. `hs_history` honours it: replaying that event throws away the turns
+collected so far and starts again from a single `system` message, so later prompts send the
+summary plus whatever happened after it.
+
+This is the one method that still waits: the summary is its result, so it is fetched
+synchronously with the turn's timeout rather than parked. Everything else on the prompt path
+parks.
+
 M0's acceptance is 1,000 round-trips/s over UDS and a fuzz-clean decoder. A
 gate that is not measured is not met.
 

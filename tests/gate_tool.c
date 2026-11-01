@@ -498,6 +498,19 @@ int main(void) {
   fclose(file);
   assert(strcmp(content, "hello there") == 0);
 
+  cbor_item_t *compacted = NULL;
+  cbor_item_t *compact_params = wd_map(1);
+  wd_put(compact_params, "id", wd_text(session));
+  assert(request(&a, a.next_id++, "session.compact", compact_params, &compacted,
+                 NULL) == 0);
+  char *summary = wd_text_copy(wd_get(compacted, "summary"));
+  assert(summary != NULL && summary[0] != '\0');
+  uint64_t compact_through = 0;
+  assert(wd_uint_of(wd_get(compacted, "through"), &compact_through));
+  assert(compact_through > 0);
+  free(summary);
+  wd_free(compacted);
+
   cbor_item_t *checked = NULL;
   cbor_item_t *check_params = wd_map(2);
   wd_put(check_params, "id", wd_text(session));

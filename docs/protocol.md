@@ -130,6 +130,13 @@ fields stay the same when a real tokenizer replaces the estimate.
 **`stats.global`** — no params. The same counters summed over every session, plus
 `{sessions}`.
 
+**`session.compact`** — params `{id}`. Asks the provider to summarise the conversation so
+far, appends `session.compacted {through, summary}` and answers `{session, through, summary}`.
+The history builder replays it: a later prompt sends the summary as one system message and
+only the turns recorded after `through`. The summarise call is the one request still made
+synchronously, because the answer is the method's result; it is bounded by the same timeout
+as a turn.
+
 **`session.checkpoint`** — params `{id, label?}`. Appends `session.checkpoint {label}` and
 answers `{session, seq}`, the sequence a later branch can start from.
 

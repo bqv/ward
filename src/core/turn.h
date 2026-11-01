@@ -39,5 +39,7 @@ int wd_turn_cancel_tool(wd_turn *turn);
 int wd_turn_resume_http(wd_turn *turn, wd_turn_emit emit, void *ctx,
                         char **err);
 int wd_turn_http_fd(wd_turn *turn);
+int wd_turn_compact(wd_turn *turn, cbor_item_t *history, char **summary,
+                    char **err);
 
 #endif

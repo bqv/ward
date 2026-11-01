@@ -143,6 +143,21 @@ int main(void) {
   assert(cbor_array_size(built) == 2);
   wd_free(built);
 
+  cbor_item_t *compacted = wd_map(2);
+  wd_put(compacted, "through", wd_uint(hist->last_seq));
+  wd_put(compacted, "summary", wd_text("they talked twice"));
+  assert(hs_emit(hist, "session.compacted", compacted, NULL) == 0);
+  assert(hs_history(hist, 0, &built) == 0);
+  assert(cbor_array_size(built) == 1);
+  turns = cbor_array_handle(built);
+  role = wd_text_copy(wd_get(turns[0], "role"));
+  text = wd_text_copy(wd_get(turns[0], "text"));
+  assert(role != NULL && strcmp(role, "system") == 0);
+  assert(text != NULL && strcmp(text, "they talked twice") == 0);
+  free(role);
+  free(text);
+  wd_free(built);
+
   hs_close(&store);
 
   printf("session tests passed\n");

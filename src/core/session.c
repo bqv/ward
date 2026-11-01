@@ -427,6 +427,23 @@ static int history_record(void *ctx, uint64_t seq, cbor_item_t *event) {
       hc->pending[hc->pending_len] = '\0';
       free(piece);
     }
+  } else if (strcmp(kind, "session.compacted") == 0) {
+    char *summary = wd_text_copy(wd_get(payload, "summary"));
+    if (summary != NULL) {
+      for (size_t i = 0; i < hc->len; i++) {
+        free(hc->turns[i].role);
+        free(hc->turns[i].text);
+      }
+      hc->len = 0;
+      if (hc->pending != NULL) hc->pending[0] = '\0';
+      hc->pending_len = 0;
+      int pushed = hist_push(hc, "system", summary);
+      free(summary);
+      if (pushed != 0) {
+        free(kind);
+        return 1;
+      }
+    }
   } else if (strcmp(kind, "turn.end") == 0) {
     if (hc->pending != NULL) {
       if (hist_push(hc, "assistant", hc->pending) != 0) {

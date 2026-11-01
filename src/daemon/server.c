@@ -117,6 +117,7 @@ static int token_http;
 static void conn_close(wd_server *srv, wd_conn *conn);
 static void conn_release(wd_server *srv, wd_conn *conn);
 static cbor_item_t *session_cbor(wd_server *srv, hs_session *session);
+static wd_turn *server_turn(wd_server *srv, char **err);
 static void watch_worker(wd_server *srv);
 static void unwatch_worker(wd_server *srv);
 static void watch_http(wd_server *srv);
@@ -523,6 +524,66 @@ static void handle_session_label(wd_server *srv, wd_conn *conn, uint64_t id,
   conn_send_cached(conn, id, wd_response_ok(id, result));
   conn_arm(srv, conn);
   free(session_id);
+}
+
+static void handle_session_compact(wd_server *srv, wd_conn *conn, uint64_t id,
+                                   cbor_item_t *params) {
+  char *session_id = wd_text_copy(wd_get(params, "id"));
+  hs_session *session =
+      session_id != NULL ? hs_find(&srv->store, session_id) : NULL;
+  free(session_id);
+  if (session == NULL) {
+    conn_send_error(conn, id, WD_ERR_NOT_FOUND, "no such session");
+    conn_arm(srv, conn);
+    return;
+  }
+  cbor_item_t *history = NULL;
+  if (hs_history(session, 0, &history) != 0 || cbor_array_size(history) == 0) {
+    if (history != NULL) wd_free(history);
+    conn_send_error(conn, id, WD_ERR_CONFLICT, "nothing to compact");
+    conn_arm(srv, conn);
+    return;
+  }
+  char *err = NULL;
+  wd_turn *turn = server_turn(srv, &err);
+  if (turn == NULL) {
+    wd_free(history);
+    respond_internal(srv, conn, id, err != NULL ? err : "no modules");
+    free(err);
+    return;
+  }
+  wd_turn_set_root(turn, session->cwd);
+  char *summary = NULL;
+  int rc = wd_turn_compact(turn, history, &summary, &err);
+  wd_free(history);
+  if (rc != 0) {
+    respond_internal(srv, conn, id,
+                     err != NULL ? err : "cannot summarise the session");
+    free(err);
+    conn_arm(srv, conn);
+    return;
+  }
+  free(err);
+  cbor_item_t *record = wd_map(2);
+  wd_put(record, "through", wd_uint(session->last_seq));
+  wd_put(record, "summary", wd_text(summary));
+  uint64_t seq = 0;
+  if (hs_emit(session, "session.compacted", record, &seq) != 0) {
+    free(summary);
+    respond_internal(srv, conn, id, "cannot record the summary");
+    return;
+  }
+  cbor_item_t *event = wd_map(2);
+  wd_put(event, "through", wd_uint(seq - 1));
+  wd_put(event, "summary", wd_text(summary));
+  conn_broadcast(srv, session, "session.compacted", seq, event);
+  cbor_item_t *result = wd_map(3);
+  wd_put(result, "session", wd_text(session->id));
+  wd_put(result, "through", wd_uint(seq - 1));
+  wd_put(result, "summary", wd_text(summary));
+  free(summary);
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
 }
 
 static void handle_session_checkpoint(wd_server *srv, wd_conn *conn,
@@ -1397,6 +1458,8 @@ static void handle_request(wd_server *srv, wd_conn *conn, uint64_t id,
     handle_session_label(srv, conn, id, params, 1);
   } else if (strcmp(method, "session.pin") == 0) {
     handle_session_label(srv, conn, id, params, 2);
+  } else if (strcmp(method, "session.compact") == 0) {
+    handle_session_compact(srv, conn, id, params);
   } else if (strcmp(method, "session.checkpoint") == 0) {
     handle_session_checkpoint(srv, conn, id, params);
   } else if (strcmp(method, "session.undo") == 0) {
