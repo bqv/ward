@@ -606,6 +606,43 @@ also the first slice of M5, where the registry's reload path needs a throwaway t
 gate hangs with *no* output, suspect the build tree before the code: check that every
 `out/*.wasm` is a real module (`head -c 8`) before reaching for a debugger.
 
+Fifty-seventh: the M5 plan, and the line that cannot yet be met. A read-only survey of the tree
+against the README produced two findings worth keeping before any M5 code is written.
+
+First, **the M5 acceptance line is currently unfalsifiable.** `wd_turn_new` reads and instantiates
+all seven guests on every prompt and `wd_turn_free` destroys them at `turn.end`; there are no
+refcounts, no instance pool, and the only state that survives a boundary is core's own
+`turn->parked` CBOR. So "upgrade a stateful module mid-session with no data loss" has no stateful
+module to demonstrate it — a test written today would prove core to core. The honest way through
+is the README's own conformance guest (export, import, migrate, trap), with a note that no
+shipped guest carries state yet.
+
+Second, **`ward_state_migrate` does not exist in the host**, although `docs/modules.md` freezes
+it. `wd_instance_state_export` and `wd_instance_state_import` are implemented; the migrate call,
+its schema argument and its `{ptr, len}` reply are not, so the upgrade order the README describes
+has a hole exactly where the interesting case is.
+
+The slices, in order, each building and committing alone:
+
+1. **Registry identity** — a manifest per module (version, `state_schema`, capabilities), `@version`
+   filenames, `wd_registry_resolve`, and an honest `module.list`/`module.reload` whose arrays are
+   sized at their final length. Purity and grants stay in a core table: a manifest must never
+   widen its own authority.
+2. **Host `state_migrate`** plus a conformance guest — pure addition, no ABI change.
+3. **Pinning** — a durable `session.modules` event, replayed like `session.model`, so a session
+   keeps the versions it started with.
+4. **`session.upgrade`** — the pin moves at a boundary, appending `session.upgraded`.
+5. **Drain and migrate** — export, drop, instantiate, import, migrate between schemas; on failure
+   keep the old instance and record `migration_failed`.
+6. **Bad version** — repeated traps demote a version until cleared.
+7. **`code.outline`** — the module decides what a symbol is, core reads the file under the tool
+   root. Label it a scanner until tree-sitter is really there.
+8. **The index** — `symbols`/`edges` sidecars in `cache/`, `code.defs` carrying a generation; this
+   is the slice that meets `code.defs finds a symbol in the harness`.
+
+Steps 1 and 2 are independent of the rest and can run first; 3–6 are a chain; 7–8 are orthogonal
+and can start in parallel.
+
 ## M3: started, with one finding worth keeping
 
 The first M3 attempt replaced the daemon's single `wd_turn` with a pool keyed by session, so
