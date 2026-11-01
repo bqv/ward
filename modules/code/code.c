@@ -4,9 +4,9 @@
 
 #include "wd_abi.h"
 
-#define HEAP_SIZE 8192u
-#define REPLY_SIZE 2048u
-#define TEXT_SIZE 4096u
+#define HEAP_SIZE 65536u
+#define REPLY_SIZE 4096u
+#define TEXT_SIZE 16384u
 #define SYMBOL_MAX 16u
 #define NAME_MAX 48u
 

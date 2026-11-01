@@ -974,3 +974,17 @@ A turn's file read is capped at 256 KiB and the index at 200 files, but the *gue
 limit. Raising its buffers is the next step for the index, and the acceptance line "finds a symbol
 in the harness" cannot be claimed until it lands. The scanner also now crosses a wrapped signature
 (`wd_turn *wd_turn_new(...)` split over two lines), which the earlier version missed.
+
+Seventy-eighth: the code guest's buffers, and a limit that is still a wall. The text buffer went from
+4 KiB to 16 KiB, the reply from 2 KiB to 4 KiB and the heap from 8 KiB to 64 KiB, which lets the
+index read files up to 16 KiB instead of truncating most of them at 4.
+
+Larger did not work, and the way it failed is worth recording: at 64 KiB of text and 8 KiB of reply,
+`wd_instance_call` refused outright — instantiation succeeded, the call returned an error, and the
+whole index came back empty. The cause is not yet identified, and it is not the index's own caps
+(200 files, 256 KiB each). Until it is, 16 KiB is the working size and the acceptance line
+"`code.defs` finds a symbol in the harness" stays unclaimed: a harness index does produce rows, but
+not every symbol expected, and the discrepancy is unexplained rather than fixed.
+
+The honest next step is to find that wall, not to raise a number and hope: bisect the guest's text
+size against a single large file and read the host's error string, which no test prints today.
