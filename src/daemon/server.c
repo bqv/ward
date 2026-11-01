@@ -95,6 +95,7 @@ typedef struct {
   wd_quic *quic;
   wd_approvals *approvals;
   int worker_fd;
+  int http_fd;
   wd_models *models;
   wd_labels *labels;
   char *default_model;
@@ -111,12 +112,17 @@ static int token_listen;
 static int token_signal;
 static int token_quic;
 static int token_worker;
+static int token_http;
 
 static void conn_close(wd_server *srv, wd_conn *conn);
 static void conn_release(wd_server *srv, wd_conn *conn);
 static cbor_item_t *session_cbor(wd_server *srv, hs_session *session);
 static void watch_worker(wd_server *srv);
 static void unwatch_worker(wd_server *srv);
+static void watch_http(wd_server *srv);
+static void unwatch_http(wd_server *srv);
+static void park_or_finish(wd_server *srv, hs_session *session, int rc,
+                           char *err);
 static int conn_arm(wd_server *srv, wd_conn *conn);
 static int conn_flush(wd_conn *conn);
 static int conn_read(wd_server *srv, wd_conn *conn);
@@ -828,6 +834,10 @@ static void handle_session_prompt(wd_server *srv, wd_conn *conn, uint64_t id,
     snprintf(srv->turn_session, sizeof(srv->turn_session), "%s", session->id);
     watch_worker(srv);
   }
+  if (pending_kind == 3) {
+    snprintf(srv->turn_session, sizeof(srv->turn_session), "%s", session->id);
+    watch_http(srv);
+  }
   if (pending_kind == 1) {
     uint64_t call = 0;
     uint64_t epoch = 0;
@@ -873,18 +883,42 @@ static void watch_worker(wd_server *srv) {
   if (epoll_ctl(srv->epoll_fd, EPOLL_CTL_ADD, fd, &ev) == 0) srv->worker_fd = fd;
 }
 
-static void tool_done(wd_server *srv) {
-  hs_session *session = hs_find(&srv->store, srv->turn_session);
-  if (srv->turn == NULL || session == NULL) {
-    unwatch_worker(srv);
-    srv->turn_session[0] = '\0';
+static void unwatch_http(wd_server *srv) {
+  if (srv->http_fd < 0) return;
+  (void)epoll_ctl(srv->epoll_fd, EPOLL_CTL_DEL, srv->http_fd, NULL);
+  srv->http_fd = -1;
+}
+
+static void watch_http(wd_server *srv) {
+  int fd = wd_turn_http_fd(srv->turn);
+  if (fd < 0) {
+    unwatch_http(srv);
     return;
   }
-  wd_turn_ctx tc = {srv, session};
-  char *err = NULL;
-  int rc = wd_turn_resume_tool(srv->turn, turn_emit, &tc, &err);
+  if (srv->http_fd == fd) return;
+  unwatch_http(srv);
+  struct epoll_event ev;
+  memset(&ev, 0, sizeof(ev));
+  ev.events = EPOLLIN;
+  ev.data.ptr = &token_http;
+  if (epoll_ctl(srv->epoll_fd, EPOLL_CTL_ADD, fd, &ev) == 0) srv->http_fd = fd;
+}
+
+static void park_or_finish(wd_server *srv, hs_session *session, int rc,
+                           char *err) {
   if (rc == WD_TURN_PENDING) {
     int kind = wd_turn_pending_kind(srv->turn);
+    snprintf(srv->turn_session, sizeof(srv->turn_session), "%s", session->id);
+    if (kind == 3) {
+      unwatch_worker(srv);
+      watch_http(srv);
+      return;
+    }
+    if (kind == 2) {
+      unwatch_http(srv);
+      watch_worker(srv);
+      return;
+    }
     if (kind == 1) {
       uint64_t call = 0;
       uint64_t epoch = 0;
@@ -897,18 +931,44 @@ static void tool_done(wd_server *srv) {
         free(reason);
       }
       unwatch_worker(srv);
-    } else {
-      watch_worker(srv);
+      unwatch_http(srv);
+      return;
     }
-    return;
   }
   unwatch_worker(srv);
+  unwatch_http(srv);
   srv->turn_session[0] = '\0';
   if (rc != 0) {
-    fprintf(stderr, "ward: the tool call failed: %s\n",
+    fprintf(stderr, "ward: the turn failed: %s\n",
             err != NULL ? err : "unknown");
   }
   free(err);
+}
+
+static void tool_done(wd_server *srv) {
+  hs_session *session = hs_find(&srv->store, srv->turn_session);
+  if (srv->turn == NULL || session == NULL) {
+    unwatch_worker(srv);
+    srv->turn_session[0] = '\0';
+    return;
+  }
+  wd_turn_ctx tc = {srv, session};
+  char *err = NULL;
+  int rc = wd_turn_resume_tool(srv->turn, turn_emit, &tc, &err);
+  park_or_finish(srv, session, rc, err);
+}
+
+static void http_done(wd_server *srv) {
+  hs_session *session = hs_find(&srv->store, srv->turn_session);
+  if (srv->turn == NULL || session == NULL) {
+    unwatch_http(srv);
+    srv->turn_session[0] = '\0';
+    return;
+  }
+  wd_turn_ctx tc = {srv, session};
+  char *err = NULL;
+  int rc = wd_turn_resume_http(srv->turn, turn_emit, &tc, &err);
+  park_or_finish(srv, session, rc, err);
 }
 
 static bool resume_turn(wd_server *srv, const char *session_id, bool allow,
@@ -924,6 +984,11 @@ static bool resume_turn(wd_server *srv, const char *session_id, bool allow,
   if (rc == WD_TURN_PENDING && wd_turn_pending_kind(srv->turn) == 2) {
     snprintf(srv->turn_session, sizeof(srv->turn_session), "%s", session->id);
     watch_worker(srv);
+    return true;
+  }
+  if (rc == WD_TURN_PENDING && wd_turn_pending_kind(srv->turn) == 3) {
+    snprintf(srv->turn_session, sizeof(srv->turn_session), "%s", session->id);
+    watch_http(srv);
     return true;
   }
   if (rc == WD_TURN_PENDING) {
@@ -1838,6 +1903,10 @@ int wd_up_run(const wd_up_config *cfg) {
       }
       if (ptr == &token_worker) {
         tool_done(&srv);
+        continue;
+      }
+      if (ptr == &token_http) {
+        http_done(&srv);
         continue;
       }
       if (ptr == &token_quic) {

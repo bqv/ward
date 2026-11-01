@@ -129,6 +129,11 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
   uint32_t n = 0;
   uint8_t prompt[JSON_SIZE];
   uint32_t prompt_len = 0;
+  char body[JSON_SIZE];
+  uint32_t body_len = 0;
+  uint32_t status = 0;
+  int have_prompt = 0;
+  int have_body = 0;
   if (wd_r_map(&r, &n) != 0) return;
   for (uint32_t i = 0; i < n; i++) {
     const uint8_t *kp = 0;
@@ -136,14 +141,36 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
     if (wd_r_text_ptr(&r, &kp, &kn) != 0) return;
     if (wd_key_eq(kp, kn, "prompt")) {
       if (wd_r_text(&r, (char *)prompt, sizeof(prompt), &prompt_len) != 0) return;
+      have_prompt = 1;
+    } else if (wd_key_eq(kp, kn, "body")) {
+      if (wd_r_text(&r, body, sizeof(body), &body_len) != 0) return;
+      have_body = 1;
+    } else if (wd_key_eq(kp, kn, "status")) {
+      uint32_t value = 0;
+      if (wd_r_uint(&r, &value) != 0) return;
+      status = value;
     } else if (wd_r_skip(&r) != 0) {
       return;
     }
   }
 
+  wd_w w;
+  if (have_body) {
+    uint32_t text_at = 0;
+    answer[0] = '\0';
+    if (status == 200)
+      text_at = scan_content((const uint8_t *)body, body_len);
+    wd_w_init(&w, reply, REPLY_SIZE);
+    wd_w_map(&w, 1);
+    wd_w_textz(&w, "text");
+    wd_w_text(&w, answer, text_at);
+    if (!w.failed) pair(out, reply, w.at);
+    return;
+  }
+  if (!have_prompt) return;
+
   char escaped[JSON_SIZE];
   uint32_t escaped_len = json_escape(escaped, sizeof(escaped), prompt, prompt_len);
-
   static const char prefix[] =
       "{\"model\":\"local\",\"stream\":true,\"messages\":[{\"role\":\"user\","
       "\"content\":\"";
@@ -154,41 +181,13 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
   for (uint32_t i = 0; i < escaped_len && jl < sizeof(json); i++) json[jl++] = escaped[i];
   for (uint32_t i = 0; suffix[i] != '\0' && jl < sizeof(json); i++) json[jl++] = suffix[i];
 
-  wd_w w;
-  wd_w_init(&w, callbuf, CALL_SIZE);
-  static const char cap_name[] = "net.request";
-  wd_put32(callbuf, sizeof(cap_name) - 1);
-  uint32_t name_len = sizeof(cap_name) - 1;
-  for (uint32_t i = 0; i < name_len; i++) callbuf[4 + i] = (uint8_t)cap_name[i];
-  wd_w_init(&w, callbuf + 4 + name_len, CALL_SIZE - 4 - name_len);
+  wd_w_init(&w, reply, REPLY_SIZE);
+  wd_w_map(&w, 1);
+  wd_w_textz(&w, "request");
   wd_w_map(&w, 2);
   wd_w_textz(&w, "path");
   wd_w_textz(&w, "/v1/chat/completions");
   wd_w_textz(&w, "body");
   wd_w_text(&w, json, jl);
-  if (w.failed) {
-    wd_w_init(&w, reply, REPLY_SIZE);
-    wd_w_map(&w, 1);
-    wd_w_textz(&w, "text");
-    wd_w_textz(&w, "");
-    pair(out, reply, w.at);
-    return;
-  }
-
-  uint32_t desc[2];
-  ward_cap((uint32_t)(uintptr_t)callbuf, 4 + name_len + w.at,
-           (uint32_t)(uintptr_t)desc);
-  const uint8_t *res = (const uint8_t *)(uintptr_t)desc[0];
-  uint32_t res_len = desc[1];
-
-  uint32_t text_at = 0;
-  answer[0] = '\0';
-  if (res_len > 4 && wd_get32(res) == 200)
-    text_at = scan_content(res + 4, res_len - 4);
-
-  wd_w_init(&w, reply, REPLY_SIZE);
-  wd_w_map(&w, 1);
-  wd_w_textz(&w, "text");
-  wd_w_text(&w, answer, text_at);
   if (!w.failed) pair(out, reply, w.at);
 }

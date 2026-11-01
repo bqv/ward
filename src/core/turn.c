@@ -39,6 +39,7 @@ struct wd_turn {
   wd_instance *tools;
   wd_worker *worker;
   wd_worker *tool_worker;
+  wd_http_job *http_job;
   char *worker_root;
   wd_instance *policy;
   int pending_kind;
@@ -56,6 +57,8 @@ static const wd_limits TURN_LIMITS = {.fuel = WD_TURN_FUEL,
 #define WD_TOOL_MAX (64u * 1024u)
 
 static wd_worker *worker_for(wd_turn *turn);
+static int provider_phase(wd_turn *turn, cbor_item_t *payload,
+                          cbor_item_t **reply, char **err);
 static int exec_reply(wd_proc_result *result, cbor_item_t **out);
 
 static uint8_t *read_file(const char *path, size_t *len) {
@@ -676,6 +679,7 @@ void wd_turn_set_root(wd_turn *turn, const char *root) {
 
 void wd_turn_free(wd_turn *turn) {
   if (turn == NULL) return;
+  wd_http_job_free(turn->http_job);
   wd_worker_free(turn->worker);
   free(turn->worker_root);
   wd_instance_free(turn->driver);
@@ -702,6 +706,7 @@ static wd_worker *worker_for(wd_turn *turn) {
     return turn->worker;
   if (turn->worker != NULL && turn->tool_worker == turn->worker)
     return turn->worker;
+  wd_http_job_free(turn->http_job);
   wd_worker_free(turn->worker);
   turn->worker = NULL;
   free(turn->worker_root);
@@ -757,6 +762,38 @@ static int invoke(wd_instance *instance, cbor_item_t *payload,
   }
   *result = reply;
   return 0;
+}
+
+static int provider_phase(wd_turn *turn, cbor_item_t *payload,
+                          cbor_item_t **reply, char **err) {
+  return invoke(turn->provider, payload, reply, err);
+}
+
+static int net_submit(wd_turn *turn, cbor_item_t *reply, char **err) {
+  cbor_item_t *request = wd_get(reply, "request");
+  char *path = wd_text_copy(wd_get(request, "path"));
+  char *body = wd_text_copy(wd_get(request, "body"));
+  if (turn->endpoint == NULL || path == NULL) {
+    free(path);
+    free(body);
+    *err = strdup("the provider asked for no endpoint");
+    return -1;
+  }
+  char url[512];
+  snprintf(url, sizeof(url), "%s%s", turn->endpoint, path);
+  free(path);
+  if (!wd_http_loopback(url)) {
+    free(body);
+    *err = strdup("net.request: the endpoint is not loopback");
+    return -1;
+  }
+  wd_http_job_free(turn->http_job);
+  turn->http_job =
+      wd_http_start(url, "POST", body != NULL ? body : "", 300000, 4u << 20, err);
+  free(body);
+  if (turn->http_job == NULL) return -1;
+  turn->pending_kind = 3;
+  return 1;
 }
 
 static int exec_submit(wd_turn *turn, cbor_item_t *args, char **err) {
@@ -870,6 +907,19 @@ static int process_action(wd_turn *turn, cbor_item_t *action, wd_turn_emit emit,
     if (instance == NULL || payload == NULL) {
       *err = strdup("no such module action");
       rc = -1;
+    } else if (instance == turn->provider) {
+      cbor_item_t *request = NULL;
+      rc = provider_phase(turn, payload, &request, err);
+      if (rc == 0) {
+        int parked = net_submit(turn, request, err);
+        wd_free(request);
+        if (parked == 1) {
+          *pending = true;
+          rc = 0;
+        } else if (parked != 0) {
+          rc = -1;
+        }
+      }
     } else if (instance == turn->tools) {
       cbor_item_t *request = NULL;
       rc = invoke(instance, payload, &request, err);
@@ -1044,6 +1094,47 @@ int wd_turn_resume_tool(wd_turn *turn, wd_turn_emit emit, void *ctx,
   wd_put(message, "kind", wd_text("result"));
   wd_put(message, "payload", reply);
   return drive(turn, message, emit, ctx, err);
+}
+
+int wd_turn_resume_http(wd_turn *turn, wd_turn_emit emit, void *ctx,
+                        char **err) {
+  if (turn->pending_kind != 3 || turn->http_job == NULL) {
+    *err = strdup("no provider request is pending");
+    return -1;
+  }
+  turn->pending_kind = 0;
+  wd_http_response response;
+  int rc = wd_http_job_finish(turn->http_job, &response, err);
+  wd_http_job_free(turn->http_job);
+  turn->http_job = NULL;
+  cbor_item_t *message = wd_map(2);
+  wd_put(message, "kind", wd_text("result"));
+  if (rc != 0) {
+    free(err != NULL ? *err : NULL);
+    if (err != NULL) *err = NULL;
+    cbor_item_t *payload = wd_map(1);
+    wd_put(payload, "text", wd_text("the provider request failed"));
+    wd_put(message, "payload", payload);
+    return drive(turn, message, emit, ctx, err);
+  }
+  cbor_item_t *phase = wd_map(2);
+  wd_put(phase, "status", wd_uint((uint64_t)response.status));
+  wd_put(phase, "body", wd_text_len((const char *)response.body, response.len));
+  cbor_item_t *reply = NULL;
+  rc = provider_phase(turn, phase, &reply, err);
+  wd_free(phase);
+  wd_http_response_free(&response);
+  if (rc != 0) {
+    wd_free(message);
+    return -1;
+  }
+  wd_put(message, "payload", reply);
+  return drive(turn, message, emit, ctx, err);
+}
+
+int wd_turn_http_fd(wd_turn *turn) {
+  if (turn == NULL || turn->http_job == NULL) return -1;
+  return wd_http_job_fd(turn->http_job);
 }
 
 int wd_turn_cancel_tool(wd_turn *turn) {

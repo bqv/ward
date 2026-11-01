@@ -5,6 +5,11 @@
 #include "net/http.h"
 
 #include <curl/curl.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <signal.h>
+#include <sys/wait.h>
+#include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -97,4 +102,112 @@ void wd_http_response_free(wd_http_response *response) {
   free(response->body);
   response->body = NULL;
   response->len = 0;
+}
+
+struct wd_http_job {
+  pid_t pid;
+  int fd;
+};
+
+wd_http_job *wd_http_start(const char *url, const char *method, const char *body,
+                           uint64_t timeout_ms, size_t max_bytes, char **err) {
+  int fds[2];
+  if (pipe2(fds, O_CLOEXEC) != 0) {
+    if (err != NULL) *err = strdup("cannot create the http pipe");
+    return NULL;
+  }
+  pid_t pid = fork();
+  if (pid < 0) {
+    close(fds[0]);
+    close(fds[1]);
+    if (err != NULL) *err = strdup("cannot fork for the http request");
+    return NULL;
+  }
+  if (pid == 0) {
+    close(fds[0]);
+    wd_http_response response;
+    char *why = NULL;
+    int rc = wd_http_request(url, method, body, timeout_ms, max_bytes, &response,
+                             &why);
+    free(why);
+    uint32_t status = rc == 0 ? (uint32_t)response.status : 0;
+    uint32_t len = rc == 0 ? (uint32_t)response.len : 0;
+    uint8_t header[8] = {(uint8_t)(status & 0xff), (uint8_t)((status >> 8) & 0xff),
+                         (uint8_t)((status >> 16) & 0xff),
+                         (uint8_t)((status >> 24) & 0xff),
+                         (uint8_t)(len & 0xff), (uint8_t)((len >> 8) & 0xff),
+                         (uint8_t)((len >> 16) & 0xff),
+                         (uint8_t)((len >> 24) & 0xff)};
+    if (write(fds[1], header, sizeof(header)) == (ssize_t)sizeof(header) &&
+        len > 0)
+      (void)write(fds[1], response.body, len);
+    if (rc == 0) wd_http_response_free(&response);
+    _exit(rc == 0 && status == 200 ? 0 : 1);
+  }
+  close(fds[1]);
+  wd_http_job *job = calloc(1, sizeof(*job));
+  if (job == NULL) {
+    (void)kill(pid, SIGKILL);
+    close(fds[0]);
+    if (err != NULL) *err = strdup("out of memory");
+    return NULL;
+  }
+  job->pid = pid;
+  job->fd = fds[0];
+  return job;
+}
+
+int wd_http_job_fd(wd_http_job *job) { return job != NULL ? job->fd : -1; }
+
+static int read_exact(int fd, void *buf, size_t len) {
+  uint8_t *p = buf;
+  size_t off = 0;
+  while (off < len) {
+    ssize_t n = read(fd, p + off, len - off);
+    if (n < 0) {
+      if (errno == EINTR) continue;
+      return -1;
+    }
+    if (n == 0) return -1;
+    off += (size_t)n;
+  }
+  return 0;
+}
+
+int wd_http_job_finish(wd_http_job *job, wd_http_response *out, char **err) {
+  memset(out, 0, sizeof(*out));
+  uint8_t header[8];
+  if (read_exact(job->fd, header, sizeof(header)) != 0) {
+    if (err != NULL) *err = strdup("the http helper died");
+    return -1;
+  }
+  uint32_t status = (uint32_t)header[0] | ((uint32_t)header[1] << 8) |
+                    ((uint32_t)header[2] << 16) | ((uint32_t)header[3] << 24);
+  uint32_t len = (uint32_t)header[4] | ((uint32_t)header[5] << 8) |
+                 ((uint32_t)header[6] << 16) | ((uint32_t)header[7] << 24);
+  out->status = (long)status;
+  if (len > 0) {
+    out->body = malloc(len);
+    if (out->body == NULL) {
+      if (err != NULL) *err = strdup("out of memory");
+      return -1;
+    }
+    if (read_exact(job->fd, out->body, len) != 0) {
+      wd_http_response_free(out);
+      if (err != NULL) *err = strdup("the http helper died");
+      return -1;
+    }
+    out->len = len;
+  }
+  return 0;
+}
+
+void wd_http_job_free(wd_http_job *job) {
+  if (job == NULL) return;
+  if (job->fd >= 0) close(job->fd);
+  if (job->pid > 0) {
+    while (waitpid(job->pid, NULL, 0) < 0 && errno == EINTR) {
+    }
+  }
+  free(job);
 }

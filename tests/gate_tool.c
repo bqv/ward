@@ -16,6 +16,7 @@
 #include <unistd.h>
 
 #include "core/util.h"
+#include "fake_endpoint.h"
 #include <sys/stat.h>
 #include "proto/codec.h"
 #include "proto/frame.h"
@@ -217,6 +218,9 @@ int main(void) {
   if (bin == NULL || modules == NULL) {
     return 1;
   }
+  int endpoint_port = 0;
+  pid_t endpoint = 0;
+  fake_endpoint(&endpoint_port, &endpoint);
   char root[] = "/tmp/ward-tool-gate-XXXXXX";
   assert(mkdtemp(root) != NULL);
   char state[256];
@@ -382,6 +386,19 @@ int main(void) {
   assert(request(&a, a.next_id++, "session.resume", resume, &resumed, NULL) ==
          0);
   wd_free(resumed);
+
+  cbor_item_t *plain = NULL;
+  cbor_item_t *plain_prompt = wd_map(2);
+  wd_put(plain_prompt, "id", wd_text(session));
+  wd_put(plain_prompt, "text", wd_text("hello over the async provider"));
+  assert(request(&a, a.next_id++, "session.prompt", plain_prompt, &plain,
+                 NULL) == 0);
+  wd_free(plain);
+  cbor_item_t *plain_end = wait_event(&a, "turn.end", NULL);
+  assert(plain_end != NULL);
+  wd_free(plain_end);
+
+
 
   cbor_item_t *answered = NULL;
   cbor_item_t *prompt = wd_map(2);
@@ -633,6 +650,7 @@ int main(void) {
   close(a.fd);
   kill(pid, SIGKILL);
   waitpid(pid, NULL, 0);
+  stop_server(endpoint);
   printf("tool gate passed: a write waited for an approval and was answered\n");
   return 0;
 }

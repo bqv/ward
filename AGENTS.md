@@ -193,7 +193,15 @@ Sixteenth: usage stats. `hs_measure` replays a session's log and counts its even
 counters and `ward stats [<id>]` prints them. No tokenizer yet, so this is the shape cost
 accounting will price rather than a price — the numbers are exact, the money is absent.
 
-What is still missing from M1 is therefore the provider half of the asynchronous split.
+Seventeenth: the provider left the loop too. `modules/provider` is two-phase like `tools`:
+`{prompt}` in gives `{request: {path, body}}` out, and the second call takes
+`{status, body}` and gives `{text}`. Core performs the request through a forked helper —
+`wd_http_start` runs the existing curl call in a child and hands the parent a pipe — so the
+daemon watches that pipe in epoll, parks the turn and resumes it when the reply is readable.
+Nothing on the prompt path blocks the loop now.
+
+M1 is feature-complete: no item on its parity row is missing, and both of its acceptance
+lines are gated.
 
 M0's acceptance is 1,000 round-trips/s over UDS and a fuzz-clean decoder. A
 gate that is not measured is not met.

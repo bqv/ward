@@ -36,6 +36,21 @@ static int emit(void *ctx, const char *event, cbor_item_t *payload, char **err) 
   return 0;
 }
 
+static int run_turn(wd_turn *turn, const char *text, wd_turn_emit emit,
+                   void *ctx, char **err) {
+  int rc = wd_turn_prompt(turn, text, emit, ctx, err);
+  while (rc == WD_TURN_PENDING) {
+    int kind = wd_turn_pending_kind(turn);
+    if (kind == 1)
+      rc = wd_turn_resume(turn, true, emit, ctx, err);
+    else if (kind == 2)
+      rc = wd_turn_resume_tool(turn, emit, ctx, err);
+    else
+      rc = wd_turn_resume_http(turn, emit, ctx, err);
+  }
+  return rc;
+}
+
 int main(void) {
   const char *dir = getenv("WARD_MODULE_DIR");
   assert(dir != NULL);
@@ -52,7 +67,7 @@ int main(void) {
     return 1;
   }
   seen s = {0, {0}};
-  int rc = wd_turn_prompt(turn, "hello m1", emit, &s, &err);
+  int rc = run_turn(turn, "hello m1", emit, &s, &err);
   if (rc != 0) {
     fprintf(stderr, "prompt: %s\n", err != NULL ? err : "failed");
     return 1;
