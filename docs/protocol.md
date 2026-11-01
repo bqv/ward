@@ -136,6 +136,13 @@ approved text and finishes the turn; denying it ends with the policy's refusal. 
 tool call in the ordinary shape — `plan.run` in core — so a client cannot tell an approved
 plan from an approved command.
 
+**`schedule.set`** — params `{session, cron, text}`. The `schedule` guest turns the expression
+into the next fire time (cron fields, or `@every <ms>` for an interval), core stores the entry
+and appends `schedule.updated {schedule, state, next_ms}`. Answers `{schedule, next_ms}`. When
+it is due the daemon forks the session, runs `text` as a turn in the child and appends
+`schedule.fired {schedule, session}` before re-arming. `schedule.list` answers
+`{schedules: [...]}` and `schedule.delete` answers `{deleted}`.
+
 **`goal.set`** — params `{session, text}`. Appends a durable `goal.set {text}` and answers
 `{goal}`; `goal.clear` appends `goal.cleared`. The active goal is prepended to the history
 every later prompt sends, as a `system` message, so the model is reminded what the session is

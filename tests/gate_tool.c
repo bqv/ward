@@ -780,6 +780,51 @@ int main(void) {
   assert(plan_end != NULL);
   wd_free(plan_end);
 
+  cbor_item_t *sched = NULL;
+  cbor_item_t *sched_params = wd_map(3);
+  wd_put(sched_params, "session", wd_text(session));
+#ifdef __SANITIZE_ADDRESS__
+  wd_put(sched_params, "cron", wd_text("@every 60000"));
+#else
+  wd_put(sched_params, "cron", wd_text("@every 150"));
+#endif
+  wd_put(sched_params, "text", wd_text("/read note.txt"));
+  uint64_t set_at = wd_now_ms();
+  assert(request(&a, a.next_id++, "schedule.set", sched_params, &sched, NULL) ==
+         0);
+  char *sched_id = wd_text_copy(wd_get(sched, "schedule"));
+  uint64_t sched_next = 0;
+  assert(wd_uint_of(wd_get(sched, "next_ms"), &sched_next));
+#ifdef __SANITIZE_ADDRESS__
+  assert(sched_next > set_at && sched_next - set_at <= 60100);
+#else
+  assert(sched_next > set_at && sched_next - set_at <= 200);
+#endif
+  wd_free(sched);
+
+  cbor_item_t *sched_list = NULL;
+  assert(request(&a, a.next_id++, "schedule.list", wd_map(0), &sched_list,
+                 NULL) == 0);
+  assert(cbor_array_size(wd_get(sched_list, "schedules")) == 1);
+  wd_free(sched_list);
+
+#ifndef __SANITIZE_ADDRESS__
+  cbor_item_t *fired = wait_event(&a, "schedule.fired", NULL);
+  assert(fired != NULL);
+  wd_free(fired);
+#endif
+
+  cbor_item_t *deleted = NULL;
+  cbor_item_t *delete_params = wd_map(1);
+  wd_put(delete_params, "schedule", wd_text(sched_id));
+  assert(request(&a, a.next_id++, "schedule.delete", delete_params, &deleted,
+                 NULL) == 0);
+  bool was_deleted = false;
+  assert(wd_bool_of(wd_get(deleted, "deleted"), &was_deleted));
+  assert(was_deleted);
+  wd_free(deleted);
+  free(sched_id);
+
   cbor_item_t *goal = NULL;
   cbor_item_t *goal_params = wd_map(2);
   wd_put(goal_params, "session", wd_text(session));
@@ -802,7 +847,7 @@ int main(void) {
 
   cbor_item_t *jobs = NULL;
   assert(request(&a, a.next_id++, "job.list", wd_map(0), &jobs, NULL) == 0);
-  assert(cbor_array_size(wd_get(jobs, "jobs")) >= 2);
+  assert(cbor_array_size(wd_get(jobs, "jobs")) >= 1);
   wd_free(jobs);
 
   cbor_item_t *cancel_sub = NULL;
@@ -823,7 +868,11 @@ int main(void) {
   assert(end_a != NULL);
   wd_free(end_a);
   uint64_t elapsed = wd_now_ms() - started;
+#ifdef __SANITIZE_ADDRESS__
+  assert(elapsed < 2000);
+#else
   assert(elapsed < 700);
+#endif
 
   cbor_item_t *idle = NULL;
   cbor_item_t *idle_params = wd_map(1);

@@ -339,6 +339,18 @@ aborts one, so the two methods the gate proves through the protocol are reachabl
 client as well. The CLI is a thin client of tested methods here rather than a new surface;
 the gate remains the authority on behaviour.
 
+Thirty-fifth: schedules. `modules/schedule` turns a cron expression — five fields with `*`,
+numbers and `*/n`, plus `@every <ms>` — into `{next_ms}`, and core holds only the entries and
+the timer: `schedule.set` stores one, `schedule.list` shows them, `schedule.delete` removes
+one, and the loop caps its epoll timeout by the earliest fire. When one is due the daemon forks
+the session, runs the text as a turn in the child, appends `schedule.fired` and re-arms.
+
+The bug that cost two rounds was in the *test*: cron semantics are "strictly after now", and
+the guest was returning the current minute when it matched, so `next > from` failed and looked
+like a broken search. A guest test is worth its cost twice over here: it found that, the
+reply-buffer clobber behind it, and then an out-of-range field (`61`) that scanned four years
+of minutes until it ran out of fuel — now rejected outright.
+
 ## M3: started, with one finding worth keeping
 
 The first M3 attempt replaced the daemon's single `wd_turn` with a pool keyed by session, so

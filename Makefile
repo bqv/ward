@@ -47,6 +47,7 @@ CORE_SRC := \
   src/core/models.c \
   src/core/worker.c \
   src/core/labels.c \
+  src/core/schedule.c \
   src/core/proc.c \
   src/wasm/host.c \
   src/net/http.c \
@@ -61,7 +62,7 @@ WARD := $(BUILDDIR)/ward
 
 TEST_BINS := $(patsubst tests/%.c,$(BUILDDIR)/%,$(wildcard tests/*.c))
 
-MODULES := engine driver provider tools policy
+MODULES := engine driver provider tools policy schedule
 MODULE_WASM := $(addprefix $(BUILDDIR)/,$(addsuffix .wasm,$(MODULES)))
 
 GUESTS := echo wasi importer
@@ -107,6 +108,10 @@ $(BUILDDIR)/provider.wasm: modules/provider/provider.c modules/abi/wd_abi.h
 	$(WASI_CC) $(WASI_FLAGS) -I modules/abi $< -o $@
 
 $(BUILDDIR)/tools.wasm: modules/tools/tools.c modules/abi/wd_abi.h
+	@mkdir -p $(@D)
+	$(WASI_CC) $(WASI_FLAGS) -I modules/abi $< -o $@
+
+$(BUILDDIR)/schedule.wasm: modules/schedule/schedule.c modules/abi/wd_abi.h
 	@mkdir -p $(@D)
 	$(WASI_CC) $(WASI_FLAGS) -I modules/abi $< -o $@
 
