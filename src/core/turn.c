@@ -38,6 +38,7 @@ struct wd_turn {
   wd_instance *eng;
   wd_instance *tools;
   wd_worker *worker;
+  wd_worker *tool_worker;
   char *worker_root;
   wd_instance *policy;
   int pending_kind;
@@ -699,6 +700,8 @@ static wd_worker *worker_for(wd_turn *turn) {
       turn->worker_root != NULL && turn->root != NULL &&
       strcmp(turn->worker_root, turn->root) == 0)
     return turn->worker;
+  if (turn->worker != NULL && turn->tool_worker == turn->worker)
+    return turn->worker;
   wd_worker_free(turn->worker);
   turn->worker = NULL;
   free(turn->worker_root);
@@ -764,14 +767,17 @@ static int exec_submit(wd_turn *turn, cbor_item_t *args, char **err) {
     *err = strdup("exec.run: the command is missing or empty");
     return -1;
   }
-  int rc = wd_worker_submit(worker_for(turn), argv, timeout, WD_TOOL_MAX, err);
+  wd_worker *worker = worker_for(turn);
+  int rc = wd_worker_submit(worker, argv, timeout, WD_TOOL_MAX, err);
   if (rc != 0) {
     free(err != NULL ? *err : NULL);
     if (err != NULL) *err = NULL;
-    rc = wd_worker_submit(worker_for(turn), argv, timeout, WD_TOOL_MAX, err);
+    worker = worker_for(turn);
+    rc = wd_worker_submit(worker, argv, timeout, WD_TOOL_MAX, err);
   }
   free(copy);
   if (rc != 0) return -1;
+  turn->tool_worker = worker;
   turn->pending_kind = 2;
   return 1;
 }
@@ -1018,9 +1024,12 @@ int wd_turn_resume_tool(wd_turn *turn, wd_turn_emit emit, void *ctx,
     return -1;
   }
   turn->pending_kind = 0;
+  wd_worker *worker =
+      turn->tool_worker != NULL ? turn->tool_worker : worker_for(turn);
+  turn->tool_worker = NULL;
   wd_proc_result result;
   cbor_item_t *reply = NULL;
-  int rc = wd_worker_complete(worker_for(turn), WD_TOOL_MAX, &result, err);
+  int rc = wd_worker_complete(worker, WD_TOOL_MAX, &result, err);
   if (rc == 0) {
     exec_reply(&result, &reply);
     wd_proc_result_free(&result);
@@ -1035,6 +1044,12 @@ int wd_turn_resume_tool(wd_turn *turn, wd_turn_emit emit, void *ctx,
   wd_put(message, "kind", wd_text("result"));
   wd_put(message, "payload", reply);
   return drive(turn, message, emit, ctx, err);
+}
+
+int wd_turn_cancel_tool(wd_turn *turn) {
+  if (turn == NULL || turn->pending_kind != 2 || turn->worker == NULL) return 0;
+  wd_worker_kill(turn->worker);
+  return 1;
 }
 
 int wd_turn_pending_kind(wd_turn *turn) { return turn != NULL ? turn->pending_kind : 0; }

@@ -297,6 +297,21 @@ static void handle_model_select(wd_server *srv, wd_conn *conn, uint64_t id,
   conn_arm(srv, conn);
 }
 
+static void handle_session_cancel(wd_server *srv, wd_conn *conn, uint64_t id,
+                                  cbor_item_t *params) {
+  char *session_id = wd_text_copy(wd_get(params, "id"));
+  bool cancelled = false;
+  if (session_id != NULL && srv->turn != NULL &&
+      strcmp(srv->turn_session, session_id) == 0 &&
+      wd_turn_pending_kind(srv->turn) == 2)
+    cancelled = wd_turn_cancel_tool(srv->turn) != 0;
+  free(session_id);
+  cbor_item_t *result = wd_map(1);
+  wd_put(result, "cancelled", cbor_build_bool(cancelled));
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
 static void handle_session_fork(wd_server *srv, wd_conn *conn, uint64_t id,
                                 cbor_item_t *params) {
   char *session_id = wd_text_copy(wd_get(params, "id"));
@@ -1044,6 +1059,8 @@ static void handle_request(wd_server *srv, wd_conn *conn, uint64_t id,
     handle_session_get(srv, conn, id, params);
   } else if (strcmp(method, "session.resume") == 0) {
     handle_session_resume(srv, conn, id, params);
+  } else if (strcmp(method, "session.cancel") == 0) {
+    handle_session_cancel(srv, conn, id, params);
   } else if (strcmp(method, "session.fork") == 0) {
     handle_session_fork(srv, conn, id, params);
   } else if (strcmp(method, "session.set_model") == 0) {

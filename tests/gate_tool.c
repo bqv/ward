@@ -460,6 +460,44 @@ int main(void) {
   assert(exec_end != NULL);
   wd_free(exec_end);
 
+  cbor_item_t *slow = NULL;
+  cbor_item_t *slow_prompt = wd_map(2);
+  wd_put(slow_prompt, "id", wd_text(session));
+  wd_put(slow_prompt, "text", wd_text("/run sleep 5"));
+  assert(request(&a, a.next_id++, "session.prompt", slow_prompt, &slow, NULL) ==
+         0);
+  uint64_t slow_call = 0;
+  uint64_t slow_epoch = 0;
+  assert(wd_uint_of(wd_get(wd_get(slow, "approval"), "call"), &slow_call));
+  assert(wd_uint_of(wd_get(wd_get(slow, "approval"), "epoch"), &slow_epoch));
+  wd_free(slow);
+
+  cbor_item_t *slow_ok = NULL;
+  cbor_item_t *slow_respond = wd_map(4);
+  wd_put(slow_respond, "session", wd_text(session));
+  wd_put(slow_respond, "call", wd_uint(slow_call));
+  wd_put(slow_respond, "epoch", wd_uint(slow_epoch));
+  wd_put(slow_respond, "allow", cbor_build_bool(true));
+  catalog_ok = false;
+  assert(request(&a, a.next_id++, "approval.respond", slow_respond, &slow_ok,
+                 &catalog_ok) == 0);
+  assert(catalog_ok);
+  wd_free(slow_ok);
+
+  cbor_item_t *cancel = NULL;
+  cbor_item_t *cancel_params = wd_map(1);
+  wd_put(cancel_params, "id", wd_text(session));
+  bool cancelled = false;
+  assert(request(&a, a.next_id++, "session.cancel", cancel_params, &cancel,
+                 &cancelled) == 0);
+  assert(cancelled);
+  wd_free(cancel);
+  uint64_t stopped_at = wu_now_ms();
+  cbor_item_t *after_cancel = wait_event(&a, "turn.end", NULL);
+  assert(after_cancel != NULL);
+  assert(wu_now_ms() - stopped_at < 3000);
+  wd_free(after_cancel);
+
   cbor_item_t *second = NULL;
   cbor_item_t *prompt2 = wd_map(2);
   wd_put(prompt2, "id", wd_text(session));

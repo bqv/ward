@@ -316,6 +316,12 @@ int wd_worker_fd(const wd_worker *worker) {
   return worker != NULL ? worker->fd : -1;
 }
 
+void wd_worker_kill(wd_worker *worker) {
+  if (worker == NULL || worker->dead) return;
+  worker->dead = true;
+  (void)kill(worker->pid, SIGKILL);
+}
+
 int wd_worker_complete(wd_worker *worker, size_t max_bytes,
                        wd_proc_result *out, char **err) {
   if (worker == NULL || worker->dead) {

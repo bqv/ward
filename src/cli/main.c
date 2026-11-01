@@ -38,6 +38,7 @@ static void usage(FILE *out) {
           "  session get    <id> [--json]\n"
           "  session resume <id> [--from SEQ] [--follow] [--json]\n"
           "  session approve <id> --call N --epoch N (--allow|--deny)\n"
+          "  session cancel <id>\n"
           "  session fork   <id> [--from SEQ] [--json]\n"
           "  session set-model <id> <model>\n"
           "  model list     [--json]\n"
@@ -436,6 +437,19 @@ static int command_session(int argc, char **argv) {
       wd_free(root);
       if (!follow) break;
     }
+    rc = 0;
+  } else if (strcmp(sub, "cancel") == 0) {
+    if (id == NULL) {
+      fprintf(stderr, "ward: session cancel needs an id\n");
+      goto done;
+    }
+    cbor_item_t *params = wd_map(1);
+    wd_put(params, "id", wd_text(id));
+    if (client_request(&client, "session.cancel", params, &result) != 0)
+      goto done;
+    bool cancelled = false;
+    wd_bool_of(wd_get(result, "cancelled"), &cancelled);
+    printf(cancelled ? "cancelled\n" : "nothing to cancel\n");
     rc = 0;
   } else if (strcmp(sub, "fork") == 0) {
     if (id == NULL) {

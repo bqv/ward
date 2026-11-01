@@ -153,6 +153,17 @@ The provider request is the one blocking call left: `net.request` runs curl insi
 daemon's loop, so a slow model still stalls it. That is the next thing to lift, and the
 parking machinery is now in place to do it.
 
+Thirteenth: `session.cancel`. With a tool in a worker there is something to stop: the method
+kills that worker, the daemon sees its socket close, the turn takes the failure as the tool
+result and finishes with `turn.end`. The daemon gate starts `/run sleep 5`, approves it,
+cancels it and asserts `turn.end` arrives in under three seconds — which also proves the
+turn is genuinely parked rather than the loop being busy.
+
+The bug that first made this hang is worth remembering: the resume must complete the worker
+it submitted to, not whatever `worker_for` returns afterwards, because a killed worker looks
+exactly like a worker that needs replacing and the reply would then be awaited on a socket
+that was never written to.
+
 What is still missing from M1 is therefore the provider half of the asynchronous split.
 
 M0's acceptance is 1,000 round-trips/s over UDS and a fuzz-clean decoder. A

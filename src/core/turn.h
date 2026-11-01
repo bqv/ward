@@ -34,5 +34,6 @@ int wd_turn_pending_kind(wd_turn *turn);
 int wd_turn_worker_fd(wd_turn *turn);
 int wd_turn_resume_tool(wd_turn *turn, wd_turn_emit emit, void *ctx,
                         char **err);
+int wd_turn_cancel_tool(wd_turn *turn);
 
 #endif

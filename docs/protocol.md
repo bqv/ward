@@ -116,6 +116,10 @@ to `"unset"`. The id is minted by the daemon, never supplied by the client.
 
 **`session.get`** — params `{id: text}`. Returns `{session: <session>}`, or `not_found`.
 
+**`session.cancel`** — params `{id}`. Kills the command running for that session, if one is:
+the worker dies, the turn takes the failure as the tool result and finishes with `turn.end`.
+Answers `{cancelled: bool}`, false when nothing was running.
+
 **`session.fork`** — params `{id, from?: uint}`. Copies the parent's durable events with
 `seq <= from` (all of them when `from` is absent) into a new session with its own id and
 sequence numbers, then appends `session.forked {from, at}` so the transcript records the
