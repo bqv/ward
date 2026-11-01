@@ -63,7 +63,7 @@ static char *socket_from_args(int argc, char **argv) {
   for (int i = 0; i < argc; i++)
     if (strcmp(argv[i], "--socket") == 0 && i + 1 < argc)
       return strdup(argv[i + 1]);
-  const char *env = getenv("HARNESS_SOCKET");
+  const char *env = getenv("WARD_SOCKET");
   if (env != NULL && env[0] != '\0') return strdup(env);
   return wu_default_socket_path();
 }

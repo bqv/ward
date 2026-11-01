@@ -26,6 +26,7 @@ core = static_library('ward-core',
   files(
     'src/proto/frame.c',
     'src/proto/codec.c',
+    'src/proto/sse.c',
     'src/core/util.c',
     'src/core/ids.c',
     'src/core/log.c',
@@ -45,13 +46,14 @@ ward = executable('ward',
 )
 
 test_env = environment()
-test_env.set('HARNESS_BIN', ward.full_path())
+test_env.set('WARD_BIN', ward.full_path())
 
 foreach t : [
   ['frame', 'tests/frame_test.c'],
   ['codec', 'tests/codec_test.c'],
   ['log', 'tests/log_test.c'],
   ['session', 'tests/session_test.c'],
+  ['sse', 'tests/sse_test.c'],
 ]
   exe = executable(t[0] + '-test', t[1],
     include_directories: inc,
@@ -67,6 +69,13 @@ fuzz = executable('fuzz-codec-test', 'tests/fuzz_codec.c',
   dependencies: [libcbor, libzstd],
 )
 test('fuzz', fuzz, timeout: 180)
+
+fuzz_sse = executable('fuzz-sse-test', 'tests/fuzz_sse.c',
+  include_directories: inc,
+  link_with: core,
+  dependencies: [libcbor, libzstd],
+)
+test('fuzz-sse', fuzz_sse, timeout: 180)
 
 gate = executable('gate-m0-test', 'tests/gate_m0.c',
   include_directories: inc,

@@ -36,8 +36,11 @@ with a fuzz gate; `ward up` with handshake, `session.create/list/get/resume`
 and replay; a CLI client; and the M0 gate, which measures round-trips rather
 than assuming them.
 
-Next: the SSE client, fuzzed before the provider client exists, then the Wasmtime
-host and the `engine`/`driver` pair (M1). A method is served only when
+M1 is under way: the SSE framer (`src/proto/sse.c`) is written, bounded and fuzzed;
+it is the transport half of the provider, and the guest still decides what an event
+means.
+
+Next: the Wasmtime host and the `engine`/`driver` pair (M1). A method is served only when
 `docs/protocol.md` says it is served — the rest of the frozen list answers
 `not_supported`.
 

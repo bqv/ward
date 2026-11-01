@@ -127,9 +127,9 @@ static double seconds_since(struct timespec *start) {
 
 int main(void) {
   alarm(120);
-  const char *bin = getenv("HARNESS_BIN");
+  const char *bin = getenv("WARD_BIN");
   if (bin == NULL) {
-    fprintf(stderr, "gate: HARNESS_BIN is not set\n");
+    fprintf(stderr, "gate: WARD_BIN is not set\n");
     return 1;
   }
   char root[] = "/tmp/ward-gate-XXXXXX";

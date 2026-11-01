@@ -2,8 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-#ifndef HARNESS_CORE_UTIL_H
-#define HARNESS_CORE_UTIL_H
+#ifndef WARD_CORE_UTIL_H
+#define WARD_CORE_UTIL_H
 
 #include <stdbool.h>
 #include <stddef.h>

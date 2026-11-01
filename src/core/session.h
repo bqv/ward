@@ -2,8 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-#ifndef HARNESS_CORE_SESSION_H
-#define HARNESS_CORE_SESSION_H
+#ifndef WARD_CORE_SESSION_H
+#define WARD_CORE_SESSION_H
 
 #include <cbor.h>
 #include <stdbool.h>
