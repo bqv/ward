@@ -133,7 +133,7 @@ static int quic_err(char **err, const char *msg) {
 
 static uint64_t quic_clock(uint64_t now_ms) {
   if (now_ms != 0) return now_ms;
-  return wu_now_ms();
+  return wd_now_ms();
 }
 
 static ngtcp2_tstamp quic_ts(uint64_t now_ms) {
@@ -153,7 +153,7 @@ static int quic_global_init(void) {
 static void quic_rand(uint8_t *dest, size_t destlen,
                       const ngtcp2_rand_ctx *rand_ctx) {
   (void)rand_ctx;
-  if (wu_random_bytes(dest, destlen) != 0) memset(dest, 0, destlen);
+  if (wd_random_bytes(dest, destlen) != 0) memset(dest, 0, destlen);
 }
 
 static int quic_new_cid(ngtcp2_conn *conn, ngtcp2_cid *cid,
@@ -162,10 +162,10 @@ static int quic_new_cid(ngtcp2_conn *conn, ngtcp2_cid *cid,
   (void)conn;
   (void)user_data;
   if (cidlen > NGTCP2_MAX_CIDLEN) return NGTCP2_ERR_CALLBACK_FAILURE;
-  if (wu_random_bytes(cid->data, cidlen) != 0)
+  if (wd_random_bytes(cid->data, cidlen) != 0)
     return NGTCP2_ERR_CALLBACK_FAILURE;
   cid->datalen = cidlen;
-  if (wu_random_bytes(token->data, sizeof(token->data)) != 0)
+  if (wd_random_bytes(token->data, sizeof(token->data)) != 0)
     return NGTCP2_ERR_CALLBACK_FAILURE;
   return 0;
 }
@@ -822,7 +822,7 @@ static void quic_accept(wd_quic *q, struct sockaddr_storage *remote,
     free(cc);
     return;
   }
-  if (wu_random_bytes(cc->scid.data, WD_QUIC_SCIDLEN) != 0) {
+  if (wd_random_bytes(cc->scid.data, WD_QUIC_SCIDLEN) != 0) {
     quic_stream_free(cc->stream);
     free(cc);
     return;
@@ -1384,9 +1384,9 @@ int wd_quic_client_start(wd_quic_client *client, const char *host,
   memset(&dcid, 0, sizeof(dcid));
   memset(&scid, 0, sizeof(scid));
   dcid.datalen = NGTCP2_MIN_INITIAL_DCIDLEN;
-  if (wu_random_bytes(dcid.data, dcid.datalen) != 0) goto fail;
+  if (wd_random_bytes(dcid.data, dcid.datalen) != 0) goto fail;
   scid.datalen = WD_QUIC_SCIDLEN;
-  if (wu_random_bytes(scid.data, scid.datalen) != 0) goto fail;
+  if (wd_random_bytes(scid.data, scid.datalen) != 0) goto fail;
   ngtcp2_settings_default(&settings);
   settings.initial_ts = quic_ts(c->now_ms);
   settings.no_pmtud = 1;

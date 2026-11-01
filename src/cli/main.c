@@ -70,7 +70,7 @@ static int read_full(int fd, void *buf, size_t len) {
 }
 
 static int write_full(int fd, const void *buf, size_t len) {
-  return wu_write_all(fd, buf, len);
+  return wd_write_all(fd, buf, len);
 }
 
 static char *socket_from_args(int argc, char **argv) {
@@ -79,7 +79,7 @@ static char *socket_from_args(int argc, char **argv) {
       return strdup(argv[i + 1]);
   const char *env = getenv("WARD_SOCKET");
   if (env != NULL && env[0] != '\0') return strdup(env);
-  return wu_default_socket_path();
+  return wd_default_socket_path();
 }
 
 static int client_connect(wd_client *client, const char *path) {
@@ -272,11 +272,11 @@ static int do_up(int argc, char **argv) {
   char *socket_default = NULL;
   char *state_default = NULL;
   if (socket_path == NULL) {
-    socket_default = wu_default_socket_path();
+    socket_default = wd_default_socket_path();
     socket_path = socket_default;
   }
   if (state_dir == NULL) {
-    state_default = wu_default_state_dir();
+    state_default = wd_default_state_dir();
     state_dir = state_default;
   }
   wd_up_config cfg = {.socket_path = socket_path, .state_dir = state_dir};

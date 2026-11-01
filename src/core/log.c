@@ -78,8 +78,8 @@ int hlog_append(hlog *log, const uint8_t *data, size_t len) {
   prefix[2] = (uint8_t)((n >> 16) & 0xff);
   prefix[3] = (uint8_t)((n >> 24) & 0xff);
   int rc = 0;
-  if (wu_write_all(log->fd, prefix, sizeof(prefix)) != 0 ||
-      wu_write_all(log->fd, frame, n) != 0 || fsync(log->fd) != 0)
+  if (wd_write_all(log->fd, prefix, sizeof(prefix)) != 0 ||
+      wd_write_all(log->fd, frame, n) != 0 || fsync(log->fd) != 0)
     rc = -1;
   free(frame);
   return rc;

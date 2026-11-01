@@ -28,7 +28,7 @@ static int collect(void *ctx, const uint8_t *data, size_t len) {
 int main(void) {
   char dir[] = "/tmp/ward-log-XXXXXX";
   assert(mkdtemp(dir) != NULL);
-  char *path = wu_path_join(dir, "events.zst");
+  char *path = wd_path_join(dir, "events.zst");
   assert(path != NULL);
 
   hlog log;

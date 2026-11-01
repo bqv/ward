@@ -10,15 +10,15 @@
 #include <stdint.h>
 #include <sys/types.h>
 
-int wu_mkdir_p(const char *path, mode_t mode);
-int wu_write_all(int fd, const void *buf, size_t len);
-int wu_fsync_dir(const char *path);
-char *wu_path_join(const char *a, const char *b);
-char *wu_default_state_dir(void);
-char *wu_default_socket_path(void);
-char *wu_boot_id(void);
-uint64_t wu_now_ms(void);
-bool wu_pid_alive(long pid);
-int wu_random_bytes(void *buf, size_t len);
+int wd_mkdir_p(const char *path, mode_t mode);
+int wd_write_all(int fd, const void *buf, size_t len);
+int wd_fsync_dir(const char *path);
+char *wd_path_join(const char *a, const char *b);
+char *wd_default_state_dir(void);
+char *wd_default_socket_path(void);
+char *wd_boot_id(void);
+uint64_t wd_now_ms(void);
+bool wd_pid_alive(long pid);
+int wd_random_bytes(void *buf, size_t len);
 
 #endif

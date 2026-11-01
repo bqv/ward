@@ -64,7 +64,7 @@ static int write_text(const char *path, const char *data, size_t len,
     close(fd);
     return -1;
   }
-  int rc = wu_write_all(fd, data, len);
+  int rc = wd_write_all(fd, data, len);
   close(fd);
   return rc;
 }
@@ -504,7 +504,7 @@ wd_pki *wd_pki_open(const char *dir, char **err) {
   if (err != NULL) *err = NULL;
   char message[160];
   message[0] = '\0';
-  if (wu_mkdir_p(dir, 0700) != 0) {
+  if (wd_mkdir_p(dir, 0700) != 0) {
     if (err != NULL)
       *err = strdup("cannot create the pki directory");
     return NULL;
@@ -515,12 +515,12 @@ wd_pki *wd_pki_open(const char *dir, char **err) {
     return NULL;
   }
   pki->dir = strdup(dir);
-  pki->ca_cert_path = wu_path_join(dir, "ca.crt");
-  pki->ca_key_path = wu_path_join(dir, "ca.key");
-  pki->server_cert_path = wu_path_join(dir, "server.crt");
-  pki->server_key_path = wu_path_join(dir, "server.key");
-  pki->crl_path = wu_path_join(dir, "crl.pem");
-  pki->devices_path = wu_path_join(dir, "devices.txt");
+  pki->ca_cert_path = wd_path_join(dir, "ca.crt");
+  pki->ca_key_path = wd_path_join(dir, "ca.key");
+  pki->server_cert_path = wd_path_join(dir, "server.crt");
+  pki->server_key_path = wd_path_join(dir, "server.key");
+  pki->crl_path = wd_path_join(dir, "crl.pem");
+  pki->devices_path = wd_path_join(dir, "devices.txt");
   if (pki->dir == NULL || pki->ca_cert_path == NULL ||
       pki->ca_key_path == NULL || pki->server_cert_path == NULL ||
       pki->server_key_path == NULL || pki->crl_path == NULL ||
@@ -622,7 +622,7 @@ char *wd_pki_token_mint(wd_pki *pki, uint64_t now_ms, uint64_t ttl_ms,
                         int scope) {
   wd_pki_token *slot = &pki->tokens[pki->token_at % WD_PKI_TOKENS];
   pki->token_at++;
-  if (wu_random_bytes(slot->secret, sizeof(slot->secret)) != 0) return NULL;
+  if (wd_random_bytes(slot->secret, sizeof(slot->secret)) != 0) return NULL;
   slot->expires_ms = now_ms + (ttl_ms == 0 ? WD_PKI_TOKEN_TTL : ttl_ms);
   slot->scope = scope;
   slot->used = false;
@@ -776,7 +776,7 @@ int wd_pki_issue(wd_pki *pki, const char *csr_pem, int scope, char **cert_pem,
   snprintf(grown[count].serial, sizeof(grown[count].serial), "%s", serial);
   snprintf(grown[count].name, sizeof(grown[count].name), "%s", name);
   grown[count].scope = scope;
-  grown[count].issued_ms = wu_now_ms();
+  grown[count].issued_ms = wd_now_ms();
   grown[count].revoked = false;
   if (write_devices(grown, count + 1, pki->devices_path, err, cap) != 0) {
     free(grown);

@@ -33,96 +33,96 @@ int main(void) {
   char dir[] = "/tmp/ward-session-XXXXXX";
   assert(mkdtemp(dir) != NULL);
 
-  hs_store store;
-  assert(hs_open(&store, dir) == 0);
+  wd_store store;
+  assert(wd_store_open(&store, dir) == 0);
   assert(store.len == 0);
 
-  hs_session *first = NULL;
-  hs_session *second = NULL;
-  assert(hs_create(&store, "/tmp", "deepseek", &first) == 0);
+  wd_session *first = NULL;
+  wd_session *second = NULL;
+  assert(wd_session_create(&store, "/tmp", "deepseek", &first) == 0);
   usleep(2000);
-  assert(hs_create(&store, "/tmp", NULL, &second) == 0);
+  assert(wd_session_create(&store, "/tmp", NULL, &second) == 0);
   assert(store.len == 2);
   assert(strcmp(store.items[0]->id, second->id) == 0);
   assert(strcmp(second->model, "unset") == 0);
-  assert(hs_find(&store, first->id) == first);
-  assert(hs_find(&store, "nope") == NULL);
+  assert(wd_session_find(&store, first->id) == first);
+  assert(wd_session_find(&store, "nope") == NULL);
 
   uint64_t seq = 0;
   cbor_item_t *payload = wd_map(1);
-  wd_put(payload, "session", hs_to_cbor(first));
-  assert(hs_emit(first, "session.updated", payload, &seq) == 0);
+  wd_put(payload, "session", wd_session_to_cbor(first));
+  assert(wd_session_emit(first, "session.updated", payload, &seq) == 0);
   assert(seq == 1);
   assert(first->last_seq == 1);
 
   seen s = {0};
-  assert(hs_replay(first, 0, note, &s) == 1);
+  assert(wd_session_replay(first, 0, note, &s) == 1);
   assert(s.count == 1);
   assert(s.seqs[0] == 1);
   assert(strcmp(s.kinds[0], "session.updated") == 0);
 
   seen from_one = {0};
-  assert(hs_replay(first, 1, note, &from_one) == 0);
+  assert(wd_session_replay(first, 1, note, &from_one) == 0);
   assert(from_one.count == 0);
 
   char first_id[WD_ID_LEN];
   snprintf(first_id, sizeof(first_id), "%s", first->id);
-  hs_close(&store);
+  wd_store_close(&store);
 
-  assert(hs_open(&store, dir) == 0);
+  assert(wd_store_open(&store, dir) == 0);
   assert(store.len == 2);
-  hs_session *reloaded = hs_find(&store, first_id);
+  wd_session *reloaded = wd_session_find(&store, first_id);
   assert(reloaded != NULL);
   assert(reloaded->last_seq == 1);
   assert(strcmp(reloaded->cwd, "/tmp") == 0);
   assert(strcmp(reloaded->model, "deepseek") == 0);
   uint64_t checkpoint = 0;
-  assert(hs_checkpoint(reloaded, "before the branch", &checkpoint) == 0);
+  assert(wd_session_checkpoint(reloaded, "before the branch", &checkpoint) == 0);
   assert(checkpoint == 2);
   uint64_t last = 0;
-  assert(hs_last_checkpoint(reloaded, &last) == 0);
+  assert(wd_session_last_checkpoint(reloaded, &last) == 0);
   assert(last == checkpoint);
-  assert(hs_checkpoint(reloaded, "", &checkpoint) == 0);
+  assert(wd_session_checkpoint(reloaded, "", &checkpoint) == 0);
   assert(checkpoint == 3);
-  assert(hs_last_checkpoint(reloaded, &last) == 0);
+  assert(wd_session_last_checkpoint(reloaded, &last) == 0);
   assert(last == 3);
 
-  hs_session *child = NULL;
-  assert(hs_fork(&store, reloaded, 0, &child) == 0);
+  wd_session *child = NULL;
+  assert(wd_session_fork(&store, reloaded, 0, &child) == 0);
   assert(child != NULL);
   assert(strcmp(child->id, reloaded->id) != 0);
   assert(strcmp(child->cwd, reloaded->cwd) == 0);
   assert(strcmp(child->model, reloaded->model) == 0);
   assert(child->last_seq == 4);
   seen fork_seen = {0};
-  assert(hs_replay(child, 0, note, &fork_seen) == 4);
+  assert(wd_session_replay(child, 0, note, &fork_seen) == 4);
   assert(strcmp(fork_seen.kinds[0], "session.updated") == 0);
   assert(strcmp(fork_seen.kinds[1], "session.checkpoint") == 0);
   assert(strcmp(fork_seen.kinds[2], "session.checkpoint") == 0);
   assert(strcmp(fork_seen.kinds[3], "session.forked") == 0);
 
-  hs_session *cut = NULL;
-  assert(hs_fork(&store, reloaded, 1, &cut) == 0);
+  wd_session *cut = NULL;
+  assert(wd_session_fork(&store, reloaded, 1, &cut) == 0);
   assert(cut->last_seq == 2);
-  hs_session *hist = NULL;
-  assert(hs_create(&store, "/tmp", NULL, &hist) == 0);
+  wd_session *hist = NULL;
+  assert(wd_session_create(&store, "/tmp", NULL, &hist) == 0);
   cbor_item_t *asked = wd_map(1);
   wd_put(asked, "text", wd_text("first question"));
-  assert(hs_emit(hist, "session.prompted", asked, NULL) == 0);
+  assert(wd_session_emit(hist, "session.prompted", asked, NULL) == 0);
   cbor_item_t *delta = wd_map(1);
   wd_put(delta, "text", wd_text("first answer"));
-  assert(hs_emit(hist, "text.delta", delta, NULL) == 0);
-  assert(hs_emit(hist, "turn.end", wd_map(0), NULL) == 0);
+  assert(wd_session_emit(hist, "text.delta", delta, NULL) == 0);
+  assert(wd_session_emit(hist, "turn.end", wd_map(0), NULL) == 0);
   cbor_item_t *asked2 = wd_map(1);
   wd_put(asked2, "text", wd_text("second question"));
-  assert(hs_emit(hist, "session.prompted", asked2, NULL) == 0);
+  assert(wd_session_emit(hist, "session.prompted", asked2, NULL) == 0);
   cbor_item_t *delta2 = wd_map(1);
   wd_put(delta2, "text", wd_text("second answer"));
-  assert(hs_emit(hist, "text.delta", delta2, NULL) == 0);
-  assert(hs_emit(hist, "turn.end", wd_map(0), NULL) == 0);
+  assert(wd_session_emit(hist, "text.delta", delta2, NULL) == 0);
+  assert(wd_session_emit(hist, "turn.end", wd_map(0), NULL) == 0);
 
   cbor_item_t *built = NULL;
-  assert(hs_history(hist, 0, &built) == 0);
+  assert(wd_session_history(hist, 0, &built) == 0);
   assert(cbor_array_size(built) == 4);
   cbor_item_t **turns = cbor_array_handle(built);
   char *role = wd_text_copy(wd_get(turns[0], "role"));
@@ -139,15 +139,15 @@ int main(void) {
   free(text);
   wd_free(built);
 
-  assert(hs_history(hist, 30, &built) == 0);
+  assert(wd_session_history(hist, 30, &built) == 0);
   assert(cbor_array_size(built) == 2);
   wd_free(built);
 
   cbor_item_t *compacted = wd_map(2);
   wd_put(compacted, "through", wd_uint(hist->last_seq));
   wd_put(compacted, "summary", wd_text("they talked twice"));
-  assert(hs_emit(hist, "session.compacted", compacted, NULL) == 0);
-  assert(hs_history(hist, 0, &built) == 0);
+  assert(wd_session_emit(hist, "session.compacted", compacted, NULL) == 0);
+  assert(wd_session_history(hist, 0, &built) == 0);
   assert(cbor_array_size(built) == 1);
   turns = cbor_array_handle(built);
   role = wd_text_copy(wd_get(turns[0], "role"));
@@ -158,7 +158,7 @@ int main(void) {
   free(text);
   wd_free(built);
 
-  hs_close(&store);
+  wd_store_close(&store);
 
   printf("session tests passed\n");
   return 0;

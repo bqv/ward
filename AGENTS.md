@@ -133,7 +133,7 @@ its own process group and replying with the wait status, flags and output. A wor
 died is replaced by the next call, which is the containment the design asks for; exec no
 longer runs as a direct child of the daemon.
 
-Eleventh: `session.fork`. The copy is over the log, not over memory: `hs_fork` creates a
+Eleventh: `session.fork`. The copy is over the log, not over memory: `wd_session_fork` creates a
 fresh session with the parent's cwd and model, replays the parent's durable events up to the
 chosen sequence, re-emits them under the child's own sequence numbering and appends
 `session.forked {from, at}` so the lineage is in the transcript rather than only in a table.
@@ -170,7 +170,7 @@ replays from zero: every durable event is there, sequence numbers are contiguous
 `last_seq`, `turn.end` and `approval.requested` both survived, the lock file was reclaimed
 from the dead pid, and a new prompt runs against the restarted daemon.
 
-Writing it found a small but real bug: `hs_open` scanned every directory under the state
+Writing it found a small but real bug: `wd_store_open` scanned every directory under the state
 root as a session, so `cache/` and `pki/` produced "skipping unreadable session" warnings on
 every start. It now treats only a 16-hex-character name as a session id.
 
@@ -188,7 +188,7 @@ rest — the label fields vanished from every response while the daemon log show
 read. `session_cbor` now builds the map at its exact size, and `session.list` counts first
 and then allocates the array, because the same bug bites `cbor_array_push` on a `wd_array(0)`.
 
-Sixteenth: usage stats. `hs_measure` replays a session's log and counts its events, its
+Sixteenth: usage stats. `wd_session_measure` replays a session's log and counts its events, its
 `turn.end`s and the bytes of its text deltas; `stats.session` and `stats.global` serve the
 counters and `ward stats [<id>]` prints them. No tokenizer yet, so this is the shape cost
 accounting will price rather than a price — the numbers are exact, the money is absent.
@@ -206,20 +206,20 @@ lines are gated.
 Eighteenth: checkpoints and undo. `session.checkpoint {id, label?}` appends a
 `session.checkpoint` event and answers its sequence; `session.undo {id, to?}` branches the
 session at that sequence, or at the last checkpoint when asked for none, through the same
-`hs_fork` the fork method uses. Undo is a branch rather than a rewrite because the log is
+`wd_session_fork` the fork method uses. Undo is a branch rather than a rewrite because the log is
 append-only — the old line stays, and the client gets a new session id whose transcript is
 the history up to the checkpoint.
 
 Nineteenth: the log records the question. `session.prompt` appends `session.prompted {text}`
 before running the turn, so a transcript can be read back as a conversation rather than as
-answers to questions nobody kept. `hs_measure` counts those bytes as `prompt_bytes`, and
+answers to questions nobody kept. `wd_session_measure` counts those bytes as `prompt_bytes`, and
 both stats methods report it beside `text_bytes`.
 
 This is the foundation the two remaining M2 rows need: compaction summarises what was asked,
 and a price needs both sides of it. Until this commit the user's own words were not durable
 anywhere, which would have made either row a guess.
 
-Twentieth: history. `hs_history` replays a log into `[{role, text}]` pairs — a
+Twentieth: history. `wd_session_history` replays a log into `[{role, text}]` pairs — a
 `session.prompted` opens a user turn and the deltas up to `turn.end` close an assistant one —
 and trims from the front to a byte budget. The daemon sets it on the turn before each
 prompt, core merges it into the provider payload and `modules/provider` writes the messages
@@ -237,13 +237,20 @@ budget for exists. The field shape will not change when it does.
 Twenty-second: compaction. `session.compact {id}` builds the session's history, asks the
 provider through the same guest and job machinery a turn uses — `wd_turn_compact` runs it
 with a fixed summarise instruction — appends `session.compacted {through, summary}` and
-answers the summary. `hs_history` honours it: replaying that event throws away the turns
+answers the summary. `wd_session_history` honours it: replaying that event throws away the turns
 collected so far and starts again from a single `system` message, so later prompts send the
 summary plus whatever happened after it.
 
 This is the one method that still waits: the summary is its result, so it is fetched
 synchronously with the turn's timeout rather than parked. Everything else on the prompt path
 parks.
+
+Twenty-third: one prefix. The `hs_` and `wu_` prefixes were the last survivors of an older
+split, so the session store and the utility helpers moved to `wd_` with the second segment
+naming the owner: `wd_store_open`, `wd_session_emit`, `wd_session_history`, `wd_path_join`,
+`wd_now_ms`. Every exported core symbol is now `wd_*`; nothing outside a header carries a
+prefix at all. It is a rename with no behaviour change, which is why the same 21 tests pass
+before and after.
 
 M0's acceptance is 1,000 round-trips/s over UDS and a fuzz-clean decoder. A
 gate that is not measured is not met.
@@ -376,5 +383,8 @@ These are decisions, not open questions; a change to one is a design change.
   retyped; never edit it by hand, re-fetch it if it ever needs refreshing. Every
   new source file starts with the three-line Exhibit A notice from the bottom of
   that file. Not MIT, and not the IUL — this repository is open source.
+- Every exported core symbol is `wd_`-prefixed, with the owner in the second segment
+  (`wd_turn_*`, `wd_http_*`, `wd_session_*`). `static` helpers carry no prefix. There is one
+  namespace, not one per module.
 - Say when something is a guess rather than a measurement. The parity table is
   the scope contract; anything not in it waits.

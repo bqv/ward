@@ -23,7 +23,7 @@ static const char schema[] =
 
 wd_labels *wd_labels_open(const char *dir, char **err) {
   if (err != NULL) *err = NULL;
-  char *path = wu_path_join(dir, "labels.db");
+  char *path = wd_path_join(dir, "labels.db");
   if (path == NULL) {
     if (err != NULL) *err = strdup("out of memory");
     return NULL;
@@ -71,13 +71,13 @@ static int update(wd_labels *labels, const char *sql, const char *id,
   if (text != NULL) {
     if (sqlite3_bind_text(stmt, 1, text, -1, SQLITE_TRANSIENT) == SQLITE_OK &&
         sqlite3_bind_text(stmt, 2, id, -1, SQLITE_TRANSIENT) == SQLITE_OK &&
-        sqlite3_bind_int64(stmt, 3, (sqlite3_int64)wu_now_ms()) == SQLITE_OK &&
+        sqlite3_bind_int64(stmt, 3, (sqlite3_int64)wd_now_ms()) == SQLITE_OK &&
         sqlite3_step(stmt) == SQLITE_DONE)
       rc = 0;
   } else {
     if (sqlite3_bind_int(stmt, 1, flag) == SQLITE_OK &&
         sqlite3_bind_text(stmt, 2, id, -1, SQLITE_TRANSIENT) == SQLITE_OK &&
-        sqlite3_bind_int64(stmt, 3, (sqlite3_int64)wu_now_ms()) == SQLITE_OK &&
+        sqlite3_bind_int64(stmt, 3, (sqlite3_int64)wd_now_ms()) == SQLITE_OK &&
         sqlite3_step(stmt) == SQLITE_DONE)
       rc = 0;
   }

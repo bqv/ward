@@ -112,15 +112,15 @@ static int write_file(const char *path, const char *text) {
 }
 
 static void enable_cache(wasm_config_t *config, const char *state_dir) {
-  char *dir = wu_path_join(state_dir, "cache");
+  char *dir = wd_path_join(state_dir, "cache");
   char *store = NULL;
   char *toml = NULL;
   if (dir == NULL) return;
-  if (wu_mkdir_p(dir, 0700) != 0) goto done;
-  store = wu_path_join(dir, "wasmtime");
-  toml = wu_path_join(dir, "wasmtime.toml");
+  if (wd_mkdir_p(dir, 0700) != 0) goto done;
+  store = wd_path_join(dir, "wasmtime");
+  toml = wd_path_join(dir, "wasmtime.toml");
   if (store == NULL || toml == NULL) goto done;
-  if (wu_mkdir_p(store, 0700) != 0) goto done;
+  if (wd_mkdir_p(store, 0700) != 0) goto done;
   char text[1024];
   snprintf(text, sizeof(text), "[cache]\nenabled = true\ndirectory = \"%s\"\n",
            store);

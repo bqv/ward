@@ -94,18 +94,18 @@ static void pump(wd_quic *server, wd_quic_client *client) {
   }
   if (n > 0) (void)poll(fds, n, 20);
   if (server != NULL) {
-    (void)wd_quic_service(server, wu_now_ms());
+    (void)wd_quic_service(server, wd_now_ms());
     (void)wd_quic_flush(server);
   }
   if (client != NULL) {
-    (void)wd_quic_client_service(client, wu_now_ms());
+    (void)wd_quic_client_service(client, wd_now_ms());
     (void)wd_quic_client_flush(client);
   }
 }
 
 static bool wait_state(wd_quic *server, wd_quic_client *client,
                        enum wd_quic_state want, uint64_t deadline_ms) {
-  while (wu_now_ms() < deadline_ms) {
+  while (wd_now_ms() < deadline_ms) {
     if (wd_quic_client_state(client) == want) return true;
     if (wd_quic_client_state(client) == WD_QUIC_CLOSED && want != WD_QUIC_CLOSED)
       return false;
@@ -116,7 +116,7 @@ static bool wait_state(wd_quic *server, wd_quic_client *client,
 
 static bool wait_frames(wd_quic *server, wd_quic_client *client,
                         client_state *st, int wanted, uint64_t deadline_ms) {
-  while (wu_now_ms() < deadline_ms) {
+  while (wd_now_ms() < deadline_ms) {
     if (st->frames >= wanted) return true;
     if (wd_quic_client_state(client) == WD_QUIC_CLOSED) return false;
     pump(server, client);
@@ -199,12 +199,12 @@ int main(void) {
   wd_quic_client *client = wd_quic_client_new(&cfg, &err);
   assert(client != NULL);
   assert(wd_quic_client_start(client, "127.0.0.1", (uint16_t)port,
-                              wu_now_ms()) == 0);
-  assert(wait_state(server, client, WD_QUIC_ESTABLISHED, wu_now_ms() + 5000));
+                              wd_now_ms()) == 0);
+  assert(wait_state(server, client, WD_QUIC_ESTABLISHED, wd_now_ms() + 5000));
   assert(wd_quic_client_verified(client) == 1);
 
   assert(client_send(client, WD_FRAME_HELLO, 0, 0, wd_hello()) == 0);
-  assert(wait_frames(server, client, &state, 1, wu_now_ms() + 5000));
+  assert(wait_frames(server, client, &state, 1, wd_now_ms() + 5000));
   assert(srv_state.opened == 1);
   assert(srv_state.frames == 1);
   assert(srv_state.authed);
@@ -223,10 +223,10 @@ int main(void) {
   wd_quic_client *guest = wd_quic_client_new(&anon_cfg, &err);
   assert(guest != NULL);
   assert(wd_quic_client_start(guest, "127.0.0.1", (uint16_t)port,
-                              wu_now_ms()) == 0);
-  assert(wait_state(server, guest, WD_QUIC_ESTABLISHED, wu_now_ms() + 5000));
+                              wd_now_ms()) == 0);
+  assert(wait_state(server, guest, WD_QUIC_ESTABLISHED, wd_now_ms() + 5000));
   assert(client_send(guest, WD_FRAME_HELLO, 0, 0, wd_hello()) == 0);
-  assert(wait_frames(server, guest, &anon, 1, wu_now_ms() + 5000));
+  assert(wait_frames(server, guest, &anon, 1, wd_now_ms() + 5000));
   assert(srv_state.opened == 2);
   assert(!srv_state.authed);
   assert(srv_state.scope[0] == '\0');
@@ -245,9 +245,9 @@ int main(void) {
   wd_quic_client *banned = wd_quic_client_new(&revoked_cfg, &err);
   assert(banned != NULL);
   assert(wd_quic_client_start(banned, "127.0.0.1", (uint16_t)port,
-                              wu_now_ms()) == 0);
-  uint64_t deadline = wu_now_ms() + 4000;
-  while (wu_now_ms() < deadline && srv_state.opened == 2)
+                              wd_now_ms()) == 0);
+  uint64_t deadline = wd_now_ms() + 4000;
+  while (wd_now_ms() < deadline && srv_state.opened == 2)
     pump(server, banned);
   assert(srv_state.opened == 2);
   wd_quic_client_free(banned);

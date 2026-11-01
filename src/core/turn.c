@@ -446,7 +446,7 @@ static int edit_run(wd_turn *turn, const uint8_t *in, size_t in_len,
     free(next);
     return tool_fail("fs.edit: cannot rewrite the file", out, out_len);
   }
-  int written = wu_write_all(wfd, next, total);
+  int written = wd_write_all(wfd, next, total);
   close(wfd);
   free(next);
   if (written != 0) return tool_fail("fs.edit: cannot rewrite the file", out, out_len);
@@ -573,7 +573,7 @@ static int fs_write(wd_turn *turn, const uint8_t *in, size_t in_len,
     free(text);
     return tool_fail("fs.write: cannot create the file", out, out_len);
   }
-  int written = wu_write_all(fd, text, len);
+  int written = wd_write_all(fd, text, len);
   close(fd);
   free(text);
   if (written != 0) return tool_fail("fs.write: cannot write the file", out, out_len);

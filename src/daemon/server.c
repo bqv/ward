@@ -88,7 +88,7 @@ typedef struct {
   char *socket_path;
   char *state_dir;
   char *lock_path;
-  hs_store store;
+  wd_store store;
   wd_engine *engine;
   wd_turn *turn;
   wd_pki *pki;
@@ -116,13 +116,13 @@ static int token_http;
 
 static void conn_close(wd_server *srv, wd_conn *conn);
 static void conn_release(wd_server *srv, wd_conn *conn);
-static cbor_item_t *session_cbor(wd_server *srv, hs_session *session);
+static cbor_item_t *session_cbor(wd_server *srv, wd_session *session);
 static wd_turn *server_turn(wd_server *srv, char **err);
 static void watch_worker(wd_server *srv);
 static void unwatch_worker(wd_server *srv);
 static void watch_http(wd_server *srv);
 static void unwatch_http(wd_server *srv);
-static void park_or_finish(wd_server *srv, hs_session *session, int rc,
+static void park_or_finish(wd_server *srv, wd_session *session, int rc,
                            char *err);
 static int conn_arm(wd_server *srv, wd_conn *conn);
 static int conn_flush(wd_conn *conn);
@@ -225,7 +225,7 @@ static int conn_send_error(wd_conn *conn, uint64_t id, wd_error err,
                         wd_response_err(id, err, message), true);
 }
 
-static void conn_broadcast(wd_server *srv, hs_session *session,
+static void conn_broadcast(wd_server *srv, wd_session *session,
                            const char *kind, uint64_t seq,
                            cbor_item_t *payload) {
   cbor_item_t *event = wd_event(kind, payload);
@@ -327,16 +327,16 @@ static void handle_session_fork(wd_server *srv, wd_conn *conn, uint64_t id,
   char *session_id = wd_text_copy(wd_get(params, "id"));
   uint64_t from = 0;
   wd_uint_of(wd_get(params, "from"), &from);
-  hs_session *parent =
-      session_id != NULL ? hs_find(&srv->store, session_id) : NULL;
+  wd_session *parent =
+      session_id != NULL ? wd_session_find(&srv->store, session_id) : NULL;
   if (parent == NULL) {
     free(session_id);
     conn_send_error(conn, id, WD_ERR_NOT_FOUND, "no such session");
     conn_arm(srv, conn);
     return;
   }
-  hs_session *child = NULL;
-  if (hs_fork(&srv->store, parent, from, &child) != 0) {
+  wd_session *child = NULL;
+  if (wd_session_fork(&srv->store, parent, from, &child) != 0) {
     free(session_id);
     respond_internal(srv, conn, id, "cannot fork the session");
     return;
@@ -352,8 +352,8 @@ static void handle_session_set_model(wd_server *srv, wd_conn *conn, uint64_t id,
                                      cbor_item_t *params) {
   char *session_id = wd_text_copy(wd_get(params, "id"));
   char *name = wd_text_copy(wd_get(params, "model"));
-  hs_session *session =
-      session_id != NULL ? hs_find(&srv->store, session_id) : NULL;
+  wd_session *session =
+      session_id != NULL ? wd_session_find(&srv->store, session_id) : NULL;
   if (session == NULL) {
     free(session_id);
     free(name);
@@ -369,7 +369,7 @@ static void handle_session_set_model(wd_server *srv, wd_conn *conn, uint64_t id,
     return;
   }
   uint64_t seq = 0;
-  if (hs_set_model(session, name, &seq) != 0) {
+  if (wd_session_set_model(session, name, &seq) != 0) {
     free(session_id);
     free(name);
     respond_internal(srv, conn, id, "cannot record the model change");
@@ -388,7 +388,7 @@ static void handle_session_set_model(wd_server *srv, wd_conn *conn, uint64_t id,
   free(name);
 }
 
-static cbor_item_t *session_cbor(wd_server *srv, hs_session *session) {
+static cbor_item_t *session_cbor(wd_server *srv, wd_session *session) {
   wd_label label;
   bool tagged = wd_labels_get(srv->labels, session->id, &label) == 0;
   cbor_item_t *item = wd_map(tagged ? 9 : 5);
@@ -409,16 +409,16 @@ static cbor_item_t *session_cbor(wd_server *srv, hs_session *session) {
 static void handle_stats_session(wd_server *srv, wd_conn *conn, uint64_t id,
                                  cbor_item_t *params) {
   char *session_id = wd_text_copy(wd_get(params, "id"));
-  hs_session *session =
-      session_id != NULL ? hs_find(&srv->store, session_id) : NULL;
+  wd_session *session =
+      session_id != NULL ? wd_session_find(&srv->store, session_id) : NULL;
   free(session_id);
   if (session == NULL) {
     conn_send_error(conn, id, WD_ERR_NOT_FOUND, "no such session");
     conn_arm(srv, conn);
     return;
   }
-  hs_stats stats;
-  if (hs_measure(session, &stats) != 0) {
+  wd_session_stats stats;
+  if (wd_session_measure(session, &stats) != 0) {
     respond_internal(srv, conn, id, "cannot read the session log");
     return;
   }
@@ -449,11 +449,11 @@ static void handle_stats_session(wd_server *srv, wd_conn *conn, uint64_t id,
 }
 
 static void handle_stats_global(wd_server *srv, wd_conn *conn, uint64_t id) {
-  hs_stats total;
+  wd_session_stats total;
   memset(&total, 0, sizeof(total));
   for (size_t i = 0; i < srv->store.len; i++) {
-    hs_stats one;
-    if (hs_measure(srv->store.items[i], &one) == 0) {
+    wd_session_stats one;
+    if (wd_session_measure(srv->store.items[i], &one) == 0) {
       total.events += one.events;
       total.turns += one.turns;
       total.text_bytes += one.text_bytes;
@@ -473,8 +473,8 @@ static void handle_stats_global(wd_server *srv, wd_conn *conn, uint64_t id) {
 static void handle_session_label(wd_server *srv, wd_conn *conn, uint64_t id,
                                  cbor_item_t *params, int kind) {
   char *session_id = wd_text_copy(wd_get(params, "id"));
-  hs_session *session =
-      session_id != NULL ? hs_find(&srv->store, session_id) : NULL;
+  wd_session *session =
+      session_id != NULL ? wd_session_find(&srv->store, session_id) : NULL;
   if (session == NULL) {
     free(session_id);
     conn_send_error(conn, id, WD_ERR_NOT_FOUND, "no such session");
@@ -514,7 +514,7 @@ static void handle_session_label(wd_server *srv, wd_conn *conn, uint64_t id,
   cbor_item_t *logged = wd_map(1);
   wd_put(logged, "session", session_cbor(srv, session));
   uint64_t seq = 0;
-  if (hs_emit(session, "session.updated", logged, &seq) == 0) {
+  if (wd_session_emit(session, "session.updated", logged, &seq) == 0) {
     cbor_item_t *event = wd_map(1);
     wd_put(event, "session", session_cbor(srv, session));
     conn_broadcast(srv, session, "session.updated", seq, event);
@@ -529,8 +529,8 @@ static void handle_session_label(wd_server *srv, wd_conn *conn, uint64_t id,
 static void handle_session_compact(wd_server *srv, wd_conn *conn, uint64_t id,
                                    cbor_item_t *params) {
   char *session_id = wd_text_copy(wd_get(params, "id"));
-  hs_session *session =
-      session_id != NULL ? hs_find(&srv->store, session_id) : NULL;
+  wd_session *session =
+      session_id != NULL ? wd_session_find(&srv->store, session_id) : NULL;
   free(session_id);
   if (session == NULL) {
     conn_send_error(conn, id, WD_ERR_NOT_FOUND, "no such session");
@@ -538,7 +538,7 @@ static void handle_session_compact(wd_server *srv, wd_conn *conn, uint64_t id,
     return;
   }
   cbor_item_t *history = NULL;
-  if (hs_history(session, 0, &history) != 0 || cbor_array_size(history) == 0) {
+  if (wd_session_history(session, 0, &history) != 0 || cbor_array_size(history) == 0) {
     if (history != NULL) wd_free(history);
     conn_send_error(conn, id, WD_ERR_CONFLICT, "nothing to compact");
     conn_arm(srv, conn);
@@ -568,7 +568,7 @@ static void handle_session_compact(wd_server *srv, wd_conn *conn, uint64_t id,
   wd_put(record, "through", wd_uint(session->last_seq));
   wd_put(record, "summary", wd_text(summary));
   uint64_t seq = 0;
-  if (hs_emit(session, "session.compacted", record, &seq) != 0) {
+  if (wd_session_emit(session, "session.compacted", record, &seq) != 0) {
     free(summary);
     respond_internal(srv, conn, id, "cannot record the summary");
     return;
@@ -590,8 +590,8 @@ static void handle_session_checkpoint(wd_server *srv, wd_conn *conn,
                                       uint64_t id, cbor_item_t *params) {
   char *session_id = wd_text_copy(wd_get(params, "id"));
   char *label = wd_text_copy(wd_get(params, "label"));
-  hs_session *session =
-      session_id != NULL ? hs_find(&srv->store, session_id) : NULL;
+  wd_session *session =
+      session_id != NULL ? wd_session_find(&srv->store, session_id) : NULL;
   free(session_id);
   if (session == NULL) {
     free(label);
@@ -600,7 +600,7 @@ static void handle_session_checkpoint(wd_server *srv, wd_conn *conn,
     return;
   }
   uint64_t seq = 0;
-  int rc = hs_checkpoint(session, label, &seq);
+  int rc = wd_session_checkpoint(session, label, &seq);
   free(label);
   if (rc != 0) {
     respond_internal(srv, conn, id, "cannot record the checkpoint");
@@ -618,15 +618,15 @@ static void handle_session_undo(wd_server *srv, wd_conn *conn, uint64_t id,
   char *session_id = wd_text_copy(wd_get(params, "id"));
   uint64_t to = 0;
   bool have_to = wd_uint_of(wd_get(params, "to"), &to);
-  hs_session *session =
-      session_id != NULL ? hs_find(&srv->store, session_id) : NULL;
+  wd_session *session =
+      session_id != NULL ? wd_session_find(&srv->store, session_id) : NULL;
   free(session_id);
   if (session == NULL) {
     conn_send_error(conn, id, WD_ERR_NOT_FOUND, "no such session");
     conn_arm(srv, conn);
     return;
   }
-  if (!have_to && hs_last_checkpoint(session, &to) != 0) {
+  if (!have_to && wd_session_last_checkpoint(session, &to) != 0) {
     conn_send_error(conn, id, WD_ERR_CONFLICT,
                     "the session has no checkpoint to undo to");
     conn_arm(srv, conn);
@@ -638,8 +638,8 @@ static void handle_session_undo(wd_server *srv, wd_conn *conn, uint64_t id,
     conn_arm(srv, conn);
     return;
   }
-  hs_session *branch = NULL;
-  if (hs_fork(&srv->store, session, to, &branch) != 0) {
+  wd_session *branch = NULL;
+  if (wd_session_fork(&srv->store, session, to, &branch) != 0) {
     respond_internal(srv, conn, id, "cannot branch from the checkpoint");
     return;
   }
@@ -664,7 +664,7 @@ static void handle_session_search(wd_server *srv, wd_conn *conn, uint64_t id,
   }
   cbor_item_t *list = wd_array(count);
   for (size_t i = 0; i < count; i++) {
-    hs_session *session = hs_find(&srv->store, rows[i].id);
+    wd_session *session = wd_session_find(&srv->store, rows[i].id);
     if (session == NULL) continue;
     cbor_item_t *entry = session_cbor(srv, session);
     bool pushed = cbor_array_push(list, entry);
@@ -712,8 +712,8 @@ static void handle_session_create(wd_server *srv, wd_conn *conn, uint64_t id,
     conn_arm(srv, conn);
     return;
   }
-  hs_session *session = NULL;
-  if (hs_create(&srv->store, cwd, model, &session) != 0) {
+  wd_session *session = NULL;
+  if (wd_session_create(&srv->store, cwd, model, &session) != 0) {
     free(cwd);
     free(model);
     respond_internal(srv, conn, id, "cannot create session");
@@ -726,7 +726,7 @@ static void handle_session_create(wd_server *srv, wd_conn *conn, uint64_t id,
   cbor_item_t *logged = wd_map(1);
   wd_put(logged, "session", session_cbor(srv, session));
   uint64_t seq = 0;
-  if (hs_emit(session, "session.updated", logged, &seq) != 0) {
+  if (wd_session_emit(session, "session.updated", logged, &seq) != 0) {
     respond_internal(srv, conn, id, "cannot append session event");
     return;
   }
@@ -755,7 +755,7 @@ static void handle_session_list(wd_server *srv, wd_conn *conn, uint64_t id,
   wd_bool_of(wd_get(params, "include_archived"), &include_archived);
   size_t show = 0;
   for (size_t i = 0; i < srv->store.len && show < limit; i++) {
-    const hs_session *session = srv->store.items[i];
+    const wd_session *session = srv->store.items[i];
     wd_label label;
     if (wd_labels_get(srv->labels, session->id, &label) == 0 &&
         label.archived && !include_archived)
@@ -765,7 +765,7 @@ static void handle_session_list(wd_server *srv, wd_conn *conn, uint64_t id,
   cbor_item_t *list = wd_array(show);
   size_t pushed_count = 0;
   for (size_t i = 0; i < srv->store.len && pushed_count < show; i++) {
-    hs_session *session = srv->store.items[i];
+    wd_session *session = srv->store.items[i];
     wd_label label;
     if (wd_labels_get(srv->labels, session->id, &label) == 0 &&
         label.archived && !include_archived)
@@ -790,7 +790,7 @@ static void handle_session_get(wd_server *srv, wd_conn *conn, uint64_t id,
     conn_arm(srv, conn);
     return;
   }
-  hs_session *session = hs_find(&srv->store, want);
+  wd_session *session = wd_session_find(&srv->store, want);
   free(want);
   if (session == NULL) {
     conn_send_error(conn, id, WD_ERR_NOT_FOUND, "no such session");
@@ -817,11 +817,11 @@ static int replay_event(void *ctx, uint64_t seq, cbor_item_t *event) {
   return 0;
 }
 
-static void replay_into(wd_server *srv, wd_conn *conn, hs_session *session,
+static void replay_into(wd_server *srv, wd_conn *conn, wd_session *session,
                         uint64_t sub, uint64_t from) {
   uint64_t to = session->last_seq;
   replay_ctx rc = {.srv = srv, .conn = conn, .sub = sub};
-  hs_replay(session, from, replay_event, &rc);
+  wd_session_replay(session, from, replay_event, &rc);
   cbor_item_t *done = wd_map(2);
   wd_put(done, "from", wd_uint(from));
   wd_put(done, "to", wd_uint(to));
@@ -849,7 +849,7 @@ static void handle_session_resume(wd_server *srv, wd_conn *conn, uint64_t id,
     }
     have_from = true;
   }
-  hs_session *session = hs_find(&srv->store, want);
+  wd_session *session = wd_session_find(&srv->store, want);
   free(want);
   if (session == NULL) {
     conn_send_error(conn, id, WD_ERR_NOT_FOUND, "no such session");
@@ -878,7 +878,7 @@ static void handle_session_resume(wd_server *srv, wd_conn *conn, uint64_t id,
 
 typedef struct {
   wd_server *srv;
-  hs_session *session;
+  wd_session *session;
 } wd_turn_ctx;
 
 static cbor_item_t *dup_item(cbor_item_t *item) {
@@ -897,7 +897,7 @@ static int turn_emit(void *ctx, const char *event, cbor_item_t *payload,
   wd_turn_ctx *tc = ctx;
   cbor_item_t *logged = payload != NULL ? dup_item(payload) : wd_map(0);
   uint64_t seq = 0;
-  if (logged == NULL || hs_emit(tc->session, event, logged, &seq) != 0) {
+  if (logged == NULL || wd_session_emit(tc->session, event, logged, &seq) != 0) {
     *err = strdup("cannot append the turn event");
     return -1;
   }
@@ -933,8 +933,8 @@ static void handle_session_prompt(wd_server *srv, wd_conn *conn, uint64_t id,
                                   cbor_item_t *params) {
   char *session_id = wd_text_copy(wd_get(params, "id"));
   char *text = wd_text_copy(wd_get(params, "text"));
-  hs_session *session =
-      session_id != NULL ? hs_find(&srv->store, session_id) : NULL;
+  wd_session *session =
+      session_id != NULL ? wd_session_find(&srv->store, session_id) : NULL;
   if (session == NULL) {
     free(session_id);
     free(text);
@@ -959,13 +959,13 @@ static void handle_session_prompt(wd_server *srv, wd_conn *conn, uint64_t id,
     return;
   }
   cbor_item_t *history = NULL;
-  if (hs_history(session, 8192, &history) == 0)
+  if (wd_session_history(session, 8192, &history) == 0)
     wd_turn_set_history(turn, history);
 
   cbor_item_t *asked = wd_map(1);
   wd_put(asked, "text", wd_text(text));
   uint64_t asked_seq = 0;
-  if (hs_emit(session, "session.prompted", asked, &asked_seq) == 0) {
+  if (wd_session_emit(session, "session.prompted", asked, &asked_seq) == 0) {
     cbor_item_t *event = wd_map(1);
     wd_put(event, "text", wd_text(text));
     conn_broadcast(srv, session, "session.prompted", asked_seq, event);
@@ -1001,7 +1001,7 @@ static void handle_session_prompt(wd_server *srv, wd_conn *conn, uint64_t id,
       respond_internal(srv, conn, id, "the turn asked for an unnamed approval");
       return;
     }
-    wd_approval_request(srv->approvals, session->id, call, epoch, wu_now_ms(),
+    wd_approval_request(srv->approvals, session->id, call, epoch, wd_now_ms(),
                         WD_APPROVAL_TTL_MS);
     snprintf(srv->turn_session, sizeof(srv->turn_session), "%s", session->id);
     srv->turn_call = call;
@@ -1058,7 +1058,7 @@ static void watch_http(wd_server *srv) {
   if (epoll_ctl(srv->epoll_fd, EPOLL_CTL_ADD, fd, &ev) == 0) srv->http_fd = fd;
 }
 
-static void park_or_finish(wd_server *srv, hs_session *session, int rc,
+static void park_or_finish(wd_server *srv, wd_session *session, int rc,
                            char *err) {
   if (rc == WD_TURN_PENDING) {
     int kind = wd_turn_pending_kind(srv->turn);
@@ -1079,7 +1079,7 @@ static void park_or_finish(wd_server *srv, hs_session *session, int rc,
       char *reason = NULL;
       if (wd_turn_pending(srv->turn, &call, &epoch, &reason) == 0) {
         wd_approval_request(srv->approvals, session->id, call, epoch,
-                            wu_now_ms(), WD_APPROVAL_TTL_MS);
+                            wd_now_ms(), WD_APPROVAL_TTL_MS);
         srv->turn_call = call;
         srv->turn_epoch = epoch;
         free(reason);
@@ -1100,7 +1100,7 @@ static void park_or_finish(wd_server *srv, hs_session *session, int rc,
 }
 
 static void tool_done(wd_server *srv) {
-  hs_session *session = hs_find(&srv->store, srv->turn_session);
+  wd_session *session = wd_session_find(&srv->store, srv->turn_session);
   if (srv->turn == NULL || session == NULL) {
     unwatch_worker(srv);
     srv->turn_session[0] = '\0';
@@ -1113,7 +1113,7 @@ static void tool_done(wd_server *srv) {
 }
 
 static void http_done(wd_server *srv) {
-  hs_session *session = hs_find(&srv->store, srv->turn_session);
+  wd_session *session = wd_session_find(&srv->store, srv->turn_session);
   if (srv->turn == NULL || session == NULL) {
     unwatch_http(srv);
     srv->turn_session[0] = '\0';
@@ -1130,7 +1130,7 @@ static bool resume_turn(wd_server *srv, const char *session_id, bool allow,
   if (srv->turn == NULL ||
       strcmp(srv->turn_session, session_id) != 0)
     return false;
-  hs_session *session = hs_find(&srv->store, session_id);
+  wd_session *session = wd_session_find(&srv->store, session_id);
   if (session == NULL) return false;
   wd_turn_ctx tc = {srv, session};
   int rc = wd_turn_resume(srv->turn, allow, turn_emit, &tc, err);
@@ -1151,7 +1151,7 @@ static bool resume_turn(wd_server *srv, const char *session_id, bool allow,
     char *reason = NULL;
     if (wd_turn_pending(srv->turn, &call, &epoch, &reason) == 0) {
       wd_approval_request(srv->approvals, session->id, call, epoch,
-                          wu_now_ms(), WD_APPROVAL_TTL_MS);
+                          wd_now_ms(), WD_APPROVAL_TTL_MS);
       snprintf(srv->turn_session, sizeof(srv->turn_session), "%s",
                session->id);
       srv->turn_call = call;
@@ -1179,7 +1179,7 @@ static void handle_approval_respond(wd_server *srv, wd_conn *conn, uint64_t id,
   }
   wd_approval_state state =
       wd_approval_answer(srv->approvals, session_id, call, epoch, allow,
-                         wu_now_ms());
+                         wd_now_ms());
   if (state == WD_APPROVAL_ALREADY_RESOLVED) {
     free(session_id);
     conn_send_error(conn, id, WD_ERR_ALREADY_RESOLVED,
@@ -1193,7 +1193,7 @@ static void handle_approval_respond(wd_server *srv, wd_conn *conn, uint64_t id,
     conn_arm(srv, conn);
     return;
   }
-  hs_session *session = hs_find(&srv->store, session_id);
+  wd_session *session = wd_session_find(&srv->store, session_id);
   if (session != NULL) {
     wd_turn_ctx tc = {srv, session};
     cbor_item_t *resolved = wd_map(3);
@@ -1283,7 +1283,7 @@ static void handle_device_pair(wd_server *srv, wd_conn *conn, uint64_t id,
     conn_arm(srv, conn);
     return;
   }
-  char *token = wd_pki_token_mint(srv->pki, wu_now_ms(), WD_PAIR_TTL_MS, scope);
+  char *token = wd_pki_token_mint(srv->pki, wd_now_ms(), WD_PAIR_TTL_MS, scope);
   if (token == NULL) {
     conn_send_error(conn, id, WD_ERR_INTERNAL, "cannot mint a token");
     conn_arm(srv, conn);
@@ -1297,7 +1297,7 @@ static void handle_device_pair(wd_server *srv, wd_conn *conn, uint64_t id,
   wd_put(result, "scope", wd_text(wd_scope_name(scope)));
   wd_put(result, "endpoint",
          wd_text(srv->quic_endpoint != NULL ? srv->quic_endpoint : ""));
-  wd_put(result, "expires_ms", wd_uint(wu_now_ms() + WD_PAIR_TTL_MS));
+  wd_put(result, "expires_ms", wd_uint(wd_now_ms() + WD_PAIR_TTL_MS));
   free(token);
   conn_send_cached(conn, id, wd_response_ok(id, result));
   conn_arm(srv, conn);
@@ -1315,7 +1315,7 @@ static void handle_device_enrol(wd_server *srv, wd_conn *conn, uint64_t id,
     return;
   }
   int scope = WD_SCOPE_NONE;
-  if (wd_pki_token_redeem(srv->pki, token, wu_now_ms(), &scope) != 0) {
+  if (wd_pki_token_redeem(srv->pki, token, wd_now_ms(), &scope) != 0) {
     free(token);
     free(csr);
     conn_send_error(conn, id, WD_ERR_PERMISSION_DENIED,
@@ -1501,7 +1501,7 @@ static void handle_control(wd_server *srv, wd_conn *conn, cbor_item_t *root) {
   if (!wd_uint_of(wd_get(root, "from"), &from)) return;
   for (size_t i = 0; i < conn->subs_len; i++) {
     if (conn->subs[i].id != sub) continue;
-    hs_session *session = hs_find(&srv->store, conn->subs[i].session_id);
+    wd_session *session = wd_session_find(&srv->store, conn->subs[i].session_id);
     if (session != NULL) replay_into(srv, conn, session, sub, from);
     return;
   }
@@ -1627,7 +1627,7 @@ static void quic_open(void *ctx, wd_quic_stream *stream) {
   }
   conn->fd = -1;
   conn->stream = stream;
-  conn->deadline_ms = wu_now_ms() + WD_HANDSHAKE_MS;
+  conn->deadline_ms = wd_now_ms() + WD_HANDSHAKE_MS;
   conn->next_sub = 1;
   srv->conns[slot] = conn;
 }
@@ -1809,7 +1809,7 @@ static void server_accept(wd_server *srv) {
       close(fd);
       continue;
     }
-    conn->deadline_ms = wu_now_ms() + WD_HANDSHAKE_MS;
+    conn->deadline_ms = wd_now_ms() + WD_HANDSHAKE_MS;
     conn->next_sub = 1;
     srv->conns[slot] = conn;
     struct epoll_event ev;
@@ -1824,7 +1824,7 @@ static void server_accept(wd_server *srv) {
 }
 
 static int acquire_lock(const char *path) {
-  char *boot = wu_boot_id();
+  char *boot = wd_boot_id();
   if (boot == NULL) return -1;
   for (int attempt = 0; attempt < 2; attempt++) {
     int fd = open(path, O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC, 0600);
@@ -1832,7 +1832,7 @@ static int acquire_lock(const char *path) {
       char body[256];
       int n = snprintf(body, sizeof(body),
                        "{\"pid\":%ld,\"boot_id\":\"%s\",\"started_at\":%llu}\n",
-                       (long)getpid(), boot, (unsigned long long)wu_now_ms());
+                       (long)getpid(), boot, (unsigned long long)wd_now_ms());
       ssize_t written = write(fd, body, (size_t)n);
       close(fd);
       free(boot);
@@ -1865,7 +1865,7 @@ static int acquire_lock(const char *path) {
       same_boot = end != NULL && (size_t)(end - start) == strlen(boot) &&
                   memcmp(start, boot, strlen(boot)) == 0;
     }
-    if (same_boot && wu_pid_alive(pid)) {
+    if (same_boot && wd_pid_alive(pid)) {
       free(boot);
       errno = EEXIST;
       return -1;
@@ -1963,19 +1963,19 @@ int wd_up_run(const wd_up_config *cfg) {
   srv.socket_path = strdup(cfg->socket_path);
   srv.state_dir = strdup(cfg->state_dir);
   if (srv.socket_path == NULL || srv.state_dir == NULL) goto cleanup;
-  if (wu_mkdir_p(srv.state_dir, 0700) != 0) {
+  if (wd_mkdir_p(srv.state_dir, 0700) != 0) {
     fprintf(stderr, "ward: cannot create %s: %s\n", srv.state_dir,
             strerror(errno));
     goto cleanup;
   }
-  srv.lock_path = wu_path_join(srv.state_dir, "ward.lock");
+  srv.lock_path = wd_path_join(srv.state_dir, "ward.lock");
   if (srv.lock_path == NULL) goto cleanup;
   if (acquire_lock(srv.lock_path) != 0) {
     fprintf(stderr, "ward: %s is already served by another daemon\n",
             srv.state_dir);
     goto cleanup;
   }
-  if (hs_open(&srv.store, srv.state_dir) != 0) {
+  if (wd_store_open(&srv.store, srv.state_dir) != 0) {
     fprintf(stderr, "ward: cannot open state directory\n");
     goto cleanup;
   }
@@ -2023,7 +2023,7 @@ int wd_up_run(const wd_up_config *cfg) {
   if (epoll_ctl(srv.epoll_fd, EPOLL_CTL_ADD, srv.signal_fd, &ev) != 0)
     goto cleanup;
 
-  char *pki_dir = wu_path_join(srv.state_dir, "pki");
+  char *pki_dir = wd_path_join(srv.state_dir, "pki");
   char *pki_err = NULL;
   if (pki_dir == NULL) goto cleanup;
   srv.pki = wd_pki_open(pki_dir, &pki_err);
@@ -2044,7 +2044,7 @@ int wd_up_run(const wd_up_config *cfg) {
 
   struct epoll_event events[64];
   while (!srv.stop) {
-    uint64_t now = wu_now_ms();
+    uint64_t now = wd_now_ms();
     int timeout = next_timeout(&srv, now);
     int n = epoll_wait(srv.epoll_fd, events, 64, timeout);
     if (n < 0) {
@@ -2052,7 +2052,7 @@ int wd_up_run(const wd_up_config *cfg) {
       break;
     }
     if (n == 0 && srv.quic != NULL) {
-      (void)wd_quic_service(srv.quic, wu_now_ms());
+      (void)wd_quic_service(srv.quic, wd_now_ms());
       (void)wd_quic_flush(srv.quic);
     }
     for (int i = 0; i < n; i++) {
@@ -2070,7 +2070,7 @@ int wd_up_run(const wd_up_config *cfg) {
         continue;
       }
       if (ptr == &token_quic) {
-        if (wd_quic_service(srv.quic, wu_now_ms()) != 0) {
+        if (wd_quic_service(srv.quic, wd_now_ms()) != 0) {
           fprintf(stderr, "ward: quic socket failed\n");
           srv.stop = true;
           break;
@@ -2112,7 +2112,7 @@ int wd_up_run(const wd_up_config *cfg) {
         }
       }
     }
-    sweep(&srv, wu_now_ms());
+    sweep(&srv, wd_now_ms());
   }
 
 cleanup:
@@ -2132,7 +2132,7 @@ cleanup:
   wd_labels_free(srv.labels);
   free(srv.default_model);
   free(srv.quic_endpoint);
-  hs_close(&srv.store);
+  wd_store_close(&srv.store);
   free(srv.socket_path);
   free(srv.state_dir);
   free(srv.lock_path);

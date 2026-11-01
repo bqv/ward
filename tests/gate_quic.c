@@ -53,8 +53,8 @@ static int uds_send(int fd, uint16_t type, uint64_t sub, uint64_t seq,
   if (body == NULL) return -1;
   uint8_t header[WD_FRAME_HEADER];
   wd_frame_header(header, type, sub, seq, (uint32_t)len);
-  int rc = wu_write_all(fd, header, sizeof(header));
-  if (rc == 0) rc = wu_write_all(fd, body, len);
+  int rc = wd_write_all(fd, header, sizeof(header));
+  if (rc == 0) rc = wd_write_all(fd, body, len);
   free(body);
   return rc;
 }
@@ -133,13 +133,13 @@ static void quic_answer(void *ctx, const wd_frame *frame) {
 static void pump(wd_quic_client *client) {
   struct pollfd pfd = {.fd = wd_quic_client_fd(client), .events = POLLIN};
   (void)poll(&pfd, 1, 20);
-  (void)wd_quic_client_service(client, wu_now_ms());
+  (void)wd_quic_client_service(client, wd_now_ms());
   (void)wd_quic_client_flush(client);
 }
 
 static bool wait_state(wd_quic_client *client, enum wd_quic_state want,
                        uint64_t deadline_ms) {
-  while (wu_now_ms() < deadline_ms) {
+  while (wd_now_ms() < deadline_ms) {
     if (wd_quic_client_state(client) == want) return true;
     if (wd_quic_client_state(client) == WD_QUIC_CLOSED) return false;
     pump(client);
@@ -149,7 +149,7 @@ static bool wait_state(wd_quic_client *client, enum wd_quic_state want,
 
 static bool wait_flag(wd_quic_client *client, const bool *flag, bool want,
                       uint64_t deadline_ms) {
-  while (wu_now_ms() < deadline_ms) {
+  while (wd_now_ms() < deadline_ms) {
     if (*flag == want) return true;
     if (wd_quic_client_state(client) == WD_QUIC_CLOSED) return *flag == want;
     pump(client);
@@ -196,8 +196,8 @@ static wd_quic_client *connect_client(const char *host, uint16_t port,
     free(err);
     return NULL;
   }
-  if (wd_quic_client_start(client, host, port, wu_now_ms()) != 0 ||
-      !wait_state(client, WD_QUIC_ESTABLISHED, wu_now_ms() + 5000)) {
+  if (wd_quic_client_start(client, host, port, wd_now_ms()) != 0 ||
+      !wait_state(client, WD_QUIC_ESTABLISHED, wd_now_ms() + 5000)) {
     fprintf(stderr, "gate: quic handshake failed\n");
     wd_quic_client_free(client);
     return NULL;
@@ -207,7 +207,7 @@ static wd_quic_client *connect_client(const char *host, uint16_t port,
 
 static bool quic_hello(wd_quic_client *client, answer *state) {
   if (quic_send(client, WD_FRAME_HELLO, 0, 0, wd_hello()) != 0) return false;
-  return wait_flag(client, &state->welcome, true, wu_now_ms() + 5000);
+  return wait_flag(client, &state->welcome, true, wd_now_ms() + 5000);
 }
 
 static bool quic_call(wd_quic_client *client, answer *state, uint64_t id,
@@ -215,7 +215,7 @@ static bool quic_call(wd_quic_client *client, answer *state, uint64_t id,
   if (quic_send(client, WD_FRAME_REQUEST, 0, 0, wd_request(id, method, params)) !=
       0)
     return false;
-  return wait_flag(client, &state->response, true, wu_now_ms() + 5000);
+  return wait_flag(client, &state->response, true, wd_now_ms() + 5000);
 }
 
 static char *error_name(cbor_item_t *result) {
@@ -344,7 +344,7 @@ int main(void) {
   assert(token != NULL && pinned != NULL && paired_endpoint != NULL);
   assert(strcmp(pinned, fingerprint) == 0);
   assert(strcmp(paired_scope, "phone") == 0);
-  assert(expires > wu_now_ms());
+  assert(expires > wd_now_ms());
   char *paired_colon = strrchr(paired_endpoint, ':');
   assert(paired_colon != NULL && (uint16_t)atoi(paired_colon + 1) == port);
   wd_free(paired);

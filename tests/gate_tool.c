@@ -78,8 +78,8 @@ static int send_item(int fd, uint16_t type, uint64_t sub, uint64_t seq,
   if (body == NULL) return -1;
   uint8_t header[WD_FRAME_HEADER];
   wd_frame_header(header, type, sub, seq, (uint32_t)len);
-  int rc = wu_write_all(fd, header, sizeof(header));
-  if (rc == 0) rc = wu_write_all(fd, body, len);
+  int rc = wd_write_all(fd, header, sizeof(header));
+  if (rc == 0) rc = wd_write_all(fd, body, len);
   free(body);
   return rc;
 }
@@ -634,10 +634,10 @@ int main(void) {
                  &cancelled) == 0);
   assert(cancelled);
   wd_free(cancel);
-  uint64_t stopped_at = wu_now_ms();
+  uint64_t stopped_at = wd_now_ms();
   cbor_item_t *after_cancel = wait_event(&a, "turn.end", NULL);
   assert(after_cancel != NULL);
-  assert(wu_now_ms() - stopped_at < 3000);
+  assert(wd_now_ms() - stopped_at < 3000);
   wd_free(after_cancel);
 
   cbor_item_t *second = NULL;
