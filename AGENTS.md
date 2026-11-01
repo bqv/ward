@@ -527,6 +527,22 @@ in the request, read through `turn_text`. Placing that assertion *after* the sub
 matters: an extra prompt in the middle changed how many runs were in flight and broke the queue
 assertion, which is a reminder that this gate is a sequence, not a set of independent tests.
 
+Fifty-first: the judge's contract. Before any model is consulted, the part the README says core
+owns — the merge, the cache, the fail-closed rule — is now `src/core/judge.c`. `wd_verdict_max`
+is the monotonic merge, so a judge can raise `allow` to `ask` and never lower a `deny`;
+`wd_judge_decide` consults the judge only for an `allow`, keys the cache on `(tool, raw
+argument bytes)`, remembers the answer, and falls back to the rule whenever the ask fails or
+answers out of range. A `deny` never reaches the model at all, which is the property worth
+having before any guest exists.
+
+`tests/judge_test` measures all of it: the merge in both directions, a cache hit consulting the
+model exactly once, a different argument missing the cache, a `deny` short-circuiting, and a
+failing ask leaving the rule standing.
+
+The guest — `judge.classify` over its own scoped endpoint, and the wiring into the policy gate
+that emits `judge.decision` — is the next slice. Splitting it this way means the merge and the
+cache are proven before a model is in the loop.
+
 ## M3: started, with one finding worth keeping
 
 The first M3 attempt replaced the daemon's single `wd_turn` with a pool keyed by session, so
