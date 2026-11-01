@@ -1052,3 +1052,18 @@ That closes the last named row of the milestone at the level it can be closed wi
 What still is not measured end to end is an upgrade of a module that carries state: every mechanism
 exists and each half is tested, but no shipped guest keeps state across a turn, so the acceptance line
 rests on a fixture and the notes say so.
+
+Eighty-third: a user service. `contrib/openrc/ward.initd` and `ward.conf.d` follow the box's existing
+precedent (`~/etc/init.d/openmessage`): OpenRC *user* mode, `supervise-daemon`, logs to `~/.dsh/logs`,
+a pidfile under `XDG_RUNTIME_DIR`, and `start_pre`/`stop_post` that clear a stale socket only when no
+live pid holds it.
+
+Verified rather than written and left: installed into `~/etc`, started with `rc-service --user ward
+start`, and the daemon came up and served a client over its socket. Two things only the run revealed —
+`WARD_MODULE_DIR` must be exported or the daemon looks healthy while refusing every prompt with
+"cannot read module", and the socket needs an explicit fallback because OpenRC sets no
+`XDG_RUNTIME_DIR`. Both are now in the conf and in `docs/service.md`.
+
+The sandbox mounts `~/.local/state` read-only, so the verification run pointed the service at
+workspace paths; the installed configuration keeps the production paths, which is where the daemon
+belongs when it is started from a real session.

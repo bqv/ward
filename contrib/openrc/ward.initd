@@ -1,0 +1,59 @@
+#!/sbin/openrc-run
+# OpenRC *user* service for ward, the coding agent harness daemon.
+#
+#   rc-service --user ward start|stop|restart|status
+#   rc-update  --user add ward default
+#
+# This runs as you, not as root: OpenRC user mode keeps its own service tree in
+# ~/.config/rc, which on this box links to ~/etc/{init.d,conf.d}.  Nothing here
+# touches the system service tree.
+#
+# The daemon it supervises is a single `ward up`, which owns the state directory,
+# the Unix socket and every session's log.  Clients connect to the socket; with
+# no socket the daemon has nothing to serve, so start_pre checks both paths
+# before supervise-daemon is allowed to try.
+
+description="ward daemon (coding agent harness)"
+
+supervisor="supervise-daemon"
+
+command="${WARD_BIN}"
+command_args="up --state ${WARD_STATE} --socket ${WARD_SOCKET}"
+
+directory="${HOME}"
+
+pidfile="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/ward.pid"
+
+output_log="${WARD_LOG_DIR}/ward.log"
+error_log="${WARD_LOG_DIR}/ward.err"
+
+respawn_delay=5
+respawn_period=60
+respawn_max=10
+
+start_pre() {
+	mkdir -p "${WARD_LOG_DIR}" "${WARD_STATE}" || return 1
+
+	if [ ! -x "${WARD_BIN}" ]; then
+		eerror "${WARD_BIN} is missing or not executable"
+		return 1
+	fi
+
+	# A crash leaves the socket inode behind, and bind(2) refuses a path that
+	# exists.  Remove it only when nothing of ours holds it: a live daemon's pid
+	# is in the pidfile, and its socket answers a connect.
+	if [ -S "${WARD_SOCKET}" ]; then
+		if [ -f "${pidfile}" ] && kill -0 "$(cat "${pidfile}" 2>/dev/null)" 2>/dev/null; then
+			einfo "socket ${WARD_SOCKET} already served by this service"
+		else
+			rm -f "${WARD_SOCKET}"
+		fi
+	fi
+}
+
+stop_post() {
+	[ -f "${pidfile}" ] && ! kill -0 "$(cat "${pidfile}" 2>/dev/null)" 2>/dev/null && rm -f "${pidfile}"
+	# The daemon unlinks its own socket on a clean shutdown; this covers a kill.
+	[ -S "${WARD_SOCKET}" ] && rm -f "${WARD_SOCKET}"
+	return 0
+}
