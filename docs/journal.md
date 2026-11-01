@@ -1352,3 +1352,17 @@ is the evidence that a frozen head is being reused rather than re-prefilled.
 The map-size trap bit again, in the same place it always does: adding three keys to a `wd_map` built for seven
 silently dropped `cost_total`, and the gate caught it with `cbor_isa_float_ctrl`. Ten keys, thirteen when
 priced — counted rather than guessed.
+
+Hundred-and-second: the wait has a name. A turn now emits `turn.state` as it moves through the provider:
+`prefilling` when the request is parked, `answering` when the reply is being read, `idle` when it is done. On a
+real turn the log reads 5 prefilling, 6 answering, 10 idle — three durable events where before there was
+silence for the length of a prefill.
+
+That is the note's "make the 40 s wait visible" without touching how text is delivered, which is still one delta
+at the end. True streaming stays open; this makes the stall attributable while it happens rather than afterwards
+in `turn.timings`.
+
+The investigation also found something about the harness rather than the product: leaked `ward up` daemons from
+earlier gate runs were still holding sockets and state directories, and a stale one made a live turn look wedged.
+The suite leaves daemons behind when a gate fails part-way. That is a test-lifecycle bug and the next thing to
+fix, because a leak that makes the *product* look broken is worse than the failure that caused it.

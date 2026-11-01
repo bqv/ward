@@ -2119,6 +2119,8 @@ static wd_run *run_find(wd_server *srv, const char *session_id) {
   return NULL;
 }
 
+static void emit_state(wd_server *srv, wd_run *run, const char *state);
+
 static void run_unwatch(wd_server *srv, wd_run *run, int kind) {
   int *fd = kind == 2 ? &run->worker_fd : &run->http_fd;
   if (*fd < 0) return;
@@ -2267,8 +2269,23 @@ static void run_free(wd_server *srv, wd_run *run) {
   free(run);
 }
 
+static void emit_state(wd_server *srv, wd_run *run, const char *state) {
+  wd_session *session = wd_session_find(&srv->store, run->session_id);
+  if (session == NULL) return;
+  cbor_item_t *logged = wd_map(2);
+  wd_put(logged, "turn", wd_uint(wd_turn_id(run->turn)));
+  wd_put(logged, "state", wd_text(state));
+  uint64_t seq = 0;
+  if (wd_session_emit(session, "turn.state", logged, &seq) != 0) return;
+  cbor_item_t *out = wd_map(2);
+  wd_put(out, "turn", wd_uint(wd_turn_id(run->turn)));
+  wd_put(out, "state", wd_text(state));
+  conn_broadcast(srv, session, "turn.state", seq, out);
+}
+
 static void run_park(wd_server *srv, wd_run *run, int kind) {
   if (kind == 3) {
+    emit_state(srv, run, "prefilling");
     run_unwatch(srv, run, 2);
     run_watch(srv, run, 3);
   } else if (kind == 2) {
@@ -2507,7 +2524,9 @@ static void http_done(wd_server *srv, wd_run *run) {
   }
   wd_turn_ctx tc = {srv, session};
   char *err = NULL;
+  emit_state(srv, run, "answering");
   int rc = wd_turn_resume_http(run->turn, turn_emit, &tc, &err);
+  if (rc != WD_TURN_PENDING) emit_state(srv, run, "idle");
   run_after(srv, run, rc, err);
 }
 
