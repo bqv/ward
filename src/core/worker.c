@@ -284,9 +284,8 @@ bool wd_worker_alive(const wd_worker *worker) {
   return kill(worker->pid, 0) == 0;
 }
 
-int wd_worker_run(wd_worker *worker, const char *const argv[],
-                  uint64_t timeout_ms, size_t max_bytes, wd_proc_result *out,
-                  char **err) {
+int wd_worker_submit(wd_worker *worker, const char *const argv[],
+                     uint64_t timeout_ms, size_t max_bytes, char **err) {
   if (worker == NULL || worker->dead) {
     if (err != NULL) *err = strdup("the worker is gone");
     return -1;
@@ -297,17 +296,32 @@ int wd_worker_run(wd_worker *worker, const char *const argv[],
     if (err != NULL) *err = strdup("the command has no arguments");
     return -1;
   }
-  if (write_u32(worker->fd, (uint32_t)argc) != 0) goto gone;
-  for (size_t i = 0; i < argc; i++) {
+  int failed = write_u32(worker->fd, (uint32_t)argc) != 0;
+  for (size_t i = 0; i < argc && !failed; i++) {
     size_t len = strlen(argv[i]);
     if (write_u32(worker->fd, (uint32_t)len) != 0 ||
         write_all(worker->fd, argv[i], len) != 0)
-      goto gone;
+      failed = 1;
   }
-  if (write_u32(worker->fd, (uint32_t)timeout_ms) != 0 ||
-      write_u32(worker->fd, (uint32_t)max_bytes) != 0)
-    goto gone;
+  if (!failed && (write_u32(worker->fd, (uint32_t)timeout_ms) != 0 ||
+                  write_u32(worker->fd, (uint32_t)max_bytes) != 0))
+    failed = 1;
+  if (!failed) return 0;
+  worker->dead = true;
+  if (err != NULL) *err = strdup("the worker is gone");
+  return -1;
+}
 
+int wd_worker_fd(const wd_worker *worker) {
+  return worker != NULL ? worker->fd : -1;
+}
+
+int wd_worker_complete(wd_worker *worker, size_t max_bytes,
+                       wd_proc_result *out, char **err) {
+  if (worker == NULL || worker->dead) {
+    if (err != NULL) *err = strdup("the worker is gone");
+    return -1;
+  }
   uint32_t status = 0;
   if (read_u32(worker->fd, &status) != 0) goto gone;
   if (status == 0xffffffffu) {
@@ -338,4 +352,11 @@ gone:
   worker->dead = true;
   if (err != NULL) *err = strdup("the worker is gone");
   return -1;
+}
+
+int wd_worker_run(wd_worker *worker, const char *const argv[],
+                  uint64_t timeout_ms, size_t max_bytes, wd_proc_result *out,
+                  char **err) {
+  if (wd_worker_submit(worker, argv, timeout_ms, max_bytes, err) != 0) return -1;
+  return wd_worker_complete(worker, max_bytes, out, err);
 }

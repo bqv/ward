@@ -426,6 +426,40 @@ int main(void) {
   wd_free(seen_turn);
   free(forked_id);
 
+  cbor_item_t *exec_prompt = NULL;
+  cbor_item_t *run = wd_map(2);
+  wd_put(run, "id", wd_text(session));
+  wd_put(run, "text", wd_text("/run sleep 1"));
+  assert(request(&a, a.next_id++, "session.prompt", run, &exec_prompt, NULL) ==
+         0);
+  uint64_t exec_call = 0;
+  uint64_t exec_epoch = 0;
+  assert(wd_uint_of(wd_get(wd_get(exec_prompt, "approval"), "call"), &exec_call));
+  assert(wd_uint_of(wd_get(wd_get(exec_prompt, "approval"), "epoch"),
+                    &exec_epoch));
+  wd_free(exec_prompt);
+
+  cbor_item_t *exec_allowed = NULL;
+  cbor_item_t *exec_respond = wd_map(4);
+  wd_put(exec_respond, "session", wd_text(session));
+  wd_put(exec_respond, "call", wd_uint(exec_call));
+  wd_put(exec_respond, "epoch", wd_uint(exec_epoch));
+  wd_put(exec_respond, "allow", cbor_build_bool(true));
+  catalog_ok = false;
+  assert(request(&a, a.next_id++, "approval.respond", exec_respond,
+                 &exec_allowed, &catalog_ok) == 0);
+  assert(catalog_ok);
+  wd_free(exec_allowed);
+
+  cbor_item_t *meanwhile = NULL;
+  assert(request(&a, a.next_id++, "session.list", wd_map(1), &meanwhile,
+                 NULL) == 0);
+  wd_free(meanwhile);
+
+  cbor_item_t *exec_end = wait_event(&a, "turn.end", NULL);
+  assert(exec_end != NULL);
+  wd_free(exec_end);
+
   cbor_item_t *second = NULL;
   cbor_item_t *prompt2 = wd_map(2);
   wd_put(prompt2, "id", wd_text(session));

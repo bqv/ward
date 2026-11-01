@@ -141,9 +141,19 @@ chosen sequence, re-emits them under the child's own sequence numbering and appe
 forks a session that has run a turn, checks the child's sequence and replays the child's
 `turn.end`.
 
-What is still missing from M1 is the asynchronous half: a tool call and the provider request
-both still block the daemon's loop while they run, so the worker is isolation and lifetime,
-not yet a second thread of execution.
+Twelfth: tools left the event loop. `modules/tools` is now pure — it only maps `{tool, args}`
+to `{call, payload}`, the capability that performs it — so core can decide *how* to perform
+it. Read, write, edit and grep are still called inline; exec is submitted to the worker and
+the turn parks, exactly as it parks for an approval. The daemon watches the worker's fd in
+epoll and resumes the turn when the reply is readable, so the loop serves other clients
+while a command runs. `gate_tool` proves it: it approves a `/run sleep 1`, immediately asks
+for `session.list` and gets an answer before `turn.end` arrives.
+
+The provider request is the one blocking call left: `net.request` runs curl inside the
+daemon's loop, so a slow model still stalls it. That is the next thing to lift, and the
+parking machinery is now in place to do it.
+
+What is still missing from M1 is therefore the provider half of the asynchronous split.
 
 M0's acceptance is 1,000 round-trips/s over UDS and a fuzz-clean decoder. A
 gate that is not measured is not met.

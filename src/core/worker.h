@@ -21,5 +21,10 @@ bool wd_worker_alive(const wd_worker *worker);
 int wd_worker_run(wd_worker *worker, const char *const argv[],
                   uint64_t timeout_ms, size_t max_bytes, wd_proc_result *out,
                   char **err);
+int wd_worker_submit(wd_worker *worker, const char *const argv[],
+                     uint64_t timeout_ms, size_t max_bytes, char **err);
+int wd_worker_fd(const wd_worker *worker);
+int wd_worker_complete(wd_worker *worker, size_t max_bytes,
+                       wd_proc_result *out, char **err);
 
 #endif

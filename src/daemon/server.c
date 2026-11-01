@@ -93,6 +93,7 @@ typedef struct {
   wd_pki *pki;
   wd_quic *quic;
   wd_approvals *approvals;
+  int worker_fd;
   wd_models *models;
   char *default_model;
   char turn_session[WD_ID_LEN];
@@ -107,9 +108,12 @@ typedef struct {
 static int token_listen;
 static int token_signal;
 static int token_quic;
+static int token_worker;
 
 static void conn_close(wd_server *srv, wd_conn *conn);
 static void conn_release(wd_server *srv, wd_conn *conn);
+static void watch_worker(wd_server *srv);
+static void unwatch_worker(wd_server *srv);
 static int conn_arm(wd_server *srv, wd_conn *conn);
 static int conn_flush(wd_conn *conn);
 static int conn_read(wd_server *srv, wd_conn *conn);
@@ -631,9 +635,15 @@ static void handle_session_prompt(wd_server *srv, wd_conn *conn, uint64_t id,
     free(err);
     return;
   }
-  cbor_item_t *result = wd_map(rc == WD_TURN_PENDING ? 2 : 1);
+  int pending_kind =
+      rc == WD_TURN_PENDING ? wd_turn_pending_kind(turn) : 0;
+  cbor_item_t *result = wd_map(pending_kind == 1 ? 2 : 1);
   wd_put(result, "session", wd_text(session->id));
-  if (rc == WD_TURN_PENDING) {
+  if (pending_kind == 2) {
+    snprintf(srv->turn_session, sizeof(srv->turn_session), "%s", session->id);
+    watch_worker(srv);
+  }
+  if (pending_kind == 1) {
     uint64_t call = 0;
     uint64_t epoch = 0;
     char *reason = NULL;
@@ -657,6 +667,65 @@ static void handle_session_prompt(wd_server *srv, wd_conn *conn, uint64_t id,
   conn_send_cached(conn, id, wd_response_ok(id, result));
 }
 
+static void unwatch_worker(wd_server *srv) {
+  if (srv->worker_fd < 0) return;
+  (void)epoll_ctl(srv->epoll_fd, EPOLL_CTL_DEL, srv->worker_fd, NULL);
+  srv->worker_fd = -1;
+}
+
+static void watch_worker(wd_server *srv) {
+  int fd = wd_turn_worker_fd(srv->turn);
+  if (fd < 0) {
+    unwatch_worker(srv);
+    return;
+  }
+  if (srv->worker_fd == fd) return;
+  unwatch_worker(srv);
+  struct epoll_event ev;
+  memset(&ev, 0, sizeof(ev));
+  ev.events = EPOLLIN;
+  ev.data.ptr = &token_worker;
+  if (epoll_ctl(srv->epoll_fd, EPOLL_CTL_ADD, fd, &ev) == 0) srv->worker_fd = fd;
+}
+
+static void tool_done(wd_server *srv) {
+  hs_session *session = hs_find(&srv->store, srv->turn_session);
+  if (srv->turn == NULL || session == NULL) {
+    unwatch_worker(srv);
+    srv->turn_session[0] = '\0';
+    return;
+  }
+  wd_turn_ctx tc = {srv, session};
+  char *err = NULL;
+  int rc = wd_turn_resume_tool(srv->turn, turn_emit, &tc, &err);
+  if (rc == WD_TURN_PENDING) {
+    int kind = wd_turn_pending_kind(srv->turn);
+    if (kind == 1) {
+      uint64_t call = 0;
+      uint64_t epoch = 0;
+      char *reason = NULL;
+      if (wd_turn_pending(srv->turn, &call, &epoch, &reason) == 0) {
+        wd_approval_request(srv->approvals, session->id, call, epoch,
+                            wu_now_ms(), WD_APPROVAL_TTL_MS);
+        srv->turn_call = call;
+        srv->turn_epoch = epoch;
+        free(reason);
+      }
+      unwatch_worker(srv);
+    } else {
+      watch_worker(srv);
+    }
+    return;
+  }
+  unwatch_worker(srv);
+  srv->turn_session[0] = '\0';
+  if (rc != 0) {
+    fprintf(stderr, "ward: the tool call failed: %s\n",
+            err != NULL ? err : "unknown");
+  }
+  free(err);
+}
+
 static bool resume_turn(wd_server *srv, const char *session_id, bool allow,
                         char **err) {
   if (srv->turn == NULL ||
@@ -667,6 +736,11 @@ static bool resume_turn(wd_server *srv, const char *session_id, bool allow,
   wd_turn_ctx tc = {srv, session};
   int rc = wd_turn_resume(srv->turn, allow, turn_emit, &tc, err);
   srv->turn_session[0] = '\0';
+  if (rc == WD_TURN_PENDING && wd_turn_pending_kind(srv->turn) == 2) {
+    snprintf(srv->turn_session, sizeof(srv->turn_session), "%s", session->id);
+    watch_worker(srv);
+    return true;
+  }
   if (rc == WD_TURN_PENDING) {
     uint64_t call = 0;
     uint64_t epoch = 0;
@@ -1553,6 +1627,10 @@ int wd_up_run(const wd_up_config *cfg) {
       void *ptr = events[i].data.ptr;
       if (ptr == &token_listen) {
         server_accept(&srv);
+        continue;
+      }
+      if (ptr == &token_worker) {
+        tool_done(&srv);
         continue;
       }
       if (ptr == &token_quic) {

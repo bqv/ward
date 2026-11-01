@@ -40,6 +40,7 @@ struct wd_turn {
   wd_worker *worker;
   char *worker_root;
   wd_instance *policy;
+  int pending_kind;
   cbor_item_t *parked;
   uint64_t park_call;
   uint64_t park_epoch;
@@ -54,6 +55,7 @@ static const wd_limits TURN_LIMITS = {.fuel = WD_TURN_FUEL,
 #define WD_TOOL_MAX (64u * 1024u)
 
 static wd_worker *worker_for(wd_turn *turn);
+static int exec_reply(wd_proc_result *result, cbor_item_t **out);
 
 static uint8_t *read_file(const char *path, size_t *len) {
   FILE *f = fopen(path, "rb");
@@ -446,6 +448,53 @@ static int edit_run(wd_turn *turn, const uint8_t *in, size_t in_len,
   return tool_ok_count(total, out, out_len);
 }
 
+static int exec_reply(wd_proc_result *result, cbor_item_t **out) {
+  int status = WIFEXITED(result->status) ? WEXITSTATUS(result->status) : 127;
+  cbor_item_t *reply = wd_map(4);
+  wd_put(reply, "ok", cbor_build_bool(!result->timed_out && status == 0));
+  wd_put(reply, "status", wd_uint((uint64_t)status));
+  wd_put(reply, "timed_out", cbor_build_bool(result->timed_out));
+  if (result->len > 0) {
+    wd_put(reply, "text", wd_text_len((const char *)result->out, result->len));
+  } else {
+    char note[96];
+    if (result->timed_out)
+      snprintf(note, sizeof(note), "the command timed out");
+    else
+      snprintf(note, sizeof(note), "the command exited with status %d", status);
+    wd_put(reply, "text", wd_text(note));
+  }
+  *out = reply;
+  return 0;
+}
+
+static int exec_argv(cbor_item_t *args, char **copy_out, const char **argv,
+                     uint64_t *timeout_out) {
+  char *command = wd_text_copy(wd_get(args, "command"));
+  uint64_t timeout = 10000;
+  wd_uint_of(wd_get(args, "timeout_ms"), &timeout);
+  if (command == NULL || command[0] == '\0') {
+    free(command);
+    return -1;
+  }
+  char *copy = strdup(command);
+  free(command);
+  if (copy == NULL) return -1;
+  size_t argc = 0;
+  for (char *tok = strtok(copy, " \t"); tok != NULL && argc < 32;
+       tok = strtok(NULL, " \t"))
+    argv[argc++] = tok;
+  argv[argc] = NULL;
+  if (argc == 0) {
+    free(copy);
+    return -1;
+  }
+  if (timeout == 0 || timeout > 600000) timeout = 600000;
+  *copy_out = copy;
+  *timeout_out = timeout;
+  return 0;
+}
+
 static int exec_run(wd_turn *turn, const uint8_t *in, size_t in_len,
                     uint8_t **out, size_t *out_len) {
   cbor_item_t *request = wd_decode(in, in_len);
@@ -455,32 +504,19 @@ static int exec_run(wd_turn *turn, const uint8_t *in, size_t in_len,
     wd_put(reply, "error", wd_text("exec.run: parameters are not cbor"));
     return tool_reply(reply, out, out_len);
   }
-  char *command = wd_text_copy(wd_get(request, "command"));
-  uint64_t timeout = 10000;
-  wd_uint_of(wd_get(request, "timeout_ms"), &timeout);
-  wd_free(request);
-  if (command == NULL || command[0] == '\0') {
-    free(command);
-    return tool_fail("exec.run: the command is missing", out, out_len);
-  }
-  char *copy = strdup(command);
-  free(command);
-  if (copy == NULL) return tool_fail("exec.run: out of memory", out, out_len);
+  char *copy = NULL;
   const char *argv[33];
-  size_t argc = 0;
-  for (char *tok = strtok(copy, " \t"); tok != NULL && argc < 32;
-       tok = strtok(NULL, " \t"))
-    argv[argc++] = tok;
-  argv[argc] = NULL;
-  if (argc == 0) {
-    free(copy);
-    return tool_fail("exec.run: the command is empty", out, out_len);
-  }
-  if (timeout == 0 || timeout > 600000) timeout = 600000;
+  uint64_t timeout = 0;
+  int parsed = exec_argv(request, &copy, argv, &timeout);
+  wd_free(request);
+  if (parsed != 0)
+    return tool_fail("exec.run: the command is missing or empty", out, out_len);
   wd_proc_result result;
   char *err = NULL;
+  cbor_item_t *reply = NULL;
+  int rc = 0;
   wd_worker *worker = worker_for(turn);
-  int rc = wd_worker_run(worker, argv, timeout, WD_TOOL_MAX, &result, &err);
+  rc = wd_worker_run(worker, argv, timeout, WD_TOOL_MAX, &result, &err);
   if (rc != 0) {
     free(err);
     err = NULL;
@@ -495,23 +531,9 @@ static int exec_run(wd_turn *turn, const uint8_t *in, size_t in_len,
     free(err);
     return tool_fail(message, out, out_len);
   }
-  int status = WIFEXITED(result.status) ? WEXITSTATUS(result.status) : 127;
-  cbor_item_t *reply = wd_map(4);
-  wd_put(reply, "ok", cbor_build_bool(!result.timed_out && status == 0));
-  wd_put(reply, "status", wd_uint((uint64_t)status));
-  wd_put(reply, "timed_out", cbor_build_bool(result.timed_out));
-  if (result.len > 0) {
-    wd_put(reply, "text",
-           wd_text_len((const char *)result.out, result.len));
-  } else {
-    char note[96];
-    if (result.timed_out)
-      snprintf(note, sizeof(note), "the command timed out");
-    else
-      snprintf(note, sizeof(note), "the command exited with status %d", status);
-    wd_put(reply, "text", wd_text(note));
-  }
+  rc = exec_reply(&result, &reply);
   wd_proc_result_free(&result);
+  if (rc != 0) return tool_fail("exec.run: cannot build the reply", out, out_len);
   return tool_reply(reply, out, out_len);
 }
 
@@ -597,14 +619,12 @@ wd_turn *wd_turn_new(wd_engine *engine, const char *module_dir, const char *root
   static const char *const driver_caps[] = {"engine.call", "policy.check",
                                             "clock.now"};
   static const char *const provider_caps[] = {"net.request"};
-  static const char *const tools_caps[] = {"fs.read", "fs.write",     "fs.edit",
-                                           "exec.run", "grep.run"};
   static const char *const no_caps[] = {NULL};
   wd_module_spec engine_spec = {"engine", no_caps, 0, true};
   wd_module_spec driver_spec = {"driver", driver_caps, 3, false};
   wd_module_spec policy_spec = {"policy", no_caps, 0, true};
   wd_module_spec provider_spec = {"provider", provider_caps, 1, false};
-  wd_module_spec tools_spec = {"tools", tools_caps, 5, false};
+  wd_module_spec tools_spec = {"tools", no_caps, 0, true};
 
   turn->engine_module = load_module(engine, module_dir, "engine.wasm",
                                     &engine_spec, err);
@@ -631,8 +651,8 @@ wd_turn *wd_turn_new(wd_engine *engine, const char *module_dir, const char *root
   turn->driver = wd_instance_new(turn->driver_module, driver_caps, 3,
                                  &TURN_LIMITS, turn_capability, turn, err);
   if (turn->driver == NULL) goto fail;
-  turn->tools = wd_instance_new(turn->tools_module, tools_caps, 5,
-                                &TURN_LIMITS, turn_capability, turn, err);
+  turn->tools = wd_instance_new(turn->tools_module, no_caps, 0, &TURN_LIMITS,
+                                turn_capability, turn, err);
   if (turn->tools == NULL) goto fail;
   turn->policy = wd_instance_new(turn->policy_module, no_caps, 0, &TURN_LIMITS,
                                  turn_capability, turn, err);
@@ -736,6 +756,52 @@ static int invoke(wd_instance *instance, cbor_item_t *payload,
   return 0;
 }
 
+static int exec_submit(wd_turn *turn, cbor_item_t *args, char **err) {
+  char *copy = NULL;
+  const char *argv[33];
+  uint64_t timeout = 0;
+  if (exec_argv(args, &copy, argv, &timeout) != 0) {
+    *err = strdup("exec.run: the command is missing or empty");
+    return -1;
+  }
+  int rc = wd_worker_submit(worker_for(turn), argv, timeout, WD_TOOL_MAX, err);
+  if (rc != 0) {
+    free(err != NULL ? *err : NULL);
+    if (err != NULL) *err = NULL;
+    rc = wd_worker_submit(worker_for(turn), argv, timeout, WD_TOOL_MAX, err);
+  }
+  free(copy);
+  if (rc != 0) return -1;
+  turn->pending_kind = 2;
+  return 1;
+}
+
+static int perform_capability(wd_turn *turn, const char *capability,
+                              cbor_item_t *args, cbor_item_t **result,
+                              char **err) {
+  if (strcmp(capability, "exec.run") == 0)
+    return exec_submit(turn, args, err);
+  size_t len = 0;
+  uint8_t *bytes = encode_keep(args, &len);
+  if (bytes == NULL) {
+    *err = strdup("cannot encode the capability arguments");
+    return -1;
+  }
+  uint8_t *out = NULL;
+  size_t out_len = 0;
+  int rc = turn_capability(turn, capability, bytes, len, &out, &out_len, err);
+  free(bytes);
+  if (rc != 0) return -1;
+  cbor_item_t *reply = wd_decode(out, out_len);
+  free(out);
+  if (reply == NULL) {
+    *err = strdup("the capability returned invalid CBOR");
+    return -1;
+  }
+  *result = reply;
+  return 0;
+}
+
 static int process_action(wd_turn *turn, cbor_item_t *action, wd_turn_emit emit,
                           void *ctx, cbor_item_t **next, bool *pending,
                           bool approved, char **err) {
@@ -783,7 +849,10 @@ static int process_action(wd_turn *turn, cbor_item_t *action, wd_turn_emit emit,
         wd_put(notice, "reason", wd_text(turn->park_reason));
         rc = emit(ctx, "approval.requested", notice, err);
         wd_free(notice);
-        if (rc == 0) *pending = true;
+        if (rc == 0) {
+          turn->pending_kind = 1;
+          *pending = true;
+        }
       }
       free(module);
       free(name);
@@ -795,6 +864,34 @@ static int process_action(wd_turn *turn, cbor_item_t *action, wd_turn_emit emit,
     if (instance == NULL || payload == NULL) {
       *err = strdup("no such module action");
       rc = -1;
+    } else if (instance == turn->tools) {
+      cbor_item_t *request = NULL;
+      rc = invoke(instance, payload, &request, err);
+      if (rc == 0) {
+        char *capability = wd_text_copy(wd_get(request, "call"));
+        cbor_item_t *args = wd_get(request, "payload");
+        cbor_item_t *result = NULL;
+        if (capability == NULL || args == NULL) {
+          *err = strdup("the tools module asked for nothing");
+          rc = -1;
+        } else {
+          int parked = perform_capability(turn, capability, args, &result, err);
+          if (parked == 1) {
+            *pending = true;
+            rc = 0;
+          } else if (parked != 0) {
+            rc = -1;
+          }
+        }
+        free(capability);
+        wd_free(request);
+        if (rc == 0 && !*pending) {
+          cbor_item_t *message = wd_map(2);
+          wd_put(message, "kind", wd_text("result"));
+          wd_put(message, "payload", result);
+          *next = message;
+        }
+      }
     } else {
       cbor_item_t *result = NULL;
       rc = invoke(instance, payload, &result, err);
@@ -889,6 +986,7 @@ int wd_turn_resume(wd_turn *turn, bool allow, wd_turn_emit emit, void *ctx,
     *err = strdup("no approval is pending");
     return -1;
   }
+  turn->pending_kind = 0;
   cbor_item_t *action = turn->parked;
   turn->parked = NULL;
   free(turn->park_reason);
@@ -911,6 +1009,39 @@ int wd_turn_resume(wd_turn *turn, bool allow, wd_turn_emit emit, void *ctx,
     wd_put(next, "payload", payload);
   }
   return drive(turn, next, emit, ctx, err);
+}
+
+int wd_turn_resume_tool(wd_turn *turn, wd_turn_emit emit, void *ctx,
+                        char **err) {
+  if (turn->pending_kind != 2) {
+    *err = strdup("no tool call is pending");
+    return -1;
+  }
+  turn->pending_kind = 0;
+  wd_proc_result result;
+  cbor_item_t *reply = NULL;
+  int rc = wd_worker_complete(worker_for(turn), WD_TOOL_MAX, &result, err);
+  if (rc == 0) {
+    exec_reply(&result, &reply);
+    wd_proc_result_free(&result);
+  } else {
+    free(err != NULL ? *err : NULL);
+    if (err != NULL) *err = NULL;
+    reply = wd_map(2);
+    wd_put(reply, "ok", cbor_build_bool(false));
+    wd_put(reply, "error", wd_text("the worker is gone"));
+  }
+  cbor_item_t *message = wd_map(2);
+  wd_put(message, "kind", wd_text("result"));
+  wd_put(message, "payload", reply);
+  return drive(turn, message, emit, ctx, err);
+}
+
+int wd_turn_pending_kind(wd_turn *turn) { return turn != NULL ? turn->pending_kind : 0; }
+
+int wd_turn_worker_fd(wd_turn *turn) {
+  if (turn == NULL || turn->worker == NULL) return -1;
+  return wd_worker_fd(turn->worker);
 }
 
 int wd_turn_pending(wd_turn *turn, uint64_t *call, uint64_t *epoch,

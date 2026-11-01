@@ -163,7 +163,9 @@ int main(void) {
   assert(exec_seen.approvals == 1);
   assert(strstr(exec_seen.reason, "exec") != NULL ||
          exec_seen.reason[0] != '\0');
-  assert(wd_turn_resume(turn, true, emit, &exec_seen, &err) == WD_TURN_OK);
+  assert(wd_turn_resume(turn, true, emit, &exec_seen, &err) == WD_TURN_PENDING);
+  assert(wd_turn_pending_kind(turn) == 2);
+  assert(wd_turn_resume_tool(turn, emit, &exec_seen, &err) == WD_TURN_OK);
   assert(strstr(exec_seen.text, "tool exec works") != NULL);
 
   seen exec_denied = {{0}, 0, 0, 0, 0, {0}};
@@ -175,7 +177,8 @@ int main(void) {
   seen exec_fails = {{0}, 0, 0, 0, 0, {0}};
   assert(wd_turn_prompt(turn, "/run /nonexistent/command", emit, &exec_fails,
                         &err) == WD_TURN_PENDING);
-  assert(wd_turn_resume(turn, true, emit, &exec_fails, &err) == WD_TURN_OK);
+  assert(wd_turn_resume(turn, true, emit, &exec_fails, &err) == WD_TURN_PENDING);
+  assert(wd_turn_resume_tool(turn, emit, &exec_fails, &err) == WD_TURN_OK);
   assert(strstr(exec_fails.text, "cannot") != NULL ||
          strstr(exec_fails.text, "127") != NULL);
 

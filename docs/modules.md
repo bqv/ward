@@ -76,9 +76,10 @@ A path is relative to the turn's tool root, may not contain `..` or start with `
 resolved with `realpath` and checked against the root again after resolution, and the file
 is opened `O_NOFOLLOW`. Reads stop at 64 KiB and refuse a file containing a NUL byte.
 
-The tools module's only inputs are `{tool, args}`; it forwards to the capability named by
-the tool and returns the capability's reply unchanged. Core decides what a capability may
-do; the module decides which one to ask.
+The tools module is pure, with an empty import section: `{tool, args}` in, `{call, payload}`
+out, where `call` names the capability and `payload` is its arguments. It performs nothing
+itself. Core owns the call, which is what lets a slow capability — `exec.run` — be answered
+asynchronously while the module stays a plain translator.
 
 ## fs.edit, grep.run and exec.run
 
@@ -91,7 +92,9 @@ file is an error rather than a silent no-op.
 at 200 matches, and returns `{ok, status, text}`; `status` 1 means no match and the text
 says so. The path is optional and confined to the root exactly as `fs.read`'s is.
 
-`exec.run {command, timeout_ms?}` runs one command in the turn's tool root and returns
+`exec.run {command, timeout_ms?}` is submitted to the session worker rather than run
+inline, so the daemon's loop keeps serving while the command runs; the turn is parked and
+resumed when the worker's reply is readable. It runs one command in the turn's tool root and returns
 `{ok, status, timed_out, text}`; `text` is the combined output, capped at 64 KiB, and a
 command that exits with no output still says what happened. Core splits the command on
 whitespace itself — there is no shell, so no quoting, globbing or redirection — resolves
