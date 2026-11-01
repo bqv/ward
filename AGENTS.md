@@ -51,6 +51,13 @@ C11 and Meson, debug by default. `meson setup build -Dbuildtype=debug
 options rather than edited build files: debug compiles guests at `-O0 -g` and
 keeps DWARF; release is `-O2` and strips.
 
+The guest toolchain is pinned at `/opt/wasi-sdk-34`: clang 23.1.0-wasi-sdk with
+`share/wasi-sysroot` for `wasm32-wasip1`. Portage does not provide it —
+`llvm-core/clang` and `llvm-core/lld` are installed (22.1.8) and their WebAssembly
+backend is complete, but there is no wasi-libc in the tree, so the host clang
+cannot link a WASI program. Guests use the SDK's compiler, core uses the host
+compiler, and the two are not mixed.
+
 Dependencies resolve through `dependency()` and pkg-config: Wasmtime C API,
 ngtcp2, OpenSSL, tree-sitter, libcurl, sqlite3, libcbor, yyjson, zstd. Guests:
 `clang --target=wasm32-wasip1` against wasi-sdk for C and C++, Zig for Zig (pin
