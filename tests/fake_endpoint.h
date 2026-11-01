@@ -16,7 +16,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#define MAX_REQUEST 8192
+#define MAX_REQUEST 16384
 
 static int find_int(const char *buf, const char *key) {
   const char *at = strstr(buf, key);
@@ -33,8 +33,8 @@ static int find_int(const char *buf, const char *key) {
 static int extract_content(const char *buf, char *out, size_t cap) {
   const char *at = strstr(buf, "\"content\":\"");
   if (at == NULL) return -1;
-  for (const char *next = strstr(at + 1, "\"content\":\""); next != NULL;
-       next = strstr(next + 1, "\"content\":\""))
+  for (const char *next = strstr(at + 1, "\"content\":\"");
+       next != NULL; next = strstr(next + 1, "\"content\":\""))
     at = next;
   at += strlen("\"content\":\"");
   size_t n = 0;
@@ -64,8 +64,12 @@ static void serve(int fd) {
   request[len] = '\0';
   char prompt[256];
   if (extract_content(request, prompt, sizeof(prompt)) < 0) prompt[0] = '\0';
+  if (strstr(request, "be kind to the tools") != NULL) {
+    size_t used = strlen(prompt);
+    snprintf(prompt + used, sizeof(prompt) - used, " [rules]");
+  }
   size_t half = strlen(prompt) / 2;
-  char response[2048];
+  char response[8192];
   int n = snprintf(response, sizeof(response),
                    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n"
                    "Connection: close\r\n\r\n"

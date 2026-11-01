@@ -1229,9 +1229,53 @@ static uint64_t next_turn_id(void) {
 uint64_t wd_turn_id(wd_turn *turn) { return turn != NULL ? turn->id : 0; }
 
 
+static char *read_project_rules(const char *root) {
+  if (root == NULL) return NULL;
+  char path[PATH_MAX];
+  snprintf(path, sizeof(path), "%s/AGENTS.md", root);
+  FILE *f = fopen(path, "rb");
+  if (f == NULL) return NULL;
+  char *buf = malloc(2049);
+  if (buf == NULL) {
+    fclose(f);
+    return NULL;
+  }
+  size_t got = fread(buf, 1, 2048, f);
+  fclose(f);
+  if (got == 0) {
+    free(buf);
+    return NULL;
+  }
+  buf[got] = '\0';
+  return buf;
+}
+
+static cbor_item_t *history_with_rules(cbor_item_t *history, const char *root) {
+  char *rules = read_project_rules(root);
+  if (rules == NULL) return history;
+  size_t extra = history != NULL ? cbor_array_size(history) : 0;
+  cbor_item_t *combined = wd_array(extra + 1);
+  cbor_item_t *entry = wd_map(2);
+  wd_put(entry, "role", wd_text("system"));
+  wd_put(entry, "text", wd_text(rules));
+  bool pushed = cbor_array_push(combined, entry);
+  cbor_decref(&entry);
+  free(rules);
+  if (pushed && extra > 0) {
+    cbor_item_t **items = cbor_array_handle(history);
+    for (size_t i = 0; i < extra; i++) {
+      if (!cbor_incref(items[i])) continue;
+      if (!cbor_array_push(combined, items[i])) break;
+    }
+  }
+  if (history != NULL) wd_free(history);
+  return combined;
+}
+
 int wd_turn_prompt(wd_turn *turn, const char *text, wd_turn_emit emit, void *ctx,
                    char **err) {
   turn->id = next_turn_id();
+  turn->history = history_with_rules(turn->history, turn->root);
   cbor_item_t *message = wd_map(2);
   if (message == NULL) {
     *err = strdup("out of memory");

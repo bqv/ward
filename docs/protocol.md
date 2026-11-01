@@ -142,6 +142,10 @@ what a later milestone would add.
 answers `{ok, status, text}`. The module decides what to search for and which result to trust;
 core only runs the binary and returns its words.
 
+**Project rules.** Before a prompt runs, core reads `<session cwd>/AGENTS.md` (up to 2 KiB) and
+sends it to the provider as the first history entry, a `system` message. Slash commands skip
+it; a turn whose root has no AGENTS.md sends none.
+
 **Slash commands.** A prompt beginning `/` that no tool command claims is offered to the
 `skills` guest, which answers `{handled, text}`. `/help`, `/rules` and `/skills` are handled
 there today; anything unhandled falls through to the model as an ordinary prompt.

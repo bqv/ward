@@ -252,6 +252,13 @@ int main(void) {
   fake_endpoint(&endpoint_port, &endpoint);
   char root[] = "/tmp/ward-tool-gate-XXXXXX";
   assert(mkdtemp(root) != NULL);
+  char rules_path[512];
+  snprintf(rules_path, sizeof(rules_path), "%s/AGENTS.md", root);
+  FILE *rules = fopen(rules_path, "wb");
+  assert(rules != NULL);
+  assert(fputs("be kind to the tools\n", rules) >= 0);
+  fclose(rules);
+
   char stub_path[512];
   snprintf(stub_path, sizeof(stub_path), "%s/search-stub", root);
   FILE *stub = fopen(stub_path, "wb");
@@ -441,6 +448,12 @@ int main(void) {
   assert(request(&a, a.next_id++, "session.prompt", plain_prompt, &plain,
                  NULL) == 0);
   wd_free(plain);
+  cbor_item_t *rule_delta = wait_event(&a, "text.delta", NULL);
+  assert(rule_delta != NULL);
+  char *rule_text = wd_text_copy(wd_get(rule_delta, "text"));
+  assert(rule_text != NULL && strstr(rule_text, "[rules]") != NULL);
+  free(rule_text);
+  wd_free(rule_delta);
   cbor_item_t *plain_end = wait_turn_end(&a, last_turn);
   assert(plain_end != NULL);
   wd_free(plain_end);

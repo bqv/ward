@@ -442,6 +442,19 @@ at the endpoint still carries only the prompt. The next probe belongs one layer 
 the encoded bytes handed to `wd_instance_call` for the *first* turn, not a later one, because
 the debug line only ever appeared once in a run.
 
+Forty-fourth: the rules row, closed — and a harness that hid the answer for four rounds. The
+mechanism was right from the round the provider buffers were raised: core reads
+`<cwd>/AGENTS.md`, prepends it to the turn history as a `system` message, and the provider
+sends it. Every failure since was the *test*: the fake endpoint echoed only the **last**
+content, so the user prompt was all a gate could ever see, and the absence of the rules looked
+like a broken feature. The endpoint now echoes the last content and appends `[rules]` when the
+marker was somewhere in the request, and the gate asserts that.
+
+Two lessons, both expensive: a stub that reports only the tail of a request cannot prove
+anything about its head, and two in-process tests had been running their turns in the
+repository root — where the rules now apply — so they were moved to an empty root, which is
+what a test should have used from the start.
+
 ## M3: started, with one finding worth keeping
 
 The first M3 attempt replaced the daemon's single `wd_turn` with a pool keyed by session, so
