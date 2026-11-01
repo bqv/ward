@@ -31,6 +31,7 @@ static void usage(FILE *out) {
           "usage: ward <command>\n"
           "\n"
           "  up      [--socket PATH] [--state DIR]\n"
+          "  -p TEXT [--session ID] [--cwd DIR] [--socket PATH]\n"
           "  version\n"
           "  session create [--cwd DIR] [--model NAME] [--json]\n"
           "  session list   [--limit N] [--json]\n"
@@ -716,6 +717,66 @@ done:
   return rc;
 }
 
+static int command_print(int argc, char **argv) {
+  const char *text = NULL;
+  const char *session = NULL;
+  const char *cwd = NULL;
+  for (int i = 0; i < argc; i++) {
+    if (strcmp(argv[i], "-p") == 0 && i + 1 < argc) {
+      text = argv[++i];
+    } else if (strcmp(argv[i], "--session") == 0 && i + 1 < argc) {
+      session = argv[++i];
+    } else if (strcmp(argv[i], "--cwd") == 0 && i + 1 < argc) {
+      cwd = argv[++i];
+    } else if (strcmp(argv[i], "--socket") == 0 && i + 1 < argc) {
+      i++;
+    } else if (argv[i][0] != '-') {
+      if (text == NULL)
+        text = argv[i];
+      else {
+        fprintf(stderr, "ward: too many arguments\n");
+        return 2;
+      }
+    } else {
+      fprintf(stderr, "ward: unknown option %s\n", argv[i]);
+      return 2;
+    }
+  }
+  if (text == NULL) {
+    fprintf(stderr, "ward: -p needs a prompt\n");
+    return 2;
+  }
+  char *own_session = NULL;
+  if (session == NULL) {
+    char *path = socket_from_args(argc, argv);
+    if (path == NULL) return 1;
+    wd_client client;
+    if (client_connect(&client, path) != 0) {
+      free(path);
+      return 1;
+    }
+    free(path);
+    if (client_handshake(&client) != 0) {
+      close(client.fd);
+      return 1;
+    }
+    cbor_item_t *params = wd_map(cwd != NULL ? 1 : 0);
+    if (cwd != NULL) wd_put(params, "cwd", wd_text(cwd));
+    cbor_item_t *result = NULL;
+    int rc = client_request(&client, "session.create", params, &result);
+    close(client.fd);
+    if (rc != 0) return 1;
+    own_session = wd_text_copy(wd_get(wd_get(result, "session"), "id"));
+    wd_free(result);
+    if (own_session == NULL) return 1;
+    session = own_session;
+  }
+  char *forward[3] = {"prompt", (char *)session, (char *)text};
+  int rc = command_session(3, forward);
+  free(own_session);
+  return rc;
+}
+
 int main(int argc, char **argv) {
   if (argc < 2) {
     usage(stderr);
@@ -731,6 +792,7 @@ int main(int argc, char **argv) {
     usage(stdout);
     return 0;
   }
+  if (strcmp(command, "-p") == 0) return command_print(argc - 1, argv + 1);
   if (strcmp(command, "session") == 0) return command_session(argc - 2, argv + 2);
   if (strcmp(command, "device") == 0) return command_device(argc - 2, argv + 2);
   fprintf(stderr, "ward: unknown command %s\n", command);

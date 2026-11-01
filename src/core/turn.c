@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "core/proc.h"
@@ -255,6 +256,19 @@ static int fs_read(wd_turn *turn, const uint8_t *in, size_t in_len,
   rc = tool_ok_text(buf, got, out, out_len);
   free(buf);
   return rc;
+}
+
+static int clock_now(uint8_t **out, size_t *out_len) {
+  time_t now = time(NULL);
+  struct tm tm;
+  char text[64];
+  text[0] = '\0';
+  if (localtime_r(&now, &tm) != NULL)
+    strftime(text, sizeof(text), "%Y-%m-%d %H:%M:%S %Z", &tm);
+  cbor_item_t *reply = wd_map(2);
+  wd_put(reply, "unix_ms", wd_uint((uint64_t)now * 1000u));
+  wd_put(reply, "text", wd_text(text));
+  return tool_reply(reply, out, out_len);
 }
 
 static int grep_run(wd_turn *turn, const uint8_t *in, size_t in_len,
@@ -539,6 +553,8 @@ static int turn_capability(void *ctx, const char *capability,
     return fs_read(turn, in, in_len, out, out_len);
   if (strcmp(capability, "fs.write") == 0)
     return fs_write(turn, in, in_len, out, out_len);
+  if (strcmp(capability, "clock.now") == 0)
+    return clock_now(out, out_len);
   if (strcmp(capability, "grep.run") == 0)
     return grep_run(turn, in, in_len, out, out_len);
   if (strcmp(capability, "fs.edit") == 0)
@@ -566,13 +582,14 @@ wd_turn *wd_turn_new(wd_engine *engine, const char *module_dir, const char *root
     turn->root = realpath(root, resolved) != NULL ? strdup(resolved)
                                                   : strdup(root);
   }
-  static const char *const driver_caps[] = {"engine.call", "policy.check"};
+  static const char *const driver_caps[] = {"engine.call", "policy.check",
+                                            "clock.now"};
   static const char *const provider_caps[] = {"net.request"};
   static const char *const tools_caps[] = {"fs.read", "fs.write",     "fs.edit",
                                            "exec.run", "grep.run"};
   static const char *const no_caps[] = {NULL};
   wd_module_spec engine_spec = {"engine", no_caps, 0, true};
-  wd_module_spec driver_spec = {"driver", driver_caps, 2, false};
+  wd_module_spec driver_spec = {"driver", driver_caps, 3, false};
   wd_module_spec policy_spec = {"policy", no_caps, 0, true};
   wd_module_spec provider_spec = {"provider", provider_caps, 1, false};
   wd_module_spec tools_spec = {"tools", tools_caps, 5, false};
@@ -599,7 +616,7 @@ wd_turn *wd_turn_new(wd_engine *engine, const char *module_dir, const char *root
   turn->provider = wd_instance_new(turn->provider_module, provider_caps, 1,
                                    &TURN_LIMITS, turn_capability, turn, err);
   if (turn->provider == NULL) goto fail;
-  turn->driver = wd_instance_new(turn->driver_module, driver_caps, 2,
+  turn->driver = wd_instance_new(turn->driver_module, driver_caps, 3,
                                  &TURN_LIMITS, turn_capability, turn, err);
   if (turn->driver == NULL) goto fail;
   turn->tools = wd_instance_new(turn->tools_module, tools_caps, 5,

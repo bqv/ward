@@ -57,7 +57,7 @@ int main(void) {
     return 1;
   }
   assert(seen.deltas == 1);
-  assert(strcmp(seen.text, "hello") == 0);
+  assert(strstr(seen.text, "hello") != NULL);
   assert(seen.ended == 1);
 
   events second = {0, 0, {0}};
@@ -67,7 +67,7 @@ int main(void) {
     return 1;
   }
   assert(second.deltas == 1);
-  assert(strcmp(second.text, "again") == 0);
+  assert(strstr(second.text, "again") != NULL);
   assert(second.ended == 1);
 
   wd_turn_free(turn);

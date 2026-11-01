@@ -67,7 +67,7 @@ The tokenizer is native because BPE is a hot byte loop; a guest would pay for th
 Guests get primitives, never syscalls. Deny by default.
 
 ```
-clock.now()                      -> {unix_ms, tz}
+clock.now()                      -> {unix_ms, text}
 random.bytes(n)
 log.{debug,info,warn,error}
 store.{get,put,del,scan}

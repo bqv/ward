@@ -109,6 +109,16 @@ only the gate that turns `ask` into a parked approval. `read` is allowed; `write
 is the fail-closed default. The README's judge and plan gate are M2. A method is served only when
 `docs/protocol.md` says it is served — the rest of the frozen list answers `not_supported`.
 
+Eighth: the rest of the M1 surface. The driver asks `clock.now` and stamps every prompt with
+the local time (`[2026-11-01 18:28:47 EET] hello`), so the model sees when it is; `ward -p
+TEXT` creates a session if needed, runs one turn and prints it, which is the headless entry
+point; and the model catalog is the next slice.
+
+Two more ABI notes: a CBOR integer wider than 32 bits is skipped rather than refused —
+`clock.now` returns a millisecond timestamp and the guests that only skip it must not choke —
+and `wd_r_uint` still truncates such a value, so a guest that needs the whole 64 bits reads
+the text form instead.
+
 M0's acceptance is 1,000 round-trips/s over UDS and a fuzz-clean decoder. A
 gate that is not measured is not met.
 
