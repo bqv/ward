@@ -29,6 +29,7 @@ typedef enum {
   WD_ERR_CONFLICT = 10,
   WD_ERR_CANCELLED = 11,
   WD_ERR_LIMIT = 12,
+  WD_ERR_PERMISSION_DENIED = 13,
 } wd_error;
 
 const char *wd_error_name(wd_error err);

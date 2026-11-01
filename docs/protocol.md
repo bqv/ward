@@ -39,6 +39,21 @@ Paths:
 One state directory is served by one daemon. A second `ward up` on the same state
 directory refuses to start.
 
+Remote clients use QUIC: TLS 1.3 over UDP, one bidirectional stream carrying the same frames
+in both directions, ALPN `ward`. There is no HTTP/3 layer and no 0-RTT. The default
+bind is `127.0.0.1:0`, loopback on an ephemeral port, so a daemon never collides with
+another; `WARD_QUIC_BIND` sets it (`host:port`, `off` to disable the listener), and
+`ward up` prints `quic <endpoint> <fingerprint>` when it is listening. The endpoint a
+device needs comes from `device.pair`, not from a hardcoded port.
+
+The server certificate is signed by a local CA in `<state>/pki/`, created on first start;
+its SHA-256 fingerprint is what pairing hands to the device. A device presents a client
+certificate from that CA whose organisational unit carries its scope (`readonly`, `phone`,
+`desktop`). A connection without a certificate is unauthenticated: it may send exactly one
+request, `device.enrol`, and any other method answers `unauthenticated` and closes the
+connection. The CRL beside the CA is consulted for every peer certificate, so a revoked
+device is refused at handshake.
+
 ## Frame
 
 Every message, in both directions, is one frame:
@@ -124,6 +139,28 @@ A prompt is synchronous: the request is answered after the turn ends, and the ev
 arrive before the response. A second prompt on the same session is served after the
 first returns.
 
+### Device pairing
+
+**`device.pair`** — params `{scope?: text}`, default `desktop`, one of `readonly`, `phone`,
+`desktop`. Local only. Mints a single-use enrolment token valid for five minutes and returns
+`{token, fingerprint, endpoint, scope, expires_ms}`; a QR rendering of those fields is a
+client concern.
+
+**`device.enrol`** — params `{token: text, csr: text}`. Served only over QUIC, on a
+connection with no client certificate. Redeems the token and signs the PEM certificate
+request with the scope the token was minted for, answering `{cert, ca, serial}`; the
+connection closes afterwards. An unknown, spent or expired token is `permission_denied`.
+
+**`device.list`** — local only. Returns
+`{devices: [{serial, name, scope, issued_ms, revoked}, ...]}`, oldest first.
+
+**`device.revoke`** — params `{serial: text}`, local only. Marks the device revoked, rewrites
+the CRL, closes any live connection using that certificate and answers `{revoked: true}`.
+
+Scope is enforced by the daemon. A `readonly` device may call the read methods, but
+`session.prompt`, `session.cancel` and `approval.respond` answer `permission_denied`. Device
+administration is local only; a QUIC connection asking for it is `permission_denied`.
+
 ### Declared, not served in M0
 
 The frozen list, from `README.md`:
@@ -208,6 +245,7 @@ key on `name`.
 | 10 | `conflict` | the request contradicts existing state |
 | 11 | `cancelled` | the request was cancelled |
 | 12 | `limit` | a size or concurrency limit was hit |
+| 13 | `permission_denied` | the device scope or the transport does not allow this |
 
 The daemon sends an error response when it can, and closes only on `invalid_frame`,
 `version` or `unauthenticated`. Before the handshake completes there is no request to

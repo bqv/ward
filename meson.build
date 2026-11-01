@@ -12,9 +12,12 @@ libcbor = dependency('libcbor', version: '>=0.10')
 libzstd = dependency('libzstd', version: '>=1.4')
 wasmtime = dependency('wasmtime')
 libcurl = dependency('libcurl')
+openssl = dependency('openssl')
+ngtcp2 = dependency('libngtcp2', version: '>=1.0')
+ngtcp2_crypto = dependency('libngtcp2_crypto_ossl')
 wasi = dependency('wasi-sdk')
 
-deps = [libcbor, libzstd, wasmtime, libcurl]
+deps = [libcbor, libzstd, wasmtime, libcurl, openssl, ngtcp2, ngtcp2_crypto]
 
 add_project_arguments('-D_GNU_SOURCE', language: 'c')
 
@@ -40,6 +43,8 @@ core = static_library('ward-core',
     'src/core/turn.c',
     'src/wasm/host.c',
     'src/net/http.c',
+    'src/net/pki.c',
+    'src/net/quic.c',
   ),
   include_directories: inc,
   dependencies: deps,
@@ -64,6 +69,8 @@ foreach t : [
   ['session', 'tests/session_test.c'],
   ['sse', 'tests/sse_test.c'],
   ['approval', 'tests/approval_test.c'],
+  ['pki', 'tests/pki_test.c'],
+  ['quic', 'tests/quic_test.c'],
 ]
   exe = executable(t[0] + '-test', t[1],
     include_directories: inc,
@@ -151,6 +158,13 @@ gate_m1 = executable('gate-m1-test', 'tests/gate_m1.c',
 )
 test('m1', gate_m1, env: module_env, timeout: 300,
      depends: [module_engine, module_driver, module_provider])
+
+gate_quic = executable('gate-quic-test', 'tests/gate_quic.c',
+  include_directories: inc,
+  link_with: core,
+  dependencies: deps,
+)
+test('quic-gate', gate_quic, env: test_env, timeout: 240)
 
 wasm_env = environment()
 wasm_env.set('WARD_GUEST_DIR', meson.current_build_dir())

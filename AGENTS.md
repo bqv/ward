@@ -4,9 +4,10 @@ A coding agent harness: a small C core that owns I/O and enforcement, and a
 reloadable WebAssembly layer that owns every decision. Binary protocol over a
 Unix socket; no web UI.
 
-**Status: M0.** The daemon, the `AF_UNIX` transport, the handshake, sessions,
-durable events, replay and a client exist and pass their gate. M1 is the Wasmtime
-host. `docs/protocol.md` is a frozen contract: the frame layout, the method names
+**Status: M1.** The daemon, the `AF_UNIX` transport, the handshake, sessions,
+durable events, replay and a client exist and pass their gate, and the M1 layer sits on
+top of them: the Wasmtime host, the provider, the engine/driver dispatcher and QUIC with
+device pairing. `docs/protocol.md` is a frozen contract: the frame layout, the method names
 and the error names are a compatibility surface, so changing one is a version
 bump, not an edit. `README.md` remains the design, its parity table is the scope contract, and the
 design outranks this file; when they disagree, the README wins and this file gets
@@ -57,7 +58,29 @@ provider turns SSE `content` chunks into text. `gate-m1-test` runs a prompt agai
 fake OpenAI endpoint that echoes the request, so request building and response parsing
 are both proven. The HTTP call is synchronous inside the daemon's loop, which stalls
 other sessions for the length of a completion; that is M1's known limitation and the
-worker/async split is what removes it. Next: approvals, then QUIC and pairing. A method is served only when
+worker/async split is what removes it.
+
+Sixth: QUIC and device pairing. `src/net/quic.c` speaks ngtcp2 over OpenSSL 3.5+ TLS: one
+bidirectional stream per connection carrying frames, ALPN `ward`, a self-signed server
+certificate pinned at pairing. `src/net/pki.c` owns the local CA in `<state>/pki/`, the
+CRL, and the client certificates it issues, whose scope (`readonly`, `phone`, `desktop`) is
+the organisational unit and is enforced by the daemon, not the client. `device.pair` mints
+a five-minute single-use enrolment token; `device.enrol` is the only method an
+unauthenticated QUIC connection may call and answers with a signed certificate;
+`device.list` and `device.revoke` are local only, and a revoke also closes the device's
+live connections. `gate-quic-test` (`quic-gate`) drives the real daemon: pair over the
+socket, enrol over QUIC, create a session over QUIC with the issued certificate, prove a
+`readonly` device is refused `session.prompt`, and prove a revoked certificate no longer
+gets a stream.
+
+Two traps cost an afternoon here. The daemon must service QUIC on epoll *timeouts* as well
+as on socket readiness (`wd_quic_service` from the `n == 0` branch), or a
+flow-control-blocked write is never retried and the peer waits forever — it presented as a
+one-in-five hang. And the ALPN constant carries its length byte: `"\4ward"` with
+`WD_QUIC_ALPN_LEN 5`, not the bare name.
+
+Still open in M1: `approval.respond` and its durable events. The table is in
+`src/core/approval.c` and tested, but nothing raises a request yet. A method is served only when
 `docs/protocol.md` says it is served — the rest of the frozen list answers
 `not_supported`.
 

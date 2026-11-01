@@ -394,6 +394,7 @@ job.{list,kill}
 schedule.{list,set,delete}
 goal.{set,clear}
 settings.{get,set}
+device.{pair,enrol,list,revoke}
 terminal.{open,write,resize,close}
 file.{upload,read}
 module.{list,reload}

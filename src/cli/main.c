@@ -36,6 +36,9 @@ static void usage(FILE *out) {
           "  session list   [--limit N] [--json]\n"
           "  session get    <id> [--json]\n"
           "  session resume <id> [--from SEQ] [--follow] [--json]\n"
+          "  device pair    [--scope S] [--json]\n"
+          "  device list    [--json]\n"
+          "  device revoke  <serial>\n"
           "\n"
           "socket defaults to $XDG_RUNTIME_DIR/ward.sock or /tmp/ward-$UID.sock\n");
 }
@@ -505,6 +508,122 @@ done:
   return rc;
 }
 
+static int command_device(int argc, char **argv) {
+  if (argc == 0) {
+    usage(stderr);
+    return 2;
+  }
+  const char *sub = argv[0];
+  bool json = false;
+  const char *scope = NULL;
+  const char *serial = NULL;
+  for (int i = 1; i < argc; i++) {
+    if (strcmp(argv[i], "--json") == 0) {
+      json = true;
+    } else if (strcmp(argv[i], "--scope") == 0 && i + 1 < argc) {
+      scope = argv[++i];
+    } else if (strcmp(argv[i], "--socket") == 0 && i + 1 < argc) {
+      i++;
+    } else if (argv[i][0] != '-') {
+      if (serial == NULL)
+        serial = argv[i];
+      else {
+        fprintf(stderr, "ward: too many arguments\n");
+        return 2;
+      }
+    } else {
+      fprintf(stderr, "ward: unknown option %s\n", argv[i]);
+      return 2;
+    }
+  }
+
+  char *path = socket_from_args(argc, argv);
+  if (path == NULL) return 1;
+  wd_client client;
+  if (client_connect(&client, path) != 0) {
+    free(path);
+    return 1;
+  }
+  free(path);
+  if (client_handshake(&client) != 0) {
+    close(client.fd);
+    return 1;
+  }
+
+  int rc = 1;
+  cbor_item_t *result = NULL;
+  if (strcmp(sub, "pair") == 0) {
+    cbor_item_t *params = wd_map(1);
+    if (scope != NULL) wd_put(params, "scope", wd_text(scope));
+    if (client_request(&client, "device.pair", params, &result) != 0) goto done;
+    if (json) {
+      print_json(result);
+    } else {
+      char *token = wd_text_copy(wd_get(result, "token"));
+      char *fingerprint = wd_text_copy(wd_get(result, "fingerprint"));
+      char *endpoint = wd_text_copy(wd_get(result, "endpoint"));
+      char *granted = wd_text_copy(wd_get(result, "scope"));
+      uint64_t expires = 0;
+      wd_uint_of(wd_get(result, "expires_ms"), &expires);
+      printf("endpoint    %s\nfingerprint %s\nscope       %s\n"
+             "token       %s\nexpires     %s\n",
+             endpoint != NULL ? endpoint : "?",
+             fingerprint != NULL ? fingerprint : "?", granted != NULL ? granted : "?",
+             token != NULL ? token : "?", format_time((int64_t)expires));
+      printf("pair        %s %s %s\n", endpoint != NULL ? endpoint : "?",
+             fingerprint != NULL ? fingerprint : "?", token != NULL ? token : "?");
+      free(token);
+      free(fingerprint);
+      free(endpoint);
+      free(granted);
+    }
+    rc = 0;
+  } else if (strcmp(sub, "list") == 0) {
+    cbor_item_t *params = wd_map(0);
+    if (client_request(&client, "device.list", params, &result) != 0) goto done;
+    if (json) {
+      print_json(result);
+    } else {
+      cbor_item_t *devices = wd_get(result, "devices");
+      size_t n = cbor_array_size(devices);
+      cbor_item_t **items = cbor_array_handle(devices);
+      if (n == 0) printf("no devices\n");
+      for (size_t i = 0; i < n; i++) {
+        char *dev_serial = wd_text_copy(wd_get(items[i], "serial"));
+        char *name = wd_text_copy(wd_get(items[i], "name"));
+        char *dev_scope = wd_text_copy(wd_get(items[i], "scope"));
+        uint64_t issued = 0;
+        wd_uint_of(wd_get(items[i], "issued_ms"), &issued);
+        bool revoked = false;
+        wd_bool_of(wd_get(items[i], "revoked"), &revoked);
+        printf("%-40s %-16s %-9s %s%s\n", dev_serial != NULL ? dev_serial : "?",
+               name != NULL ? name : "?", dev_scope != NULL ? dev_scope : "?",
+               format_time((int64_t)issued), revoked ? " revoked" : "");
+        free(dev_serial);
+        free(name);
+        free(dev_scope);
+      }
+    }
+    rc = 0;
+  } else if (strcmp(sub, "revoke") == 0) {
+    if (serial == NULL) {
+      fprintf(stderr, "ward: device revoke needs a serial\n");
+      goto done;
+    }
+    cbor_item_t *params = wd_map(1);
+    wd_put(params, "serial", wd_text(serial));
+    if (client_request(&client, "device.revoke", params, &result) != 0) goto done;
+    printf("revoked %s\n", serial);
+    rc = 0;
+  } else {
+    fprintf(stderr, "ward: unknown device command %s\n", sub);
+  }
+done:
+  if (result != NULL) wd_free(result);
+  close(client.fd);
+  return rc;
+}
+
 int main(int argc, char **argv) {
   if (argc < 2) {
     usage(stderr);
@@ -521,6 +640,7 @@ int main(int argc, char **argv) {
     return 0;
   }
   if (strcmp(command, "session") == 0) return command_session(argc - 2, argv + 2);
+  if (strcmp(command, "device") == 0) return command_device(argc - 2, argv + 2);
   fprintf(stderr, "ward: unknown command %s\n", command);
   usage(stderr);
   return 2;

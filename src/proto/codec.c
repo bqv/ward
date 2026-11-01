@@ -22,6 +22,7 @@ static const char *const error_names[] = {
     [WD_ERR_CONFLICT] = "conflict",
     [WD_ERR_CANCELLED] = "cancelled",
     [WD_ERR_LIMIT] = "limit",
+    [WD_ERR_PERMISSION_DENIED] = "permission_denied",
 };
 
 const char *wd_error_name(wd_error err) {

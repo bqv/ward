@@ -27,6 +27,8 @@
 
 #include "core/session.h"
 #include "core/util.h"
+#include "net/pki.h"
+#include "net/quic.h"
 #include "proto/codec.h"
 #include "proto/frame.h"
 
@@ -35,6 +37,8 @@
 #define WD_CACHE 16
 #define WD_MAX_OUT (8u << 20)
 #define WD_HANDSHAKE_MS 5000u
+#define WD_QUIC_DEFAULT_BIND "127.0.0.1:0"
+#define WD_PAIR_TTL_MS 300000u
 
 typedef struct wd_out {
   struct wd_out *next;
@@ -57,6 +61,7 @@ typedef struct {
 
 typedef struct wd_conn {
   int fd;
+  wd_quic_stream *stream;
   bool hello;
   bool closing;
   uint64_t deadline_ms;
@@ -82,14 +87,20 @@ typedef struct {
   hs_store store;
   wd_engine *engine;
   wd_turn *turn;
+  wd_pki *pki;
+  wd_quic *quic;
+  char *quic_endpoint;
+  int quic_port;
   wd_conn *conns[WD_MAX_CONNS];
   bool stop;
 } wd_server;
 
 static int token_listen;
 static int token_signal;
+static int token_quic;
 
 static void conn_close(wd_server *srv, wd_conn *conn);
+static void conn_release(wd_server *srv, wd_conn *conn);
 static int conn_arm(wd_server *srv, wd_conn *conn);
 static int conn_flush(wd_conn *conn);
 static int conn_read(wd_server *srv, wd_conn *conn);
@@ -486,8 +497,221 @@ static void handle_session_prompt(wd_server *srv, wd_conn *conn, uint64_t id,
   conn_send_cached(conn, id, wd_response_ok(id, result));
 }
 
+static bool admin_method(const char *method) {
+  return strcmp(method, "device.pair") == 0 ||
+         strcmp(method, "device.list") == 0 ||
+         strcmp(method, "device.revoke") == 0;
+}
+
+static char *read_text_file(const char *path) {
+  int fd = open(path, O_RDONLY | O_CLOEXEC);
+  if (fd < 0) return NULL;
+  size_t cap = 8192;
+  size_t len = 0;
+  char *buf = malloc(cap);
+  if (buf == NULL) {
+    close(fd);
+    return NULL;
+  }
+  for (;;) {
+    if (len + 1 == cap) {
+      char *grown = realloc(buf, cap * 2);
+      if (grown == NULL) {
+        free(buf);
+        close(fd);
+        return NULL;
+      }
+      buf = grown;
+      cap *= 2;
+    }
+    ssize_t n = read(fd, buf + len, cap - len - 1);
+    if (n < 0) {
+      if (errno == EINTR) continue;
+      free(buf);
+      close(fd);
+      return NULL;
+    }
+    if (n == 0) break;
+    len += (size_t)n;
+  }
+  close(fd);
+  buf[len] = '\0';
+  return buf;
+}
+
+static void handle_device_pair(wd_server *srv, wd_conn *conn, uint64_t id,
+                               cbor_item_t *params) {
+  if (srv->quic == NULL) {
+    conn_send_error(conn, id, WD_ERR_NOT_SUPPORTED, "quic is disabled");
+    conn_arm(srv, conn);
+    return;
+  }
+  char *name = wd_text_copy(wd_get(params, "scope"));
+  int scope = name == NULL ? WD_SCOPE_DESKTOP : wd_scope_parse(name);
+  free(name);
+  if (scope == WD_SCOPE_NONE) {
+    conn_send_error(conn, id, WD_ERR_INVALID_PARAMS,
+                    "scope is readonly, phone or desktop");
+    conn_arm(srv, conn);
+    return;
+  }
+  char *token = wd_pki_token_mint(srv->pki, wu_now_ms(), WD_PAIR_TTL_MS, scope);
+  if (token == NULL) {
+    conn_send_error(conn, id, WD_ERR_INTERNAL, "cannot mint a token");
+    conn_arm(srv, conn);
+    return;
+  }
+  char fingerprint[65];
+  wd_pki_fingerprint(srv->pki, fingerprint);
+  cbor_item_t *result = wd_map(5);
+  wd_put(result, "token", wd_text(token));
+  wd_put(result, "fingerprint", wd_text(fingerprint));
+  wd_put(result, "scope", wd_text(wd_scope_name(scope)));
+  wd_put(result, "endpoint",
+         wd_text(srv->quic_endpoint != NULL ? srv->quic_endpoint : ""));
+  wd_put(result, "expires_ms", wd_uint(wu_now_ms() + WD_PAIR_TTL_MS));
+  free(token);
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
+static void handle_device_enrol(wd_server *srv, wd_conn *conn, uint64_t id,
+                                cbor_item_t *params) {
+  char *token = wd_text_copy(wd_get(params, "token"));
+  char *csr = wd_text_copy(wd_get(params, "csr"));
+  if (token == NULL || csr == NULL) {
+    free(token);
+    free(csr);
+    conn_send_error(conn, id, WD_ERR_INVALID_PARAMS, "token and csr are required");
+    conn_arm(srv, conn);
+    return;
+  }
+  int scope = WD_SCOPE_NONE;
+  if (wd_pki_token_redeem(srv->pki, token, wu_now_ms(), &scope) != 0) {
+    free(token);
+    free(csr);
+    conn_send_error(conn, id, WD_ERR_PERMISSION_DENIED,
+                    "the enrolment token is unknown, spent or expired");
+    conn->closing = true;
+    conn_arm(srv, conn);
+    return;
+  }
+  free(token);
+  char failure[256] = {0};
+  char *cert = NULL;
+  char serial[WD_PKI_SERIAL_MAX] = {0};
+  int rc = wd_pki_issue(srv->pki, csr, scope, &cert, serial, failure,
+                        sizeof(failure));
+  free(csr);
+  if (rc != 0) {
+    conn_send_error(conn, id, WD_ERR_INVALID_PARAMS, failure);
+    conn_arm(srv, conn);
+    return;
+  }
+  char *ca = read_text_file(wd_pki_ca_cert(srv->pki));
+  cbor_item_t *result = wd_map(3);
+  wd_put(result, "cert", wd_text(cert));
+  wd_put(result, "ca", wd_text(ca != NULL ? ca : ""));
+  wd_put(result, "serial", wd_text(serial));
+  free(cert);
+  free(ca);
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn->closing = true;
+  conn_arm(srv, conn);
+}
+
+static void handle_device_list(wd_server *srv, wd_conn *conn, uint64_t id) {
+  wd_pki_device *devices = NULL;
+  size_t count = 0;
+  char failure[256] = {0};
+  if (wd_pki_devices(srv->pki, &devices, &count, failure, sizeof(failure)) != 0) {
+    conn_send_error(conn, id, WD_ERR_INTERNAL, failure);
+    conn_arm(srv, conn);
+    return;
+  }
+  cbor_item_t *list = wd_array(count);
+  for (size_t i = 0; i < count; i++) {
+    cbor_item_t *entry = wd_map(5);
+    wd_put(entry, "serial", wd_text(devices[i].serial));
+    wd_put(entry, "name", wd_text(devices[i].name));
+    wd_put(entry, "scope", wd_text(wd_scope_name(devices[i].scope)));
+    wd_put(entry, "issued_ms", wd_uint(devices[i].issued_ms));
+    wd_put(entry, "revoked", cbor_build_bool(devices[i].revoked));
+    bool pushed = cbor_array_push(list, entry);
+    cbor_decref(&entry);
+    if (!pushed) {
+      conn->closing = true;
+      break;
+    }
+  }
+  free(devices);
+  cbor_item_t *result = wd_map(1);
+  wd_put(result, "devices", list);
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
+static void handle_device_revoke(wd_server *srv, wd_conn *conn, uint64_t id,
+                                 cbor_item_t *params) {
+  char *serial = wd_text_copy(wd_get(params, "serial"));
+  if (serial == NULL) {
+    conn_send_error(conn, id, WD_ERR_INVALID_PARAMS, "serial is required");
+    conn_arm(srv, conn);
+    return;
+  }
+  char failure[256] = {0};
+  if (wd_pki_revoke(srv->pki, serial, failure, sizeof(failure)) != 0) {
+    free(serial);
+    conn_send_error(conn, id, WD_ERR_NOT_FOUND, failure);
+    conn_arm(srv, conn);
+    return;
+  }
+  for (size_t i = 0; i < WD_MAX_CONNS; i++) {
+    wd_conn *other = srv->conns[i];
+    if (other == NULL || other->stream == NULL) continue;
+    const char *live = wd_quic_stream_serial(other->stream);
+    if (live != NULL && strcmp(live, serial) == 0) conn_close(srv, other);
+  }
+  free(serial);
+  cbor_item_t *result = wd_map(1);
+  wd_put(result, "revoked", cbor_build_bool(true));
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
 static void handle_request(wd_server *srv, wd_conn *conn, uint64_t id,
                            const char *method, cbor_item_t *params) {
+  if (conn->stream != NULL) {
+    if (!wd_quic_stream_authenticated(conn->stream) &&
+        strcmp(method, "device.enrol") != 0) {
+      conn_send_error(conn, id, WD_ERR_UNAUTHENTICATED,
+                      "enrol a device certificate first");
+      conn->closing = true;
+      conn_arm(srv, conn);
+      return;
+    }
+    if (admin_method(method)) {
+      conn_send_error(conn, id, WD_ERR_PERMISSION_DENIED,
+                      "device administration is local only");
+      conn_arm(srv, conn);
+      return;
+    }
+    const char *scope = wd_quic_stream_scope(conn->stream);
+    if (scope != NULL && strcmp(scope, "readonly") == 0 &&
+        (strcmp(method, "session.prompt") == 0 ||
+         strcmp(method, "approval.respond") == 0 ||
+         strcmp(method, "session.cancel") == 0)) {
+      conn_send_error(conn, id, WD_ERR_PERMISSION_DENIED,
+                      "the device scope is read only");
+      conn_arm(srv, conn);
+      return;
+    }
+  } else if (strcmp(method, "device.enrol") == 0) {
+    conn_send_error(conn, id, WD_ERR_NOT_SUPPORTED,
+                    "enrolment is served over quic only");
+    conn_arm(srv, conn);
+    return;
+  }
   if (strcmp(method, "session.create") == 0) {
     handle_session_create(srv, conn, id, params);
   } else if (strcmp(method, "session.list") == 0) {
@@ -498,6 +722,14 @@ static void handle_request(wd_server *srv, wd_conn *conn, uint64_t id,
     handle_session_resume(srv, conn, id, params);
   } else if (strcmp(method, "session.prompt") == 0) {
     handle_session_prompt(srv, conn, id, params);
+  } else if (strcmp(method, "device.pair") == 0) {
+    handle_device_pair(srv, conn, id, params);
+  } else if (strcmp(method, "device.enrol") == 0) {
+    handle_device_enrol(srv, conn, id, params);
+  } else if (strcmp(method, "device.list") == 0) {
+    handle_device_list(srv, conn, id);
+  } else if (strcmp(method, "device.revoke") == 0) {
+    handle_device_revoke(srv, conn, id, params);
   } else {
     conn_send_error(conn, id, WD_ERR_NOT_SUPPORTED, "method not served yet");
     conn_arm(srv, conn);
@@ -582,9 +814,8 @@ static void handle_frame(wd_server *srv, wd_conn *conn, const wd_frame *frame) {
   wd_free(root);
 }
 
-static void conn_close(wd_server *srv, wd_conn *conn) {
-  epoll_ctl(srv->epoll_fd, EPOLL_CTL_DEL, conn->fd, NULL);
-  close(conn->fd);
+static void conn_release(wd_server *srv, wd_conn *conn) {
+  if (conn->fd >= 0) close(conn->fd);
   for (size_t i = 0; i < WD_CACHE; i++) free(conn->cache[i].body);
   wd_out *out = conn->out_head;
   while (out != NULL) {
@@ -599,18 +830,85 @@ static void conn_close(wd_server *srv, wd_conn *conn) {
   free(conn);
 }
 
+static void conn_close(wd_server *srv, wd_conn *conn) {
+  if (conn->stream != NULL) {
+    wd_quic_stream *stream = conn->stream;
+    conn->stream = NULL;
+    wd_quic_stream_close(stream);
+    conn_release(srv, conn);
+    return;
+  }
+  epoll_ctl(srv->epoll_fd, EPOLL_CTL_DEL, conn->fd, NULL);
+  conn_release(srv, conn);
+}
+
+static wd_conn *conn_for_stream(wd_server *srv, wd_quic_stream *stream) {
+  for (size_t i = 0; i < WD_MAX_CONNS; i++) {
+    wd_conn *conn = srv->conns[i];
+    if (conn != NULL && conn->stream == stream) return conn;
+  }
+  return NULL;
+}
+
+static void quic_open(void *ctx, wd_quic_stream *stream) {
+  wd_server *srv = ctx;
+  size_t slot = WD_MAX_CONNS;
+  for (size_t i = 0; i < WD_MAX_CONNS; i++)
+    if (srv->conns[i] == NULL) {
+      slot = i;
+      break;
+    }
+  if (slot == WD_MAX_CONNS) {
+    wd_quic_stream_close(stream);
+    return;
+  }
+  wd_conn *conn = calloc(1, sizeof(*conn));
+  if (conn == NULL) {
+    wd_quic_stream_close(stream);
+    return;
+  }
+  conn->fd = -1;
+  conn->stream = stream;
+  conn->deadline_ms = wu_now_ms() + WD_HANDSHAKE_MS;
+  conn->next_sub = 1;
+  srv->conns[slot] = conn;
+}
+
+static void quic_frame(void *ctx, wd_quic_stream *stream, const wd_frame *frame) {
+  wd_server *srv = ctx;
+  wd_conn *conn = conn_for_stream(srv, stream);
+  if (conn == NULL) return;
+  handle_frame(srv, conn, frame);
+  if (srv->quic != NULL) wd_quic_flush(srv->quic);
+}
+
+static void quic_closed(void *ctx, wd_quic_stream *stream) {
+  wd_server *srv = ctx;
+  wd_conn *conn = conn_for_stream(srv, stream);
+  if (conn == NULL) return;
+  conn->stream = NULL;
+  conn_release(srv, conn);
+}
+
 static int conn_flush(wd_conn *conn) {
   while (conn->out_head != NULL) {
     wd_out *out = conn->out_head;
-    ssize_t n = write(conn->fd, out->data + out->off, out->len - out->off);
-    if (n < 0) {
-      if (errno == EINTR) continue;
-      if (errno == EAGAIN || errno == EWOULDBLOCK) return 0;
-      return -1;
+    if (conn->stream != NULL) {
+      if (wd_quic_stream_write(conn->stream, out->data + out->off,
+                               out->len - out->off) != 0)
+        return -1;
+      conn->out_bytes -= out->len - out->off;
+    } else {
+      ssize_t n = write(conn->fd, out->data + out->off, out->len - out->off);
+      if (n < 0) {
+        if (errno == EINTR) continue;
+        if (errno == EAGAIN || errno == EWOULDBLOCK) return 0;
+        return -1;
+      }
+      out->off += (size_t)n;
+      conn->out_bytes -= (size_t)n;
+      if (out->off < out->len) return 0;
     }
-    out->off += (size_t)n;
-    conn->out_bytes -= (size_t)n;
-    if (out->off < out->len) return 0;
     conn->out_head = out->next;
     if (conn->out_head == NULL) conn->out_tail = NULL;
     free(out->data);
@@ -620,6 +918,11 @@ static int conn_flush(wd_conn *conn) {
 }
 
 static int conn_arm(wd_server *srv, wd_conn *conn) {
+  if (conn->stream != NULL) {
+    if (conn_flush(conn) != 0) return -1;
+    if (srv->quic != NULL) wd_quic_flush(srv->quic);
+    return 0;
+  }
   struct epoll_event ev;
   memset(&ev, 0, sizeof(ev));
   ev.events = EPOLLIN | (conn->out_head != NULL ? EPOLLOUT : 0);
@@ -683,10 +986,20 @@ static int next_timeout(wd_server *srv, uint64_t now) {
     if (conn == NULL || conn->hello || conn->deadline_ms == 0) continue;
     if (best == 0 || conn->deadline_ms < best) best = conn->deadline_ms;
   }
-  if (best == 0) return -1;
-  if (best <= now) return 0;
-  uint64_t delta = best - now;
-  return delta > 60000 ? 60000 : (int)delta;
+  int quic_timeout = srv->quic != NULL ? wd_quic_next_timeout(srv->quic, now) : -1;
+  if (best == 0 && quic_timeout < 0) return -1;
+  int socket_timeout = -1;
+  if (best != 0) {
+    if (best <= now)
+      socket_timeout = 0;
+    else {
+      uint64_t delta = best - now;
+      socket_timeout = delta > 60000 ? 60000 : (int)delta;
+    }
+  }
+  if (quic_timeout >= 0 && (socket_timeout < 0 || quic_timeout < socket_timeout))
+    socket_timeout = quic_timeout;
+  return socket_timeout;
 }
 
 static void server_accept(wd_server *srv) {
@@ -843,6 +1156,46 @@ static int setup_signals(void) {
   return signalfd(-1, &mask, SFD_NONBLOCK | SFD_CLOEXEC);
 }
 
+static char *endpoint_text(const char *bind, int port) {
+  const char *colon = strrchr(bind, ':');
+  size_t host_len = colon != NULL ? (size_t)(colon - bind) : strlen(bind);
+  char *text = malloc(host_len + 16);
+  if (text == NULL) return NULL;
+  memcpy(text, bind, host_len);
+  snprintf(text + host_len, 16, ":%d", port);
+  return text;
+}
+
+static int setup_quic(wd_server *srv) {
+  const char *bind = getenv("WARD_QUIC_BIND");
+  if (bind != NULL && strcmp(bind, "off") == 0) return 0;
+  const char *spec = bind != NULL && bind[0] != '\0' ? bind : WD_QUIC_DEFAULT_BIND;
+  char *text = strdup(spec);
+  if (text == NULL) return -1;
+  wd_quic_config cfg = {.bind = text, .pki = srv->pki};
+  wd_quic_events events = {.stream_open = quic_open,
+                           .stream_frame = quic_frame,
+                           .stream_close = quic_closed};
+  char *err = NULL;
+  srv->quic = wd_quic_new(&cfg, &events, srv, &err);
+  free(text);
+  if (srv->quic == NULL) {
+    fprintf(stderr, "ward: quic: %s\n", err != NULL ? err : "cannot listen");
+    free(err);
+    return -1;
+  }
+  srv->quic_port = wd_quic_port(srv->quic);
+  srv->quic_endpoint = endpoint_text(spec, srv->quic_port);
+  if (srv->quic_endpoint == NULL) return -1;
+  struct epoll_event ev;
+  memset(&ev, 0, sizeof(ev));
+  ev.events = EPOLLIN;
+  ev.data.ptr = &token_quic;
+  if (epoll_ctl(srv->epoll_fd, EPOLL_CTL_ADD, wd_quic_fd(srv->quic), &ev) != 0)
+    return -1;
+  return 0;
+}
+
 int wd_up_run(const wd_up_config *cfg) {
   wd_server srv;
   memset(&srv, 0, sizeof(srv));
@@ -890,7 +1243,23 @@ int wd_up_run(const wd_up_config *cfg) {
   if (epoll_ctl(srv.epoll_fd, EPOLL_CTL_ADD, srv.signal_fd, &ev) != 0)
     goto cleanup;
 
-  printf("ready %s\n", srv.socket_path);
+  char *pki_dir = wu_path_join(srv.state_dir, "pki");
+  char *pki_err = NULL;
+  if (pki_dir == NULL) goto cleanup;
+  srv.pki = wd_pki_open(pki_dir, &pki_err);
+  free(pki_dir);
+  if (srv.pki == NULL) {
+    fprintf(stderr, "ward: pki: %s\n",
+            pki_err != NULL ? pki_err : "cannot open");
+    free(pki_err);
+    goto cleanup;
+  }
+  free(pki_err);
+  if (setup_quic(&srv) != 0) goto cleanup;
+  char fingerprint[65];
+  wd_pki_fingerprint(srv.pki, fingerprint);
+  printf("ready %s\nquic %s %s\n", srv.socket_path,
+         srv.quic_endpoint != NULL ? srv.quic_endpoint : "off", fingerprint);
   fflush(stdout);
 
   struct epoll_event events[64];
@@ -902,10 +1271,23 @@ int wd_up_run(const wd_up_config *cfg) {
       if (errno == EINTR) continue;
       break;
     }
+    if (n == 0 && srv.quic != NULL) {
+      (void)wd_quic_service(srv.quic, wu_now_ms());
+      (void)wd_quic_flush(srv.quic);
+    }
     for (int i = 0; i < n; i++) {
       void *ptr = events[i].data.ptr;
       if (ptr == &token_listen) {
         server_accept(&srv);
+        continue;
+      }
+      if (ptr == &token_quic) {
+        if (wd_quic_service(srv.quic, wu_now_ms()) != 0) {
+          fprintf(stderr, "ward: quic socket failed\n");
+          srv.stop = true;
+          break;
+        }
+        wd_quic_flush(srv.quic);
         continue;
       }
       if (ptr == &token_signal) {
@@ -955,6 +1337,9 @@ cleanup:
   if (srv.signal_fd >= 0) close(srv.signal_fd);
   wd_turn_free(srv.turn);
   wd_engine_free(srv.engine);
+  wd_quic_free(srv.quic);
+  wd_pki_free(srv.pki);
+  free(srv.quic_endpoint);
   hs_close(&srv.store);
   free(srv.socket_path);
   free(srv.state_dir);
