@@ -38,6 +38,8 @@ int wd_session_create(wd_store *st, const char *cwd, const char *model,
 cbor_item_t *wd_session_to_cbor(const wd_session *s);
 int wd_session_emit(wd_session *s, const char *kind, cbor_item_t *payload,
             uint64_t *seq_out);
+int wd_session_attach(wd_session *s, const char *name, const uint8_t *data,
+                      size_t len, char **path_out, char **err);
 int wd_session_set_model(wd_session *s, const char *model, uint64_t *seq_out);
 int wd_session_fork(wd_store *st, wd_session *parent, uint64_t upto, wd_session **out);
 int wd_session_checkpoint(wd_session *s, const char *label, uint64_t *seq_out);

@@ -939,6 +939,26 @@ int main(void) {
   assert(recall_end != NULL);
   wd_free(recall_end);
 
+  cbor_item_t *att_add = NULL;
+  cbor_item_t *att_params = wd_map(3);
+  wd_put(att_params, "id", wd_text(session));
+  wd_put(att_params, "name", wd_text("note.txt"));
+  wd_put(att_params, "data", wd_text("attached body"));
+  assert(request(&a, a.next_id++, "attachment.add", att_params, &att_add,
+                 NULL) == 0);
+  char *att_path = wd_text_copy(wd_get(att_add, "path"));
+  assert(att_path != NULL && strstr(att_path, "note.txt") != NULL);
+  free(att_path);
+  wd_free(att_add);
+  cbor_item_t *att_list = NULL;
+  cbor_item_t *att_query = wd_map(1);
+  wd_put(att_query, "id", wd_text(session));
+  assert(request(&a, a.next_id++, "attachment.list", att_query, &att_list,
+                 NULL) == 0);
+  cbor_item_t *att_items = wd_get(att_list, "attachments");
+  assert(att_items != NULL && cbor_array_size(att_items) == 1);
+  wd_free(att_list);
+
   cbor_item_t *sched = NULL;
   cbor_item_t *sched_params = wd_map(3);
   wd_put(sched_params, "session", wd_text(session));

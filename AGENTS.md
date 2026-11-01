@@ -491,6 +491,22 @@ Worth fixing while it is fresh: `web.search` defaults to `~/bin/srchdsh`, but th
 `~/.local/bin/srchdsh` on this box. `WARD_SEARCH_BIN` hides it in tests; the default needs
 checking against the real path when search is next touched.
 
+Forty-eighth: attachments. `attachment.add {id, name, data}` stores the bytes under
+`<state>/<session>/attachments/<name>` — refusing a name with `/` or `..`, capped at 4 MiB —
+appends a durable `session.attachment {name, size}` and answers the path. `attachment.list`
+replays those events into the list. The gate adds a note, checks the path, and lists exactly
+one entry.
+
+The trap that cost the round is the one already written down: an array built with `wd_array(0)`
+and filled by `cbor_array_push` stays empty, because a definite array is fixed-size. The
+collector now grows a plain `cbor_item_t **` and the reply array is allocated at its final
+size. It is the second time this exact bug has been the whole delay; the note in the libcbor
+section is the one to read first when an array comes back empty.
+
+Attachments are stored, listed and durable. They are **not** yet shown to the model — a prompt
+does not mention them — which is the next step for the row rather than something this round
+claims.
+
 ## M3: started, with one finding worth keeping
 
 The first M3 attempt replaced the daemon's single `wd_turn` with a pool keyed by session, so

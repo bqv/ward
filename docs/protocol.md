@@ -130,6 +130,12 @@ fields stay the same when a real tokenizer replaces the estimate.
 **`stats.global`** — no params. The same counters summed over every session, plus
 `{sessions}`.
 
+**Attachments.** `attachment.add {id, name, data}` writes `data` (bytes or text, capped at
+4 MiB) to `<state>/<session>/attachments/<name>` — the name is refused if it holds `/` or `..`
+— appends a durable `session.attachment {name, size}` event and answers `{path, size}`.
+`attachment.list {id}` replays those events into `[{name, size}]`. The file lives in the state
+directory, not the tool root, so a turn cannot read it without being told the path.
+
 **Recall.** `/recall <words>` asks the skills guest, which calls core's `recall.search
 {query, k}`. Core runs the local `dsh-recall search <query> -k <k>` as a child (no shell, 20 s,
 64 KiB) and answers `{ok, status, text}`. The index, its embedding endpoint and its ranking

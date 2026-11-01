@@ -576,13 +576,13 @@ static void handle_session_compact(wd_server *srv, wd_conn *conn, uint64_t id,
   cbor_item_t *history = NULL;
   if (wd_session_history(session, 0, &history) != 0 || cbor_array_size(history) == 0) {
     if (history != NULL) wd_free(history);
-    conn_send_error(conn, id, WD_ERR_CONFLICT, "nothing to compact");
+    conn_send_error(conn, id, WD_ERR_BUSY, "nothing to compact");
     conn_arm(srv, conn);
     return;
   }
   if (run_find(srv, session->id) != NULL) {
     wd_free(history);
-    conn_send_error(conn, id, WD_ERR_CONFLICT, "the session is busy");
+    conn_send_error(conn, id, WD_ERR_BUSY, "the session is busy");
     conn_arm(srv, conn);
     return;
   }
@@ -669,7 +669,7 @@ static void handle_session_undo(wd_server *srv, wd_conn *conn, uint64_t id,
     return;
   }
   if (!have_to && wd_session_last_checkpoint(session, &to) != 0) {
-    conn_send_error(conn, id, WD_ERR_CONFLICT,
+    conn_send_error(conn, id, WD_ERR_BUSY,
                     "the session has no checkpoint to undo to");
     conn_arm(srv, conn);
     return;
@@ -1283,7 +1283,7 @@ static void handle_terminal_open(wd_server *srv, wd_conn *conn, uint64_t id,
   if (slot == WD_MAX_TERMS) {
     free(session_id);
     free(command);
-    conn_send_error(conn, id, WD_ERR_CONFLICT, "too many terminals");
+    conn_send_error(conn, id, WD_ERR_BUSY, "too many terminals");
     return;
   }
   const char *argv[4];
@@ -1374,6 +1374,135 @@ static void handle_terminal_close(wd_server *srv, wd_conn *conn, uint64_t id,
   free(handle);
   cbor_item_t *result = wd_map(1);
   wd_put(result, "closed", cbor_build_bool(closed));
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
+static void handle_attachment_add(wd_server *srv, wd_conn *conn, uint64_t id,
+                                 cbor_item_t *params) {
+  char *session_id = wd_text_copy(wd_get(params, "id"));
+  char *name = wd_text_copy(wd_get(params, "name"));
+  wd_session *session =
+      session_id != NULL ? wd_session_find(&srv->store, session_id) : NULL;
+  if (session == NULL || name == NULL) {
+    free(session_id);
+    free(name);
+    conn_send_error(conn, id, WD_ERR_INVALID_PARAMS, "a session and a name are needed");
+    return;
+  }
+  cbor_item_t *item = wd_get(params, "data");
+  const uint8_t *bytes = NULL;
+  size_t len = 0;
+  char *text = NULL;
+  if (item != NULL && item != NULL && cbor_typeof(item) == CBOR_TYPE_BYTESTRING) {
+    bytes = cbor_bytestring_handle(item);
+    len = cbor_bytestring_length(item);
+  } else {
+    text = wd_text_copy(item);
+    if (text != NULL) {
+      bytes = (const uint8_t *)text;
+      len = strlen(text);
+    }
+  }
+  if (bytes == NULL) {
+    free(session_id);
+    free(name);
+    free(text);
+    conn_send_error(conn, id, WD_ERR_INVALID_PARAMS, "no attachment data");
+    return;
+  }
+  if (len > (4u << 20)) {
+    free(session_id);
+    free(name);
+    free(text);
+    conn_send_error(conn, id, WD_ERR_INVALID_PARAMS, "the attachment is too large");
+    return;
+  }
+  char *path = NULL;
+  char *err = NULL;
+  int rc = wd_session_attach(session, name, bytes, len, &path, &err);
+  free(session_id);
+  free(name);
+  free(text);
+  if (rc != 0) {
+    char message[160];
+    snprintf(message, sizeof(message), "%s",
+             err != NULL ? err : "cannot store the attachment");
+    free(err);
+    conn_send_error(conn, id, WD_ERR_INTERNAL, message);
+    return;
+  }
+  cbor_item_t *result = wd_map(2);
+  wd_put(result, "path", wd_text(path));
+  wd_put(result, "size", wd_uint((uint64_t)len));
+  free(path);
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
+typedef struct {
+  cbor_item_t **items;
+  size_t len;
+  size_t cap;
+} attachment_list;
+
+static int collect_attachment(void *ctx, uint64_t seq, cbor_item_t *event) {
+  (void)seq;
+  attachment_list *list = ctx;
+  char *kind = wd_text_copy(wd_get(event, "kind"));
+  if (kind == NULL) return 0;
+  if (strcmp(kind, "session.attachment") != 0) {
+    free(kind);
+    return 0;
+  }
+  free(kind);
+  cbor_item_t *payload = wd_get(event, "payload");
+  char *name = wd_text_copy(wd_get(payload, "name"));
+  uint64_t size = 0;
+  wd_uint_of(wd_get(payload, "size"), &size);
+  if (name == NULL) return 0;
+  cbor_item_t *entry = wd_map(2);
+  wd_put(entry, "name", wd_text(name));
+  wd_put(entry, "size", wd_uint(size));
+  free(name);
+  if (list->len == list->cap) {
+    size_t cap = list->cap == 0 ? 8 : list->cap * 2;
+    cbor_item_t **grown = realloc(list->items, cap * sizeof(*grown));
+    if (grown == NULL) {
+      cbor_decref(&entry);
+      return 0;
+    }
+    list->items = grown;
+    list->cap = cap;
+  }
+  list->items[list->len++] = entry;
+  return 0;
+}
+
+static void handle_attachment_list(wd_server *srv, wd_conn *conn, uint64_t id,
+                                   cbor_item_t *params) {
+  char *session_id = wd_text_copy(wd_get(params, "id"));
+  wd_session *session =
+      session_id != NULL ? wd_session_find(&srv->store, session_id) : NULL;
+  free(session_id);
+  if (session == NULL) {
+    conn_send_error(conn, id, WD_ERR_NOT_FOUND, "no such session");
+    return;
+  }
+  attachment_list list = {NULL, 0, 0};
+  (void)wd_session_replay(session, 1, collect_attachment, &list);
+  cbor_item_t *items = wd_array(list.len);
+  for (size_t i = 0; i < list.len; i++) {
+    bool pushed = cbor_array_push(items, list.items[i]);
+    if (!pushed) {
+      cbor_decref(&list.items[i]);
+      continue;
+    }
+    cbor_decref(&list.items[i]);
+  }
+  free(list.items);
+  cbor_item_t *result = wd_map(1);
+  wd_put(result, "attachments", items);
   conn_send_cached(conn, id, wd_response_ok(id, result));
   conn_arm(srv, conn);
 }
@@ -1674,7 +1803,7 @@ static void handle_session_prompt(wd_server *srv, wd_conn *conn, uint64_t id,
   if (run_find(srv, session->id) != NULL) {
     free(session_id);
     free(text);
-    conn_send_error(conn, id, WD_ERR_CONFLICT, "the session is already busy");
+    conn_send_error(conn, id, WD_ERR_BUSY, "the session is already busy");
     conn_arm(srv, conn);
     return;
   }
@@ -2153,6 +2282,10 @@ static void handle_request(wd_server *srv, wd_conn *conn, uint64_t id,
     handle_subagent_interrupt(srv, conn, id, params);
   } else if (strcmp(method, "session.cancel") == 0) {
     handle_session_cancel(srv, conn, id, params);
+  } else if (strcmp(method, "attachment.add") == 0) {
+    handle_attachment_add(srv, conn, id, params);
+  } else if (strcmp(method, "attachment.list") == 0) {
+    handle_attachment_list(srv, conn, id, params);
   } else if (strcmp(method, "terminal.open") == 0) {
     handle_terminal_open(srv, conn, id, params);
   } else if (strcmp(method, "terminal.write") == 0) {
