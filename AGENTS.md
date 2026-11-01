@@ -807,6 +807,40 @@ replay — copy the id before closing.
 Nothing calls the writer yet. The caller belongs with the handover slice, which needs persisted
 guest state to have something to hand over.
 
+Seventieth: the design for the last piece of the join, written before the code because the ordering is
+the whole difficulty. Guests live one turn, so nothing can be handed over unless the state of the
+old version was *persisted* when its turn ended.
+
+Where it lives: `<state>/<session>/modules/<name>@<version>.bin`. The version is in the filename, so
+there is no sidecar to keep consistent, and a file's existence is the record that a module at that
+version had exported state.
+
+When it is written: after `turn.end`, the daemon asks each module for its export. A guest without
+`ward_state_export` answers with an error, which means "no state" and is skipped silently; a guest
+with one has its bytes written and the other versions' files for that name removed. Only the current
+version keeps a blob, so a stale one can never be mistaken for live state.
+
+When it is handed over: at `run_new`, before the turn is created, look for a blob whose version
+differs from the pinned one. If there is none, nothing changes. If there is, the sequence is load
+the old module, instantiate it, create the turn on the pinned version, call `wd_state_handover` from
+the scratch instance into **the turn's** instance for that module, then delete the old blob and keep
+the new one.
+
+The ordering trap is the reason this is written down: `wd_turn_new_pinned` instantiates everything
+at creation, so the handover must target the instance inside the turn rather than a second copy that
+would then be thrown away. That means one new accessor, `wd_turn_instance(turn, name)`, and nothing
+else in `turn.c`.
+
+When it refuses: `wd_state_handover` fails having left the new instance untouched. The daemon then
+calls `wd_session_note_migration` with `from` = the blob's version and keeps the run on that version,
+so the turn must be created *after* the outcome is known — the resolve order is pins, stale blob,
+decision, turn, handover. A run that falls back says so in the log and loses nothing.
+
+The test is the one the milestone's acceptance line needs, and it needs a stateful pipeline module
+first: the conformance guest from `tests/guest/echo.c` promoted to a pipeline member, or a small
+`store`-shaped guest added under `modules/`. Until one exists, the handover is proven only between
+two instances the test builds itself, which is what §65 delivers and what the parity note must say.
+
 ## Resuming M5
 
 Where the milestone stands, so the next session does not have to reconstruct it: master is at
