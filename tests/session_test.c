@@ -1,0 +1,83 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+#include <assert.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
+#include "core/session.h"
+#include "proto/codec.h"
+
+typedef struct {
+  int count;
+  uint64_t seqs[8];
+  char kinds[8][32];
+} seen;
+
+static int note(void *ctx, uint64_t seq, cbor_item_t *event) {
+  seen *s = ctx;
+  if (s->count < 8) {
+    s->seqs[s->count] = seq;
+    char *kind = hx_text_copy(hx_get(event, "kind"));
+    snprintf(s->kinds[s->count], sizeof(s->kinds[0]), "%s", kind ? kind : "?");
+    free(kind);
+  }
+  s->count++;
+  return 0;
+}
+
+int main(void) {
+  char dir[] = "/tmp/harness-session-XXXXXX";
+  assert(mkdtemp(dir) != NULL);
+
+  hs_store store;
+  assert(hs_open(&store, dir) == 0);
+  assert(store.len == 0);
+
+  hs_session *first = NULL;
+  hs_session *second = NULL;
+  assert(hs_create(&store, "/tmp", "deepseek", &first) == 0);
+  usleep(2000);
+  assert(hs_create(&store, "/tmp", NULL, &second) == 0);
+  assert(store.len == 2);
+  assert(strcmp(store.items[0]->id, second->id) == 0);
+  assert(strcmp(second->model, "unset") == 0);
+  assert(hs_find(&store, first->id) == first);
+  assert(hs_find(&store, "nope") == NULL);
+
+  uint64_t seq = 0;
+  cbor_item_t *payload = hx_map(1);
+  hx_put(payload, "session", hs_to_cbor(first));
+  assert(hs_emit(first, "session.updated", payload, &seq) == 0);
+  assert(seq == 1);
+  assert(first->last_seq == 1);
+
+  seen s = {0};
+  assert(hs_replay(first, 0, note, &s) == 1);
+  assert(s.count == 1);
+  assert(s.seqs[0] == 1);
+  assert(strcmp(s.kinds[0], "session.updated") == 0);
+
+  seen from_one = {0};
+  assert(hs_replay(first, 1, note, &from_one) == 0);
+  assert(from_one.count == 0);
+
+  char first_id[HX_ID_LEN];
+  snprintf(first_id, sizeof(first_id), "%s", first->id);
+  hs_close(&store);
+
+  assert(hs_open(&store, dir) == 0);
+  assert(store.len == 2);
+  hs_session *reloaded = hs_find(&store, first_id);
+  assert(reloaded != NULL);
+  assert(reloaded->last_seq == 1);
+  assert(strcmp(reloaded->cwd, "/tmp") == 0);
+  assert(strcmp(reloaded->model, "deepseek") == 0);
+  hs_close(&store);
+
+  printf("session tests passed\n");
+  return 0;
+}
