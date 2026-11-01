@@ -1,0 +1,11 @@
+option('sanitize',
+  type: 'combo',
+  choices: ['none', 'address', 'undefined', 'thread'],
+  value: 'none',
+  description: 'Sanitizer for the host build.')
+
+option('guest_profile',
+  type: 'combo',
+  choices: ['debug', 'release'],
+  value: 'debug',
+  description: 'Guest compilation profile: debug keeps DWARF, release strips.')
