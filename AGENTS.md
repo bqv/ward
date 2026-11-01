@@ -507,6 +507,15 @@ Attachments are stored, listed and durable. They are **not** yet shown to the mo
 does not mention them — which is the next step for the row rather than something this round
 claims.
 
+Forty-ninth: reading a turn, not a delta. The gate asserted on the first `text.delta` after a
+prompt, but the fake endpoint splits its echo into two chunks, so every turn emitted two deltas
+and the gate consumed one. The leftover sat in the queue and the *next* assertion popped it —
+which is how a working rules row and a working attachment context both looked broken. `turn_text`
+now collects a turn's deltas until that turn's own `turn.end`, and the rules assertion uses it.
+
+The larger lesson is the one from round 44 in a new costume: an instrument that reads the wrong
+sample produces a false negative that looks exactly like a bug in the code under test.
+
 ## M3: started, with one finding worth keeping
 
 The first M3 attempt replaced the daemon's single `wd_turn` with a pool keyed by session, so

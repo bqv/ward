@@ -220,6 +220,36 @@ static cbor_item_t *wait_turn_end(client *c, uint64_t turn) {
   }
 }
 
+static void turn_text(client *c, uint64_t turn, char *out, size_t cap) {
+  out[0] = '\0';
+  for (;;) {
+    char *kind = NULL;
+    cbor_item_t *payload = next_event(c, &kind, NULL);
+    assert(payload != NULL);
+    if (kind != NULL && strcmp(kind, "text.delta") == 0) {
+      char *text = wd_text_copy(wd_get(payload, "text"));
+      if (text != NULL) {
+        size_t have = strlen(out);
+        snprintf(out + have, cap - have, "%s", text);
+        free(text);
+      }
+      wd_free(payload);
+      free(kind);
+      continue;
+    }
+    if (kind != NULL && strcmp(kind, "turn.end") == 0) {
+      uint64_t ended = 0;
+      if (wd_uint_of(wd_get(payload, "turn"), &ended) && ended == turn) {
+        wd_free(payload);
+        free(kind);
+        return;
+      }
+    }
+    wd_free(payload);
+    free(kind);
+  }
+}
+
 static cbor_item_t *wait_event(client *c, const char *want, uint64_t *seq) {
   for (;;) {
     char *kind = NULL;
@@ -457,15 +487,9 @@ int main(void) {
   assert(request(&a, a.next_id++, "session.prompt", plain_prompt, &plain,
                  NULL) == 0);
   wd_free(plain);
-  cbor_item_t *rule_delta = wait_event(&a, "text.delta", NULL);
-  assert(rule_delta != NULL);
-  char *rule_text = wd_text_copy(wd_get(rule_delta, "text"));
-  assert(rule_text != NULL && strstr(rule_text, "[rules]") != NULL);
-  free(rule_text);
-  wd_free(rule_delta);
-  cbor_item_t *plain_end = wait_turn_end(&a, last_turn);
-  assert(plain_end != NULL);
-  wd_free(plain_end);
+  char rule_text[2048];
+  turn_text(&a, last_turn, rule_text, sizeof(rule_text));
+  assert(strstr(rule_text, "[rules]") != NULL);
 
 
 
