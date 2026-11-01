@@ -44,6 +44,8 @@ static int extract_content(const char *buf, char *out, size_t cap) {
 }
 
 static void serve(int fd) {
+  const char *delay = getenv("WARD_FAKE_DELAY_MS");
+  if (delay != NULL) usleep((useconds_t)(atoi(delay) * 1000));
   char request[MAX_REQUEST];
   size_t len = 0;
   int content_length = -1;
@@ -99,7 +101,17 @@ static pid_t start_server(int *port_out) {
     for (int i = 0; i < 8; i++) {
       int conn = accept(fd, NULL, NULL);
       if (conn < 0) break;
-      serve(conn);
+      pid_t worker = fork();
+      if (worker == 0) {
+        close(fd);
+        serve(conn);
+        _exit(0);
+      }
+      close(conn);
+      if (worker < 0) serve(conn);
+    }
+    int status = 0;
+    while (waitpid(-1, &status, 0) > 0) {
     }
     close(fd);
     _exit(0);

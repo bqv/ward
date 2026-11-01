@@ -129,6 +129,8 @@ static wd_run_token run_tokens[WD_MAX_RUNS];
 static void conn_close(wd_server *srv, wd_conn *conn);
 static void conn_release(wd_server *srv, wd_conn *conn);
 static cbor_item_t *session_cbor(wd_server *srv, wd_session *session);
+static void handle_session_prompt(wd_server *srv, wd_conn *conn, uint64_t id,
+                                  cbor_item_t *params);
 static wd_run *run_new(wd_server *srv, wd_session *session, char **err);
 static wd_run *run_find(wd_server *srv, const char *session_id);
 static void run_free(wd_server *srv, wd_run *run);
@@ -313,6 +315,67 @@ static void handle_model_select(wd_server *srv, wd_conn *conn, uint64_t id,
   srv->default_model = name;
   cbor_item_t *result = wd_map(1);
   wd_put(result, "model", wd_text(name));
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
+static void handle_subagent_prompt(wd_server *srv, wd_conn *conn, uint64_t id,
+                                   cbor_item_t *params) {
+  char *parent_id = wd_text_copy(wd_get(params, "session"));
+  char *text = wd_text_copy(wd_get(params, "text"));
+  wd_session *parent =
+      parent_id != NULL ? wd_session_find(&srv->store, parent_id) : NULL;
+  if (parent == NULL || text == NULL || text[0] == '\0') {
+    free(parent_id);
+    free(text);
+    conn_send_error(conn, id, WD_ERR_INVALID_PARAMS,
+                    "session and text are required");
+    conn_arm(srv, conn);
+    return;
+  }
+  wd_session *child = NULL;
+  if (wd_session_fork(&srv->store, parent, parent->last_seq, &child) != 0) {
+    free(parent_id);
+    free(text);
+    respond_internal(srv, conn, id, "cannot create the subagent");
+    return;
+  }
+  cbor_item_t *notice = wd_map(3);
+  wd_put(notice, "subagent", wd_text(child->id));
+  wd_put(notice, "parent", wd_text(parent->id));
+  wd_put(notice, "state", wd_text("running"));
+  uint64_t seq = 0;
+  if (wd_session_emit(parent, "subagent.updated", notice, &seq) == 0) {
+    cbor_item_t *event = wd_map(3);
+    wd_put(event, "subagent", wd_text(child->id));
+    wd_put(event, "parent", wd_text(parent->id));
+    wd_put(event, "state", wd_text("running"));
+    conn_broadcast(srv, parent, "subagent.updated", seq, event);
+  }
+  free(parent_id);
+  cbor_item_t *sub = wd_map(2);
+  wd_put(sub, "id", wd_text(child->id));
+  wd_put(sub, "text", wd_text(text));
+  free(text);
+  handle_session_prompt(srv, conn, id, sub);
+  wd_free(sub);
+}
+
+static void handle_subagent_interrupt(wd_server *srv, wd_conn *conn,
+                                      uint64_t id, cbor_item_t *params) {
+  char *session_id = wd_text_copy(wd_get(params, "session"));
+  wd_session *session =
+      session_id != NULL ? wd_session_find(&srv->store, session_id) : NULL;
+  int stopped = 0;
+  if (session != NULL) {
+    wd_run *run = run_find(srv, session->id);
+    if (run != NULL && wd_turn_pending_kind(run->turn) == 2)
+      stopped = wd_turn_cancel_tool(run->turn) != 0;
+  }
+  free(session_id);
+  cbor_item_t *result = wd_map(2);
+  wd_put(result, "interrupted", cbor_build_bool(stopped != 0));
+  wd_put(result, "stopped", cbor_build_bool(stopped != 0));
   conn_send_cached(conn, id, wd_response_ok(id, result));
   conn_arm(srv, conn);
 }
@@ -1483,6 +1546,10 @@ static void handle_request(wd_server *srv, wd_conn *conn, uint64_t id,
     handle_session_undo(srv, conn, id, params);
   } else if (strcmp(method, "session.search") == 0) {
     handle_session_search(srv, conn, id, params);
+  } else if (strcmp(method, "subagent.prompt") == 0) {
+    handle_subagent_prompt(srv, conn, id, params);
+  } else if (strcmp(method, "subagent.interrupt") == 0) {
+    handle_subagent_interrupt(srv, conn, id, params);
   } else if (strcmp(method, "session.cancel") == 0) {
     handle_session_cancel(srv, conn, id, params);
   } else if (strcmp(method, "session.fork") == 0) {

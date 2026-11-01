@@ -264,6 +264,16 @@ belong to, so a worker or provider completion resumes the turn that asked for it
 with a live run answers `conflict: the session is already busy` rather than clobbering it,
 which is the bug the first attempt found. Compaction borrows a run and frees it.
 
+Twenty-sixth: subagents. `subagent.prompt {session, text}` forks the parent's log into a
+child session, appends `subagent.updated` to the parent and hands the child to the same
+prompt path — so a child is an ordinary session with its own run, its own worker and its own
+replay. `subagent.interrupt` finds the child's run and cancels its tool.
+
+The tool gate measures the thing the milestone asks for: the fake endpoint now delays each
+reply and serves connections in a forked child, two subagents start back to back, and the
+gate asserts both turns finish inside 700 ms when a single turn takes 400 — 466 ms measured,
+so they were genuinely in flight together rather than merely started.
+
 ## M3: started, with one finding worth keeping
 
 The first M3 attempt replaced the daemon's single `wd_turn` with a pool keyed by session, so

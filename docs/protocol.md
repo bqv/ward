@@ -130,6 +130,15 @@ fields stay the same when a real tokenizer replaces the estimate.
 **`stats.global`** — no params. The same counters summed over every session, plus
 `{sessions}`.
 
+**`subagent.prompt`** — params `{session, text}`. Forks the parent's log into a child
+session, appends `subagent.updated {subagent, parent, state}` to the parent, runs one turn in
+the child and answers `{session: child, turn}`. The child is an ordinary session: the same
+`session.resume`, `session.cancel` and replay apply, and several children of one parent run
+at once because each has its own turn.
+
+**`subagent.interrupt`** — params `{session}`. Stops a child's running tool the way
+`session.cancel` does and answers `{interrupted}`; false when nothing was running.
+
 **`session.compact`** — params `{id}`. Asks the provider to summarise the conversation so
 far, appends `session.compacted {through, summary}` and answers `{session, through, summary}`.
 The history builder replays it: a later prompt sends the summary as one system message and

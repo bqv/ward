@@ -242,6 +242,7 @@ int main(void) {
   }
   int endpoint_port = 0;
   pid_t endpoint = 0;
+  setenv("WARD_FAKE_DELAY_MS", "400", 1);
   fake_endpoint(&endpoint_port, &endpoint);
   char root[] = "/tmp/ward-tool-gate-XXXXXX";
   assert(mkdtemp(root) != NULL);
@@ -714,11 +715,77 @@ int main(void) {
   free(name);
   wd_free(again);
 
+  cbor_item_t *sub_a = NULL;
+  cbor_item_t *sub_a_params = wd_map(2);
+  wd_put(sub_a_params, "session", wd_text(session));
+  wd_put(sub_a_params, "text", wd_text("subagent one"));
+  uint64_t started = wd_now_ms();
+  assert(request(&a, a.next_id++, "subagent.prompt", sub_a_params, &sub_a,
+                 NULL) == 0);
+  char *child_a = wd_text_copy(wd_get(sub_a, "session"));
+  uint64_t turn_a = 0;
+  assert(wd_uint_of(wd_get(sub_a, "turn"), &turn_a));
+  wd_free(sub_a);
+
+  cbor_item_t *sub_b = NULL;
+  cbor_item_t *sub_b_params = wd_map(2);
+  wd_put(sub_b_params, "session", wd_text(session));
+  wd_put(sub_b_params, "text", wd_text("subagent two"));
+  assert(request(&a, a.next_id++, "subagent.prompt", sub_b_params, &sub_b,
+                 NULL) == 0);
+  char *child_b = wd_text_copy(wd_get(sub_b, "session"));
+  uint64_t turn_b = 0;
+  assert(wd_uint_of(wd_get(sub_b, "turn"), &turn_b));
+  wd_free(sub_b);
+  assert(child_a != NULL && child_b != NULL);
+  assert(strcmp(child_a, child_b) != 0);
+  assert(strcmp(child_a, session) != 0);
+
+  cbor_item_t *watch_a = NULL;
+  cbor_item_t *watch_a_params = wd_map(2);
+  wd_put(watch_a_params, "id", wd_text(child_a));
+  wd_put(watch_a_params, "from", wd_uint(0));
+  assert(request(&a, a.next_id++, "session.resume", watch_a_params, &watch_a,
+                 NULL) == 0);
+  wd_free(watch_a);
+  cbor_item_t *watch_b = NULL;
+  cbor_item_t *watch_b_params = wd_map(2);
+  wd_put(watch_b_params, "id", wd_text(child_b));
+  wd_put(watch_b_params, "from", wd_uint(0));
+  assert(request(&a, a.next_id++, "session.resume", watch_b_params, &watch_b,
+                 NULL) == 0);
+  wd_free(watch_b);
+
+  cbor_item_t *end_a = wait_turn_end(&a, turn_a);
+  assert(end_a != NULL);
+  wd_free(end_a);
+  cbor_item_t *end_b = wait_turn_end(&a, turn_b);
+  assert(end_b != NULL);
+  wd_free(end_b);
+  uint64_t elapsed = wd_now_ms() - started;
+  assert(elapsed < 700);
+
+  cbor_item_t *idle = NULL;
+  cbor_item_t *idle_params = wd_map(1);
+  wd_put(idle_params, "session", wd_text(child_a));
+  bool idle_ok = false;
+  assert(request(&a, a.next_id++, "subagent.interrupt", idle_params, &idle,
+                 &idle_ok) == 0);
+  assert(idle_ok);
+  bool was_interrupted = true;
+  assert(wd_bool_of(wd_get(idle, "interrupted"), &was_interrupted));
+  assert(!was_interrupted);
+  wd_free(idle);
+  printf("subagents ran concurrently in %llu ms\n", (unsigned long long)elapsed);
+  free(child_a);
+  free(child_b);
+
   free(session);
   close(b.fd);
   close(a.fd);
   kill(pid, SIGKILL);
   waitpid(pid, NULL, 0);
+
   stop_server(endpoint);
   printf("tool gate passed: a write waited for an approval and was answered\n");
   return 0;
