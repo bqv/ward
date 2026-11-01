@@ -160,6 +160,12 @@ typedef struct {
   wd_scheduler *scheduler;
   wd_sched *schedules;
   wd_queue *queue;
+  struct {
+    char name[32];
+    int slots;
+    int inflight;
+  } devices[8];
+  size_t devices_len;
   wd_registry registry;
   char *module_dir;
   size_t max_runs;
@@ -1201,8 +1207,20 @@ static void handle_job_list(wd_server *srv, wd_conn *conn, uint64_t id) {
     cbor_decref(&job);
     if (!pushed) break;
   }
-  cbor_item_t *result = wd_map(1);
+  size_t device_count = srv->devices_len;
+  cbor_item_t *devices = wd_array(device_count);
+  for (size_t i = 0; i < device_count; i++) {
+    cbor_item_t *entry = wd_map(3);
+    wd_put(entry, "device", wd_text(srv->devices[i].name));
+    wd_put(entry, "inflight", wd_uint((uint64_t)srv->devices[i].inflight));
+    wd_put(entry, "slots", wd_uint((uint64_t)srv->devices[i].slots));
+    bool pushed = cbor_array_push(devices, entry);
+    cbor_decref(&entry);
+    if (!pushed) break;
+  }
+  cbor_item_t *result = wd_map(2);
   wd_put(result, "jobs", list);
+  wd_put(result, "devices", devices);
   conn_send_cached(conn, id, wd_response_ok(id, result));
   conn_arm(srv, conn);
 }
@@ -1289,9 +1307,49 @@ static void start_session_turn(wd_server *srv, wd_session *session,
   free(err);
 }
 
+static int device_slot_for(wd_server *srv, wd_session *session, int *slots_out) {
+  if (session == NULL) return -1;
+  const wd_model *model = wd_models_find(srv->models, session->model);
+  if (model == NULL || model->device == NULL || model->device[0] == '\0')
+    return -1;
+  int slots = model->slots != NULL ? atoi(model->slots) : 1;
+  if (slots <= 0) slots = 1;
+  if (slots_out != NULL) *slots_out = slots;
+  for (size_t i = 0; i < srv->devices_len; i++) {
+    if (strcmp(srv->devices[i].name, model->device) != 0) continue;
+    return (int)i;
+  }
+  if (srv->devices_len >= sizeof(srv->devices) / sizeof(srv->devices[0]))
+    return -1;
+  size_t at = srv->devices_len++;
+  snprintf(srv->devices[at].name, sizeof(srv->devices[at].name), "%s",
+           model->device);
+  srv->devices[at].slots = slots;
+  srv->devices[at].inflight = 0;
+  return (int)at;
+}
+
+static bool device_free(wd_server *srv, wd_session *session) {
+  int slot = device_slot_for(srv, session, NULL);
+  if (slot < 0) return true;
+  return srv->devices[slot].inflight < srv->devices[slot].slots;
+}
+
+static void device_acquire(wd_server *srv, wd_session *session) {
+  int slot = device_slot_for(srv, session, NULL);
+  if (slot >= 0) srv->devices[slot].inflight++;
+}
+
+static void device_release(wd_server *srv, wd_session *session) {
+  int slot = device_slot_for(srv, session, NULL);
+  if (slot >= 0 && srv->devices[slot].inflight > 0) srv->devices[slot].inflight--;
+}
+
 static void drain_queue(wd_server *srv) {
   while (srv->queue != NULL && active_runs(srv) < srv->max_runs) {
     wd_queue *item = srv->queue;
+    wd_session *head = wd_session_find(&srv->store, item->session);
+    if (head != NULL && !device_free(srv, head)) break;
     srv->queue = item->next;
     wd_session *session = wd_session_find(&srv->store, item->session);
     if (session != NULL) start_session_turn(srv, session, item->text);
@@ -2056,6 +2114,7 @@ static wd_run *run_new(wd_server *srv, wd_session *session, char **err) {
     free(run);
     return NULL;
   }
+  device_acquire(srv, session);
   if (session->system != NULL)
     wd_turn_set_session_system(run->turn, session->system);
   if (session->head == NULL || session->head[0] == '\0') {
@@ -2273,6 +2332,10 @@ static void run_free(wd_server *srv, wd_run *run) {
           version = session->pins[p].version;
     wd_registry_trap(&srv->registry, trapped, version);
   }
+  {
+    wd_session *owner = wd_session_find(&srv->store, run->session_id);
+    if (owner != NULL) device_release(srv, owner);
+  }
   persist_state(srv, run);
   wd_turn_free(run->turn);
   free(run);
@@ -2356,6 +2419,16 @@ static void handle_session_prompt(wd_server *srv, wd_conn *conn, uint64_t id,
     free(session_id);
     free(text);
     conn_send_error(conn, id, WD_ERR_BUSY, "the session is already busy");
+    conn_arm(srv, conn);
+    return;
+  }
+  if (!device_free(srv, session) && enqueue_turn(srv, session, text, NULL)) {
+    cbor_item_t *queued = wd_map(2);
+    wd_put(queued, "session", wd_session_to_cbor(session));
+    wd_put(queued, "queued", cbor_build_bool(true));
+    free(session_id);
+    free(text);
+    conn_send_cached(conn, id, wd_response_ok(id, queued));
     conn_arm(srv, conn);
     return;
   }

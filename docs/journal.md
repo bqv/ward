@@ -1389,3 +1389,17 @@ This is the honest half of §7. The device semaphore — a pool keyed by the mod
 catalog, acquired before the provider call and released on finish, so two subagents on one card serialise
 instead of thrashing — is still ahead, and it needs care with the run pool and the queue that this change just
 made orderable.
+
+Hundred-and-fifth: a device holds its slots. A model entry that names a `device` and `slots` puts its runs through a
+per-device pool: a run acquires a slot when its turn is created, releases it when the run is freed, and a prompt
+whose device is full is queued instead of started. The queue drains only when the head's device has room, so a
+full card serialises its work rather than pre-empting it, and `job.list` answers a `devices` array with each
+pool's name, slots and inflight count.
+
+Verified against a one-slot device on the fixture model: with two sessions prompting back to back, the first
+reads `running` and the second `queued`, and the second runs when the first finishes. Without a `device` key
+nothing changes — which is why the existing subagent concurrency gate still passes.
+
+Two honesty notes: the pool is per daemon and per process, so a second daemon with the same card is invisible to
+it, and the queue holds at most what it holds — there is no per-session cap yet, which the note asks for so one
+parent cannot starve another.
