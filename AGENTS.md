@@ -715,6 +715,19 @@ history.
 
 Nothing reads the pins yet; resolution through them, and `session.upgrade`, are the next slices.
 
+Sixty-third: moving the pin. `wd_session_upgrade` changes one pinned version and appends
+`session.upgraded {module, from, to}`; upgrading to the version already pinned is a no-op that
+appends nothing and answers no sequence, which is what makes a repeated `session.upgrade` free
+rather than noise in the log. `apply_upgrade` replays the event beside `apply_pins`, so a
+restarted session comes back on the version it moved to.
+
+The test upgrades `driver` from 3 to 4, checks the pin and the sequence, then upgrades to 4
+again and asserts nothing was appended, and finally reopens the store and finds `driver` at 4.
+
+This is the session layer only. The daemon method — with the busy check that refuses an upgrade
+while a run is live, and the CLI verb — is the next slice, and the instance swap behind it is
+the one after that.
+
 ## M3: started, with one finding worth keeping
 
 The first M3 attempt replaced the daemon's single `wd_turn` with a pool keyed by session, so

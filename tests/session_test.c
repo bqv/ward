@@ -168,6 +168,13 @@ int main(void) {
   uint64_t pins_seq = 0;
   assert(wd_session_set_pins(pinned, pins, 2, &pins_seq) == 0);
   assert(pins_seq > 0);
+  uint64_t upgrade_seq = 0;
+  assert(wd_session_upgrade(pinned, "driver", "4", &upgrade_seq) == 0);
+  assert(upgrade_seq > pins_seq);
+  assert(strcmp(pinned->pins[0].version, "4") == 0);
+  uint64_t same_seq = 0;
+  assert(wd_session_upgrade(pinned, "driver", "4", &same_seq) == 0);
+  assert(same_seq == 0);
   char pinned_id[WD_ID_LEN];
   snprintf(pinned_id, sizeof(pinned_id), "%s", pinned->id);
 
@@ -177,7 +184,7 @@ int main(void) {
   assert(found != NULL);
   assert(found->pins_len == 2);
   assert(strcmp(found->pins[0].name, "driver") == 0);
-  assert(strcmp(found->pins[0].version, "3") == 0);
+  assert(strcmp(found->pins[0].version, "4") == 0);
   assert(strcmp(found->pins[1].name, "provider") == 0);
   assert(strcmp(found->pins[1].version, "1") == 0);
 

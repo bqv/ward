@@ -81,6 +81,36 @@ static int apply_model(void *ctx, uint64_t seq, cbor_item_t *event) {
   return 0;
 }
 
+static int apply_upgrade(void *ctx, uint64_t seq, cbor_item_t *event) {
+  wd_session *s = ctx;
+  (void)seq;
+  char *kind = wd_text_copy(wd_get(event, "kind"));
+  if (kind != NULL && strcmp(kind, "session.upgraded") == 0) {
+    cbor_item_t *payload = wd_get(event, "payload");
+    char *name = wd_text_copy(wd_get(payload, "module"));
+    char *version = wd_text_copy(wd_get(payload, "to"));
+    if (name != NULL && version != NULL) {
+      bool found = false;
+      for (size_t i = 0; i < s->pins_len; i++) {
+        if (strcmp(s->pins[i].name, name) != 0) continue;
+        snprintf(s->pins[i].version, sizeof(s->pins[i].version), "%s", version);
+        found = true;
+        break;
+      }
+      if (!found && s->pins_len < WD_PIN_MAX) {
+        snprintf(s->pins[s->pins_len].name, sizeof(s->pins[0].name), "%s", name);
+        snprintf(s->pins[s->pins_len].version, sizeof(s->pins[0].version), "%s",
+                 version);
+        s->pins_len++;
+      }
+    }
+    free(name);
+    free(version);
+  }
+  free(kind);
+  return 0;
+}
+
 static int apply_pins(void *ctx, uint64_t seq, cbor_item_t *event) {
   wd_session *s = ctx;
   (void)seq;
@@ -110,6 +140,25 @@ static int apply_pins(void *ctx, uint64_t seq, cbor_item_t *event) {
   }
   free(kind);
   return 0;
+}
+
+int wd_session_upgrade(wd_session *s, const char *name, const char *version,
+                       uint64_t *seq_out) {
+  if (name == NULL || version == NULL || name[0] == '\0' || version[0] == '\0')
+    return -1;
+  const char *was = "";
+  for (size_t i = 0; i < s->pins_len; i++) {
+    if (strcmp(s->pins[i].name, name) != 0) continue;
+    if (strcmp(s->pins[i].version, version) == 0) return 0;
+    was = s->pins[i].version;
+    snprintf(s->pins[i].version, sizeof(s->pins[i].version), "%s", version);
+    break;
+  }
+  cbor_item_t *payload = wd_map(3);
+  wd_put(payload, "module", wd_text(name));
+  wd_put(payload, "from", wd_text(was));
+  wd_put(payload, "to", wd_text(version));
+  return wd_session_emit(s, "session.upgraded", payload, seq_out);
 }
 
 int wd_session_set_pins(wd_session *s, const wd_pin *pins, size_t n,
@@ -148,6 +197,7 @@ static int session_load(const char *root, const char *id, wd_session **out) {
   if (hlog_open_append(&s->log, s->log_path) != 0) goto fail;
   if (wd_session_replay(s, 0, apply_model, s) < 0) goto fail;
   if (wd_session_replay(s, 0, apply_pins, s) < 0) goto fail;
+  if (wd_session_replay(s, 0, apply_upgrade, s) < 0) goto fail;
   *out = s;
   return 0;
 fail:

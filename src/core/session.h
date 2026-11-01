@@ -49,6 +49,8 @@ int wd_session_emit(wd_session *s, const char *kind, cbor_item_t *payload,
             uint64_t *seq_out);
 int wd_session_attach(wd_session *s, const char *name, const uint8_t *data,
                       size_t len, char **path_out, char **err);
+int wd_session_upgrade(wd_session *s, const char *name, const char *version,
+                      uint64_t *seq_out);
 int wd_session_set_pins(wd_session *s, const wd_pin *pins, size_t n,
                        uint64_t *seq_out);
 int wd_session_set_model(wd_session *s, const char *model, uint64_t *seq_out);
