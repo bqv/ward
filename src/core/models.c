@@ -57,6 +57,8 @@ static int set_field(wd_model *model, const char *key, const char *value) {
     field = &model->tags;
   else if (strcmp(key, "endpoint") == 0)
     field = &model->endpoint;
+  else if (strcmp(key, "key") == 0)
+    field = &model->key;
   else if (strcmp(key, "price") == 0)
     field = &model->price;
   else

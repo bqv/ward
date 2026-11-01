@@ -59,6 +59,7 @@ struct wd_turn {
   char trapped[WD_MAX_MODULE_NAME];
   char model_name[128];
   bool remote_ok;
+  char api_key[256];
   wd_judge *judge_cache;
   cbor_item_t *judge_event;
   char *worker_root;
@@ -143,6 +144,11 @@ static wd_module *load_pinned(wd_engine *engine, const char *dir,
     break;
   }
   return load_module(engine, dir, file, spec, err);
+}
+
+void wd_turn_set_api_key(wd_turn *turn, const char *key) {
+  if (turn == NULL) return;
+  snprintf(turn->api_key, sizeof(turn->api_key), "%s", key != NULL ? key : "");
 }
 
 void wd_turn_allow_remote(wd_turn *turn) {
@@ -245,8 +251,8 @@ static int net_request(wd_turn *turn, const uint8_t *in, size_t in_len,
     return -1;
   }
   wd_http_response response;
-  int rc = wd_http_request(url, "POST", body != NULL ? body : "", 300000,
-                           4u << 20, &response, err);
+  int rc = wd_http_request(url, "POST", body != NULL ? body : "", turn->api_key,
+                           300000, 4u << 20, &response, err);
   free(body);
   if (rc != 0) return -1;
   size_t total = 4 + response.len;
@@ -1421,7 +1427,8 @@ static int net_submit(wd_turn *turn, cbor_item_t *reply, char **err) {
   }
   wd_http_job_free(turn->http_job);
   turn->http_job =
-      wd_http_start(url, "POST", body != NULL ? body : "", 300000, 4u << 20, err);
+      wd_http_start(url, "POST", body != NULL ? body : "", turn->api_key, 300000,
+                    4u << 20, err);
   free(body);
   if (turn->http_job == NULL) return -1;
   turn->pending_kind = 3;

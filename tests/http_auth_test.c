@@ -10,26 +10,23 @@
 #include "net/http.h"
 
 int main(void) {
-  unsetenv("WARD_API_KEY");
-  assert(wd_http_auth_header("http://api.deepseek.com/v1/chat/completions") ==
-         NULL);
+  assert(wd_http_auth_header("http://api.deepseek.com/v1/chat/completions",
+                             NULL) == NULL);
 
-  setenv("WARD_API_KEY", "sk-test-123", 1);
-  char *header =
-      wd_http_auth_header("http://api.deepseek.com/v1/chat/completions");
+  char *header = wd_http_auth_header(
+      "http://api.deepseek.com/v1/chat/completions", "sk-test-123");
   assert(header != NULL);
   assert(strcmp(header, "Authorization: Bearer sk-test-123") == 0);
   free(header);
 
-  assert(wd_http_auth_header("http://127.0.0.1:55556/v1/chat/completions") ==
-         NULL);
-  assert(wd_http_auth_header("http://localhost:55556/v1/chat/completions") ==
-         NULL);
-  assert(wd_http_auth_header("http://[::1]:55556/v1/chat/completions") == NULL);
-
-  setenv("WARD_API_KEY", "", 1);
-  assert(wd_http_auth_header("http://api.deepseek.com/v1/chat/completions") ==
-         NULL);
+  assert(wd_http_auth_header("http://127.0.0.1:55556/v1/chat/completions",
+                             "sk-test-123") == NULL);
+  assert(wd_http_auth_header("http://localhost:55556/v1/chat/completions",
+                             "sk-test-123") == NULL);
+  assert(wd_http_auth_header("http://[::1]:55556/v1/chat/completions",
+                             "sk-test-123") == NULL);
+  assert(wd_http_auth_header("http://api.deepseek.com/v1/chat/completions",
+                             "") == NULL);
 
   printf("http auth tests passed\n");
   return 0;

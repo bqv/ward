@@ -29,6 +29,7 @@
 #include "core/ids.h"
 #include "core/labels.h"
 #include "core/models.h"
+#include "core/credentials.h"
 #include "core/manifest.h"
 #include "core/modstate.h"
 #include "core/pty.h"
@@ -151,6 +152,7 @@ typedef struct {
   wd_quic *quic;
   wd_approvals *approvals;
   wd_models *models;
+  wd_credentials *credentials;
   wd_labels *labels;
   wd_scheduler *scheduler;
   wd_sched *schedules;
@@ -1850,6 +1852,9 @@ static wd_run *run_new(wd_server *srv, wd_session *session, char **err) {
   }
   const wd_model *chosen = wd_models_find(srv->models, session->model);
   if (chosen != NULL) {
+    if (chosen->key != NULL)
+      wd_turn_set_api_key(run->turn,
+                          wd_credentials_find(srv->credentials, chosen->key));
     if (chosen->model != NULL) wd_turn_set_model_name(run->turn, chosen->model);
     if (chosen->endpoint != NULL) {
       wd_turn_set_endpoint(run->turn, chosen->endpoint);
@@ -1865,6 +1870,9 @@ static wd_run *run_new(wd_server *srv, wd_session *session, char **err) {
       return NULL;
     }
     if (chosen != NULL) {
+      if (chosen->key != NULL)
+        wd_turn_set_api_key(run->turn,
+                            wd_credentials_find(srv->credentials, chosen->key));
       if (chosen->model != NULL)
         wd_turn_set_model_name(run->turn, chosen->model);
       if (chosen->endpoint != NULL) {
@@ -3083,26 +3091,6 @@ static int setup_quic(wd_server *srv) {
   return 0;
 }
 
-static void load_api_key(const char *state_dir) {
-  const char *existing = getenv("WARD_API_KEY");
-  if (existing != NULL && existing[0] != '\0') return;
-  char *path = wd_path_join(state_dir, "api_key");
-  if (path == NULL) return;
-  FILE *f = fopen(path, "r");
-  if (f != NULL) {
-    char line[512];
-    if (fgets(line, sizeof(line), f) != NULL) {
-      size_t len = strlen(line);
-      while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r' ||
-                         line[len - 1] == ' '))
-        line[--len] = '\0';
-      if (len > 0) setenv("WARD_API_KEY", line, 1);
-    }
-    fclose(f);
-  }
-  free(path);
-}
-
 int wd_up_run(const wd_up_config *cfg) {
   wd_server srv;
   memset(&srv, 0, sizeof(srv));
@@ -3117,7 +3105,6 @@ int wd_up_run(const wd_up_config *cfg) {
             strerror(errno));
     goto cleanup;
   }
-  load_api_key(srv.state_dir);
   srv.lock_path = wd_path_join(srv.state_dir, "ward.lock");
   if (srv.lock_path == NULL) goto cleanup;
   if (acquire_lock(srv.lock_path) != 0) {
@@ -3173,6 +3160,13 @@ int wd_up_run(const wd_up_config *cfg) {
     if (value > 0 && value <= WD_MAX_RUNS) srv.max_runs = (size_t)value;
   }
   char *models_path = wd_models_path(srv.state_dir);
+  char *credentials_path = wd_credentials_path(srv.state_dir);
+  if (credentials_path != NULL) {
+    char *credentials_err = NULL;
+    srv.credentials = wd_credentials_load(credentials_path, &credentials_err);
+    free(credentials_err);
+    free(credentials_path);
+  }
   if (models_path != NULL) {
     char *models_err = NULL;
     srv.models = wd_models_load(models_path, &models_err);
@@ -3334,6 +3328,7 @@ cleanup:
   wd_pki_free(srv.pki);
   wd_approvals_free(srv.approvals);
   wd_models_free(srv.models);
+  wd_credentials_free(srv.credentials);
   wd_labels_free(srv.labels);
   free(srv.default_model);
   free(srv.quic_endpoint);

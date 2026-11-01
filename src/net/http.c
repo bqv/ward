@@ -31,8 +31,7 @@ static size_t write_cb(char *data, size_t size, size_t nmemb, void *userdata) {
   return n;
 }
 
-char *wd_http_auth_header(const char *url) {
-  const char *api_key = getenv("WARD_API_KEY");
+char *wd_http_auth_header(const char *url, const char *api_key) {
   if (api_key == NULL || api_key[0] == '\0') return NULL;
   if (url == NULL || wd_http_loopback(url)) return NULL;
   size_t need = strlen(api_key) + 32;
@@ -60,7 +59,7 @@ bool wd_http_loopback(const char *url) {
 }
 
 int wd_http_request(const char *url, const char *method, const char *body,
-                    uint64_t timeout_ms, size_t max_bytes,
+                    const char *api_key, uint64_t timeout_ms, size_t max_bytes,
                     wd_http_response *out, char **err) {
   static bool started = false;
   if (!started) {
@@ -80,7 +79,7 @@ int wd_http_request(const char *url, const char *method, const char *body,
   struct curl_slist *headers = NULL;
   headers = curl_slist_append(headers, "Content-Type: application/json");
   headers = curl_slist_append(headers, "Accept: text/event-stream");
-  char *auth = wd_http_auth_header(url);
+  char *auth = wd_http_auth_header(url, api_key);
   if (auth != NULL) {
     headers = curl_slist_append(headers, auth);
     free(auth);
@@ -132,7 +131,8 @@ struct wd_http_job {
 };
 
 wd_http_job *wd_http_start(const char *url, const char *method, const char *body,
-                           uint64_t timeout_ms, size_t max_bytes, char **err) {
+                           const char *api_key, uint64_t timeout_ms,
+                           size_t max_bytes, char **err) {
   int fds[2];
   if (pipe2(fds, O_CLOEXEC) != 0) {
     if (err != NULL) *err = strdup("cannot create the http pipe");
@@ -149,7 +149,8 @@ wd_http_job *wd_http_start(const char *url, const char *method, const char *body
     close(fds[0]);
     wd_http_response response;
     char *why = NULL;
-    int rc = wd_http_request(url, method, body, timeout_ms, max_bytes, &response,
+    int rc = wd_http_request(url, method, body, api_key, timeout_ms, max_bytes,
+                             &response,
                              &why);
     free(why);
     uint32_t status = rc == 0 ? (uint32_t)response.status : 0;

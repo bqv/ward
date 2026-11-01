@@ -1136,3 +1136,16 @@ no token at all.
 The CLI still does not stream a turn it starts — `session prompt` returns before the turn ends, so the text
 appears only on `session resume --from 1 --follow`. That is the next thing to fix, and it is now the only
 thing between this setup and a usable one-liner.
+
+Eighty-eighth: one key per model, not one key per daemon. A single `WARD_API_KEY` was wrong twice over: it
+meant only one cloud provider could ever be authenticated, and it sent that one key to every remote host the
+catalog named. `models.toml` now carries `key = "<name>"` — a credential *name*, never the secret — and the
+daemon reads `<state>/credentials`, one `name=value` per line at 0600, resolving the name when it builds the
+turn. The HTTP layer takes the key as an argument instead of reading the environment, so nothing is global
+and nothing can leak between providers.
+
+Verified after removing `api_key` entirely: DeepSeek still answers, which proves the lookup by name is what
+authenticates it. `credentials_test` covers parsing, quoting, the comment and the malformed line.
+
+Adding a provider is now two lines: `key = "openrouter"` in its model entry, and `openrouter=sk-…` in the
+credentials file.
