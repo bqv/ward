@@ -184,7 +184,6 @@ cbor_item_t *wd_prompt_to_history(const wd_prompt *prompt,
   if (history != NULL) {
     cbor_item_t **items = cbor_array_handle(history);
     for (size_t i = 0; i < extra; i++) {
-      if (!cbor_incref(items[i])) continue;
       if (!cbor_array_push(array, items[i])) break;
     }
   }

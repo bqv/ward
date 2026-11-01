@@ -1169,3 +1169,22 @@ this libcbor build before running out of patience. The repository's own note say
 otherwise twice. Rather than ship a leak, the module and its test are committed alone and the turn still uses
 the old two-line rules loader. The next step is a two-file experiment that answers that refcount question
 once, then the wiring is ten lines.
+
+Ninetieth: the assembly reaches the model, and the refcount question is settled. libcbor's own header says it
+plainly — "its reference count will be increased by one" on `cbor_array_push` — so a locally built entry is
+pushed and then decref'd, while a borrowed one is pushed without an incref. Doing that in one place instead of
+two is what the leak was: the previous merge kept an extra reference to every historical message.
+
+Proven at the wire, not by inference: a request captured from a daemon whose `<state>/prompt/50-style.md` says
+"Always answer in French" carries
+
+    system -> You are an agent powered by ward: a small core that owns I/O
+    system -> Always answer in French.
+    user   -> [2026-11-02 00:46:00 EET] Say OK
+
+in that order. The reply came back in English, which is the model ignoring the instruction, not the section
+going missing — Qwen1.5-1.8B is not a reliable instruction-follower.
+
+`prompt.preview {id}` and `ward prompt <id>` expose the same assembly without running a turn: each section's
+name, order, source path and text, so an operator can see exactly what the model will be told and where each
+piece came from.

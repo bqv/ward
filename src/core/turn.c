@@ -15,6 +15,7 @@
 #include <unistd.h>
 
 #include "core/index.h"
+#include "core/prompt.h"
 #include "core/judge.h"
 #include "core/proc.h"
 #include "core/worker.h"
@@ -1726,59 +1727,14 @@ void wd_turn_set_context(wd_turn *turn, const char *text) {
 }
 
 
-static char *read_project_rules(const char *root) {
-  if (root == NULL) return NULL;
-  char path[PATH_MAX];
-  snprintf(path, sizeof(path), "%s/AGENTS.md", root);
-  FILE *f = fopen(path, "rb");
-  if (f == NULL) return NULL;
-  char *buf = malloc(2049);
-  if (buf == NULL) {
-    fclose(f);
-    return NULL;
-  }
-  size_t got = fread(buf, 1, 2048, f);
-  fclose(f);
-  if (got == 0) {
-    free(buf);
-    return NULL;
-  }
-  buf[got] = '\0';
-  return buf;
-}
-
 static cbor_item_t *history_with_context(cbor_item_t *history,
                                         const char *root,
-                                        const char *context) {
-  char *rules = read_project_rules(root);
-  bool have_context = context != NULL && context[0] != '\0';
-  if (rules == NULL && !have_context) return history;
-  size_t extra = history != NULL ? cbor_array_size(history) : 0;
-  size_t added = (rules != NULL ? 1 : 0) + (have_context ? 1 : 0);
-  cbor_item_t *combined = wd_array(extra + added);
-  bool pushed = true;
-  if (rules != NULL) {
-    cbor_item_t *entry = wd_map(2);
-    wd_put(entry, "role", wd_text("system"));
-    wd_put(entry, "text", wd_text(rules));
-    pushed = cbor_array_push(combined, entry);
-    cbor_decref(&entry);
-    free(rules);
-  }
-  if (pushed && have_context) {
-    cbor_item_t *entry = wd_map(2);
-    wd_put(entry, "role", wd_text("system"));
-    wd_put(entry, "text", wd_text(context));
-    pushed = cbor_array_push(combined, entry);
-    cbor_decref(&entry);
-  }
-  if (pushed && extra > 0) {
-    cbor_item_t **items = cbor_array_handle(history);
-    for (size_t i = 0; i < extra; i++) {
-      if (!cbor_incref(items[i])) continue;
-      if (!cbor_array_push(combined, items[i])) break;
-    }
-  }
+                                        const char *context,
+                                        const char *state_dir) {
+  wd_prompt *prompt = wd_prompt_build(state_dir, root, context);
+  cbor_item_t *combined = wd_prompt_to_history(prompt, history);
+  wd_prompt_free(prompt);
+  if (combined == NULL) return history;
   if (history != NULL) wd_free(history);
   return combined;
 }
@@ -1786,7 +1742,8 @@ static cbor_item_t *history_with_context(cbor_item_t *history,
 int wd_turn_prompt(wd_turn *turn, const char *text, wd_turn_emit emit, void *ctx,
                    char **err) {
   turn->id = next_turn_id();
-  turn->history = history_with_context(turn->history, turn->root, turn->context);
+  turn->history = history_with_context(turn->history, turn->root, turn->context,
+                                       wd_engine_state_dir(turn->engine));
   cbor_item_t *message = wd_map(2);
   if (message == NULL) {
     *err = strdup("out of memory");

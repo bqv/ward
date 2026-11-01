@@ -22,6 +22,15 @@ message is `limit`.
 M1 adds one method: `session.prompt`, which runs a turn and streams its events. It is
 described below with the session object.
 
+Later milestones add methods without a version bump, because adding a method is compatible:
+`module.list`, `module.reload`, `session.upgrade`, `stats.session`, `stats.global`,
+`attachment.add`, `attachment.list`, `terminal.*`, `schedule.*`, `job.list`, `job.kill`,
+`subagent.prompt`, `subagent.interrupt`, `recall.search`, `mcp.call` and the rest. The one
+that is read-only and worth knowing about here is `prompt.preview {id}`: it returns
+`{session, sections: [{name, order, source, text}]}` — the assembled system prompt for that
+session, in the order it will be sent, with each section's origin. It runs no turn and spends
+no tokens.
+
 ## Transport
 
 Local clients use `AF_UNIX`, `SOCK_STREAM`. The socket is created mode `0600` and the

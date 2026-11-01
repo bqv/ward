@@ -47,6 +47,7 @@ static void usage(FILE *out) {
           "  session set-model <id> <model>\n"
           "  model list     [--json]\n"
           "  model select   <id>\n"
+          "  prompt <id>    [--json]  show the assembled system prompt\n"
           "  stats          [<id>] [--json]\n"
           "  job list|kill  [<id>] [--json]\n"
           "  device pair    [--scope S] [--json]\n"
@@ -769,6 +770,63 @@ done:
   return rc;
 }
 
+static int command_prompt(int argc, char **argv) {
+  const char *id = NULL;
+  bool json = false;
+  for (int i = 0; i < argc; i++) {
+    if (strcmp(argv[i], "--json") == 0)
+      json = true;
+    else if (strcmp(argv[i], "--socket") == 0 && i + 1 < argc)
+      i++;
+    else if (argv[i][0] != '-')
+      id = argv[i];
+  }
+  if (id == NULL) {
+    fprintf(stderr, "ward: prompt needs a session id\n");
+    return 2;
+  }
+  char *path = socket_from_args(argc, argv);
+  if (path == NULL) return 1;
+  wd_client client;
+  if (client_connect(&client, path) != 0) {
+    free(path);
+    return 1;
+  }
+  free(path);
+  if (client_handshake(&client) != 0) {
+    close(client.fd);
+    return 1;
+  }
+  int rc = 1;
+  cbor_item_t *result = NULL;
+  cbor_item_t *params = wd_map(1);
+  wd_put(params, "id", wd_text(id));
+  if (client_request(&client, "prompt.preview", params, &result) != 0) goto done;
+  if (json) {
+    print_json(result);
+  } else {
+    cbor_item_t *sections = wd_get(result, "sections");
+    for (size_t i = 0; sections != NULL && i < cbor_array_size(sections); i++) {
+      cbor_item_t *item = cbor_array_get(sections, i);
+      if (item == NULL) continue;
+      char *name = wd_text_copy(wd_get(item, "name"));
+      char *source = wd_text_copy(wd_get(item, "source"));
+      char *text = wd_text_copy(wd_get(item, "text"));
+      printf("%s (%s)\n%s\n\n", name != NULL ? name : "?",
+             source != NULL ? source : "?", text != NULL ? text : "");
+      free(name);
+      free(source);
+      free(text);
+      cbor_decref(&item);
+    }
+  }
+  rc = 0;
+done:
+  if (result != NULL) wd_free(result);
+  close(client.fd);
+  return rc;
+}
+
 static int command_stats(int argc, char **argv) {
   const char *id = NULL;
   bool json = false;
@@ -1109,6 +1167,7 @@ int main(int argc, char **argv) {
   if (strcmp(command, "session") == 0) return command_session(argc - 2, argv + 2);
   if (strcmp(command, "device") == 0) return command_device(argc - 2, argv + 2);
   if (strcmp(command, "model") == 0) return command_model(argc - 2, argv + 2);
+  if (strcmp(command, "prompt") == 0) return command_prompt(argc - 2, argv + 2);
   if (strcmp(command, "stats") == 0) return command_stats(argc - 2, argv + 2);
   if (strcmp(command, "job") == 0) return command_job(argc - 2, argv + 2);
   fprintf(stderr, "ward: unknown command %s\n", command);

@@ -32,6 +32,7 @@
 #include "core/credentials.h"
 #include "core/manifest.h"
 #include "core/modstate.h"
+#include "core/prompt.h"
 #include "core/pty.h"
 #include "core/registry.h"
 #include "core/schedule.h"
@@ -1386,6 +1387,31 @@ static void handle_terminal_close(wd_server *srv, wd_conn *conn, uint64_t id,
   conn_arm(srv, conn);
 }
 
+static void attachment_context(wd_session *session, char *buf, size_t cap);
+
+static void handle_prompt_preview(wd_server *srv, wd_conn *conn, uint64_t id,
+                                  cbor_item_t *params) {
+  char *session_id = wd_text_copy(wd_get(params, "id"));
+  wd_session *session =
+      session_id != NULL ? wd_session_find(&srv->store, session_id) : NULL;
+  if (session == NULL) {
+    free(session_id);
+    conn_send_error(conn, id, WD_ERR_NOT_FOUND, "no such session");
+    return;
+  }
+  char attachments[512];
+  attachment_context(session, attachments, sizeof(attachments));
+  wd_prompt *prompt = wd_prompt_build(srv->state_dir, session->cwd,
+                                      attachments[0] != '\0' ? attachments : NULL);
+  cbor_item_t *result = wd_map(2);
+  wd_put(result, "session", wd_text(session->id));
+  wd_put(result, "sections", wd_prompt_to_cbor(prompt));
+  wd_prompt_free(prompt);
+  free(session_id);
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
 static void handle_session_upgrade(wd_server *srv, wd_conn *conn, uint64_t id,
                                    cbor_item_t *params) {
   char *session_id = wd_text_copy(wd_get(params, "id"));
@@ -2587,6 +2613,8 @@ static void handle_request(wd_server *srv, wd_conn *conn, uint64_t id,
     handle_subagent_interrupt(srv, conn, id, params);
   } else if (strcmp(method, "session.cancel") == 0) {
     handle_session_cancel(srv, conn, id, params);
+  } else if (strcmp(method, "prompt.preview") == 0) {
+    handle_prompt_preview(srv, conn, id, params);
   } else if (strcmp(method, "session.upgrade") == 0) {
     handle_session_upgrade(srv, conn, id, params);
   } else if (strcmp(method, "module.list") == 0) {
