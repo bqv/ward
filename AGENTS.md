@@ -118,8 +118,9 @@ These are decisions, not open questions; a change to one is a design change.
   open an issue or comment anywhere on the owner's behalf without an explicit
   one-off OK for that text.
 - Project notes belong here, in the repository — never in `~/ref`.
-- **Licence is an open decision.** Nothing has been chosen yet; a fresh
-  repository defaults to The Individual Use Licence (IUL-1.0.0) or MPL-2.0, not
-  MIT. Do not paste a licence in as a side effect of another change.
+- **MPL-2.0.** `LICENSE` is the verbatim Mozilla text, fetched rather than
+  retyped; never edit it by hand, re-fetch it if it ever needs refreshing. Every
+  new source file starts with the three-line Exhibit A notice from the bottom of
+  that file. Not MIT, and not the IUL — this repository is open source.
 - Say when something is a guess rather than a measurement. The parity table is
   the scope contract; anything not in it waits.
