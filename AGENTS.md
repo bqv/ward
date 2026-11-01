@@ -58,6 +58,17 @@ backend is complete, but there is no wasi-libc in the tree, so the host clang
 cannot link a WASI program. Guests use the SDK's compiler, core uses the host
 compiler, and the two are not mixed.
 
+Wasmtime is pinned at `/opt/wasmtime-50.0.1`: headers in `include/`,
+`libwasmtime.so` and `libwasmtime.a` in `lib/`, CLI at `bin/wasmtime`. It ships
+no pkg-config file and no CMake package, so meson has to use
+`cc.find_library('wasmtime', dirs: ...)` plus `include_directories`, not
+`dependency('wasmtime')`.
+
+It keeps a compilation cache in `$XDG_CACHE_HOME/wasmtime` by default, which a
+sandboxed session cannot create and a `Read-only file system` error kills the
+CLI outright. The daemon must configure the cache to its own `<state>/cache`, not
+inherit the environment.
+
 Dependencies resolve through `dependency()` and pkg-config: Wasmtime C API,
 ngtcp2, OpenSSL, tree-sitter, libcurl, sqlite3, libcbor, yyjson, zstd. Guests:
 `clang --target=wasm32-wasip1` against wasi-sdk for C and C++, Zig for Zig (pin
