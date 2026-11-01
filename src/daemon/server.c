@@ -1479,6 +1479,46 @@ static int collect_attachment(void *ctx, uint64_t seq, cbor_item_t *event) {
   return 0;
 }
 
+typedef struct {
+  char *buf;
+  size_t len;
+  size_t cap;
+} attachment_note;
+
+static int note_attachment(void *ctx, uint64_t seq, cbor_item_t *event) {
+  (void)seq;
+  attachment_note *note = ctx;
+  char *kind = wd_text_copy(wd_get(event, "kind"));
+  if (kind == NULL) return 0;
+  if (strcmp(kind, "session.attachment") != 0) {
+    free(kind);
+    return 0;
+  }
+  free(kind);
+  cbor_item_t *payload = wd_get(event, "payload");
+  char *name = wd_text_copy(wd_get(payload, "name"));
+  uint64_t size = 0;
+  wd_uint_of(wd_get(payload, "size"), &size);
+  if (name == NULL) return 0;
+  if (note->len + strlen(name) + 32 < note->cap)
+    note->len += (size_t)snprintf(note->buf + note->len, note->cap - note->len,
+                                  "%s%s (%llu bytes)", note->len > 0 ? ", " : "",
+                                  name, (unsigned long long)size);
+  free(name);
+  return 0;
+}
+
+static void attachment_context(wd_session *session, char *buf, size_t cap) {
+  attachment_note note = {buf, 0, cap};
+  buf[0] = '\0';
+  (void)wd_session_replay(session, 1, note_attachment, &note);
+  if (note.len > 0) {
+    char line[1024];
+    snprintf(line, sizeof(line), "attached to this session: %s", buf);
+    snprintf(buf, cap, "%s", line);
+  }
+}
+
 static void handle_attachment_list(wd_server *srv, wd_conn *conn, uint64_t id,
                                    cbor_item_t *params) {
   char *session_id = wd_text_copy(wd_get(params, "id"));
@@ -1676,6 +1716,9 @@ static wd_run *run_new(wd_server *srv, wd_session *session, char **err) {
     return NULL;
   }
   wd_turn_set_root(run->turn, session->cwd);
+  char attach_buf[768];
+  attachment_context(session, attach_buf, sizeof(attach_buf));
+  wd_turn_set_context(run->turn, attach_buf);
   run->next = srv->runs;
   srv->runs = run;
   return run;

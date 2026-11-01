@@ -43,6 +43,7 @@ struct wd_turn {
   wd_http_job *http_job;
   uint64_t id;
   cbor_item_t *history;
+  char *context;
   char *worker_root;
   wd_instance *policy;
   wd_instance *skills;
@@ -900,6 +901,7 @@ void wd_turn_set_root(wd_turn *turn, const char *root) {
 void wd_turn_free(wd_turn *turn) {
   if (turn == NULL) return;
   if (turn->history != NULL) wd_free(turn->history);
+  free(turn->context);
   wd_http_job_free(turn->http_job);
   wd_worker_free(turn->worker);
   free(turn->worker_root);
@@ -1290,6 +1292,11 @@ static uint64_t next_turn_id(void) {
 
 uint64_t wd_turn_id(wd_turn *turn) { return turn != NULL ? turn->id : 0; }
 
+void wd_turn_set_context(wd_turn *turn, const char *text) {
+  free(turn->context);
+  turn->context = text != NULL ? strdup(text) : NULL;
+}
+
 
 static char *read_project_rules(const char *root) {
   if (root == NULL) return NULL;
@@ -1312,17 +1319,31 @@ static char *read_project_rules(const char *root) {
   return buf;
 }
 
-static cbor_item_t *history_with_rules(cbor_item_t *history, const char *root) {
+static cbor_item_t *history_with_context(cbor_item_t *history,
+                                        const char *root,
+                                        const char *context) {
   char *rules = read_project_rules(root);
-  if (rules == NULL) return history;
+  bool have_context = context != NULL && context[0] != '\0';
+  if (rules == NULL && !have_context) return history;
   size_t extra = history != NULL ? cbor_array_size(history) : 0;
-  cbor_item_t *combined = wd_array(extra + 1);
-  cbor_item_t *entry = wd_map(2);
-  wd_put(entry, "role", wd_text("system"));
-  wd_put(entry, "text", wd_text(rules));
-  bool pushed = cbor_array_push(combined, entry);
-  cbor_decref(&entry);
-  free(rules);
+  size_t added = (rules != NULL ? 1 : 0) + (have_context ? 1 : 0);
+  cbor_item_t *combined = wd_array(extra + added);
+  bool pushed = true;
+  if (rules != NULL) {
+    cbor_item_t *entry = wd_map(2);
+    wd_put(entry, "role", wd_text("system"));
+    wd_put(entry, "text", wd_text(rules));
+    pushed = cbor_array_push(combined, entry);
+    cbor_decref(&entry);
+    free(rules);
+  }
+  if (pushed && have_context) {
+    cbor_item_t *entry = wd_map(2);
+    wd_put(entry, "role", wd_text("system"));
+    wd_put(entry, "text", wd_text(context));
+    pushed = cbor_array_push(combined, entry);
+    cbor_decref(&entry);
+  }
   if (pushed && extra > 0) {
     cbor_item_t **items = cbor_array_handle(history);
     for (size_t i = 0; i < extra; i++) {
@@ -1337,7 +1358,7 @@ static cbor_item_t *history_with_rules(cbor_item_t *history, const char *root) {
 int wd_turn_prompt(wd_turn *turn, const char *text, wd_turn_emit emit, void *ctx,
                    char **err) {
   turn->id = next_turn_id();
-  turn->history = history_with_rules(turn->history, turn->root);
+  turn->history = history_with_context(turn->history, turn->root, turn->context);
   cbor_item_t *message = wd_map(2);
   if (message == NULL) {
     *err = strdup("out of memory");

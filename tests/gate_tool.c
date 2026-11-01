@@ -1124,6 +1124,17 @@ int main(void) {
   free(child_b);
   free(child_c);
 
+  cbor_item_t *att_prompt = NULL;
+  cbor_item_t *att_turn = wd_map(2);
+  wd_put(att_turn, "id", wd_text(session));
+  wd_put(att_turn, "text", wd_text("what is attached"));
+  assert(request(&a, a.next_id++, "session.prompt", att_turn, &att_prompt,
+                 NULL) == 0);
+  wd_free(att_prompt);
+  char att_echo[2048];
+  turn_text(&a, last_turn, att_echo, sizeof(att_echo));
+  assert(strstr(att_echo, "[attach]") != NULL);
+
   free(session);
   close(b.fd);
   close(a.fd);

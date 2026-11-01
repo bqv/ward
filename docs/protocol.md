@@ -134,7 +134,9 @@ fields stay the same when a real tokenizer replaces the estimate.
 4 MiB) to `<state>/<session>/attachments/<name>` — the name is refused if it holds `/` or `..`
 — appends a durable `session.attachment {name, size}` event and answers `{path, size}`.
 `attachment.list {id}` replays those events into `[{name, size}]`. The file lives in the state
-directory, not the tool root, so a turn cannot read it without being told the path.
+directory, not the tool root, so a turn cannot read it without being told the path. Before a
+prompt runs, core also sends the attachments as a `system` message — `attached to this
+session: note.txt (13 bytes)` — so the model knows what is there.
 
 **Recall.** `/recall <words>` asks the skills guest, which calls core's `recall.search
 {query, k}`. Core runs the local `dsh-recall search <query> -k <k>` as a child (no shell, 20 s,

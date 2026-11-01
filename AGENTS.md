@@ -516,6 +516,17 @@ now collects a turn's deltas until that turn's own `turn.end`, and the rules ass
 The larger lesson is the one from round 44 in a new costume: an instrument that reads the wrong
 sample produces a false negative that looks exactly like a bug in the code under test.
 
+Fiftieth: the attachment context. A turn now carries up to two `system` entries before the
+history: the project rules and a line naming the session's attachments — `attached to this
+session: note.txt (13 bytes)` — built by replaying `session.attachment` events when the run is
+created. `history_with_context` builds both in one pass, so the ordering is fixed and the array
+is sized once.
+
+The gate asserts it with the `[attach]` probe the endpoint adds when the name appears anywhere
+in the request, read through `turn_text`. Placing that assertion *after* the subagent block
+matters: an extra prompt in the middle changed how many runs were in flight and broke the queue
+assertion, which is a reminder that this gate is a sequence, not a set of independent tests.
+
 ## M3: started, with one finding worth keeping
 
 The first M3 attempt replaced the daemon's single `wd_turn` with a pool keyed by session, so

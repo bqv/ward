@@ -68,6 +68,10 @@ static void serve(int fd) {
     size_t used = strlen(prompt);
     snprintf(prompt + used, sizeof(prompt) - used, " [rules]");
   }
+  if (strstr(request, "note.txt") != NULL) {
+    size_t used = strlen(prompt);
+    snprintf(prompt + used, sizeof(prompt) - used, " [attach]");
+  }
   size_t half = strlen(prompt) / 2;
   char response[8192];
   int n = snprintf(response, sizeof(response),
