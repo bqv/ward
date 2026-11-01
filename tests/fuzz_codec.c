@@ -24,42 +24,42 @@ static uint64_t rnd(void) {
 }
 
 static void chew(const uint8_t *buf, size_t len) {
-  hx_frame frame;
+  wd_frame frame;
   size_t used = 0;
-  enum hx_frame_status status = hx_frame_parse(buf, len, &frame, &used);
-  if (status != HX_FRAME_COMPLETE) return;
-  cbor_item_t *root = hx_decode(frame.body, frame.len);
+  enum wd_frame_status status = wd_frame_parse(buf, len, &frame, &used);
+  if (status != WD_FRAME_COMPLETE) return;
+  cbor_item_t *root = wd_decode(frame.body, frame.len);
   if (root == NULL) return;
   uint64_t id = 0;
-  char method[HX_MAX_METHOD];
+  char method[WD_MAX_METHOD];
   cbor_item_t *params = NULL;
-  if (hx_read_request(root, &id, method, &params)) {
+  if (wd_read_request(root, &id, method, &params)) {
     uint64_t limit = 0;
-    hx_uint_of(hx_get(params, "limit"), &limit);
+    wd_uint_of(wd_get(params, "limit"), &limit);
   }
   bool ok = false;
   cbor_item_t *value = NULL;
-  if (hx_read_response(root, &id, &ok, &value)) {
-    char *name = hx_text_copy(hx_get(value, "message"));
+  if (wd_read_response(root, &id, &ok, &value)) {
+    char *name = wd_text_copy(wd_get(value, "message"));
     free(name);
   }
   unsigned version = 0;
   char *client = NULL;
-  if (hx_read_hello(root, &version, &client)) free(client);
+  if (wd_read_hello(root, &version, &client)) free(client);
   char *kind = NULL;
   cbor_item_t *payload = NULL;
-  if (hx_read_event(root, &kind, &payload)) free(kind);
+  if (wd_read_event(root, &kind, &payload)) free(kind);
   char text[128];
-  hx_json(root, text, sizeof(text));
-  hx_free(root);
+  wd_json(root, text, sizeof(text));
+  wd_free(root);
 }
 
 int main(void) {
-  cbor_item_t *seed = hx_request(1, "session.list", hx_map(0));
+  cbor_item_t *seed = wd_request(1, "session.list", wd_map(0));
   size_t seed_len = 0;
-  uint8_t *seed_body = hx_encode(seed, &seed_len);
+  uint8_t *seed_body = wd_encode(seed, &seed_len);
 
-  uint8_t packet[HX_FRAME_HEADER + HX_MAX_BODY];
+  uint8_t packet[WD_FRAME_HEADER + WD_MAX_BODY];
   for (int iteration = 0; iteration < 20000; iteration++) {
 
     size_t len = 1 + (size_t)(rnd() % 2048);
@@ -69,15 +69,15 @@ int main(void) {
     chew(junk, len);
     free(junk);
 
-    hx_frame_header(packet, (uint16_t)(1 + rnd() % 6), rnd(), rnd(),
+    wd_frame_header(packet, (uint16_t)(1 + rnd() % 6), rnd(), rnd(),
                     (uint32_t)seed_len);
-    memcpy(packet + HX_FRAME_HEADER, seed_body, seed_len);
+    memcpy(packet + WD_FRAME_HEADER, seed_body, seed_len);
     size_t mutations = 1 + (size_t)(rnd() % 4);
     for (size_t i = 0; i < mutations; i++) {
-      size_t at = (size_t)(rnd() % (HX_FRAME_HEADER + seed_len));
+      size_t at = (size_t)(rnd() % (WD_FRAME_HEADER + seed_len));
       packet[at] ^= (uint8_t)(1u << (rnd() % 8));
     }
-    chew(packet, HX_FRAME_HEADER + seed_len);
+    chew(packet, WD_FRAME_HEADER + seed_len);
   }
 
   free(seed_body);

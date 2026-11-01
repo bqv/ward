@@ -15,7 +15,7 @@
 #include <time.h>
 #include <unistd.h>
 
-int hu_write_all(int fd, const void *buf, size_t len) {
+int wu_write_all(int fd, const void *buf, size_t len) {
   const uint8_t *p = buf;
   size_t off = 0;
   while (off < len) {
@@ -29,7 +29,7 @@ int hu_write_all(int fd, const void *buf, size_t len) {
   return 0;
 }
 
-int hu_mkdir_p(const char *path, mode_t mode) {
+int wu_mkdir_p(const char *path, mode_t mode) {
   if (path == NULL || path[0] == '\0') {
     errno = EINVAL;
     return -1;
@@ -53,7 +53,7 @@ int hu_mkdir_p(const char *path, mode_t mode) {
   return rc;
 }
 
-int hu_fsync_dir(const char *path) {
+int wu_fsync_dir(const char *path) {
   int fd = open(path, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
   if (fd < 0) return -1;
   int rc = fsync(fd);
@@ -61,7 +61,7 @@ int hu_fsync_dir(const char *path) {
   return rc;
 }
 
-char *hu_path_join(const char *a, const char *b) {
+char *wu_path_join(const char *a, const char *b) {
   if (a == NULL || b == NULL) return NULL;
   size_t alen = strlen(a);
   size_t blen = strlen(b);
@@ -76,32 +76,32 @@ char *hu_path_join(const char *a, const char *b) {
   return out;
 }
 
-char *hu_default_state_dir(void) {
+char *wu_default_state_dir(void) {
   const char *xdg = getenv("XDG_STATE_HOME");
-  if (xdg != NULL && xdg[0] != '\0') return hu_path_join(xdg, "harness");
+  if (xdg != NULL && xdg[0] != '\0') return wu_path_join(xdg, "ward");
   const char *home = getenv("HOME");
   if (home != NULL && home[0] != '\0') {
-    char *base = hu_path_join(home, ".local/state");
+    char *base = wu_path_join(home, ".local/state");
     if (base == NULL) return NULL;
-    char *full = hu_path_join(base, "harness");
+    char *full = wu_path_join(base, "ward");
     free(base);
     return full;
   }
   char buf[64];
-  snprintf(buf, sizeof(buf), "/tmp/harness-state-%lu",
+  snprintf(buf, sizeof(buf), "/tmp/ward-state-%lu",
            (unsigned long)geteuid());
   return strdup(buf);
 }
 
-char *hu_default_socket_path(void) {
+char *wu_default_socket_path(void) {
   const char *runtime = getenv("XDG_RUNTIME_DIR");
-  if (runtime != NULL && runtime[0] != '\0') return hu_path_join(runtime, "harness.sock");
+  if (runtime != NULL && runtime[0] != '\0') return wu_path_join(runtime, "ward.sock");
   char buf[64];
-  snprintf(buf, sizeof(buf), "/tmp/harness-%lu.sock", (unsigned long)geteuid());
+  snprintf(buf, sizeof(buf), "/tmp/ward-%lu.sock", (unsigned long)geteuid());
   return strdup(buf);
 }
 
-char *hu_boot_id(void) {
+char *wu_boot_id(void) {
   int fd = open("/proc/sys/kernel/random/boot_id", O_RDONLY | O_CLOEXEC);
   if (fd < 0) return NULL;
   char buf[64];
@@ -114,19 +114,19 @@ char *hu_boot_id(void) {
   return strdup(buf);
 }
 
-uint64_t hu_now_ms(void) {
+uint64_t wu_now_ms(void) {
   struct timespec ts;
   clock_gettime(CLOCK_REALTIME, &ts);
   return (uint64_t)ts.tv_sec * 1000ull + (uint64_t)(ts.tv_nsec / 1000000);
 }
 
-bool hu_pid_alive(long pid) {
+bool wu_pid_alive(long pid) {
   if (pid <= 0) return false;
   if (kill((pid_t)pid, 0) == 0) return true;
   return errno == EPERM;
 }
 
-int hu_random_bytes(void *buf, size_t len) {
+int wu_random_bytes(void *buf, size_t len) {
   uint8_t *p = buf;
   size_t off = 0;
   while (off < len) {

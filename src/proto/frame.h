@@ -8,17 +8,17 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define HX_FRAME_HEADER 22u
-#define HX_MAX_BODY 65536u
+#define WD_FRAME_HEADER 22u
+#define WD_MAX_BODY 65536u
 
-enum hx_frame_type {
-  HX_FRAME_HELLO = 1,
-  HX_FRAME_WELCOME = 2,
-  HX_FRAME_REQUEST = 3,
-  HX_FRAME_RESPONSE = 4,
-  HX_FRAME_EVENT = 5,
-  HX_FRAME_CONTROL = 6,
-  HX_FRAME_TYPE_MAX = 6,
+enum wd_frame_type {
+  WD_FRAME_HELLO = 1,
+  WD_FRAME_WELCOME = 2,
+  WD_FRAME_REQUEST = 3,
+  WD_FRAME_RESPONSE = 4,
+  WD_FRAME_EVENT = 5,
+  WD_FRAME_CONTROL = 6,
+  WD_FRAME_TYPE_MAX = 6,
 };
 
 typedef struct {
@@ -27,17 +27,17 @@ typedef struct {
   uint64_t seq;
   uint32_t len;
   const uint8_t *body;
-} hx_frame;
+} wd_frame;
 
-enum hx_frame_status {
-  HX_FRAME_INVALID = -1,
-  HX_FRAME_COMPLETE = 0,
-  HX_FRAME_PARTIAL = 1,
+enum wd_frame_status {
+  WD_FRAME_INVALID = -1,
+  WD_FRAME_COMPLETE = 0,
+  WD_FRAME_PARTIAL = 1,
 };
 
-void hx_frame_header(uint8_t out[HX_FRAME_HEADER], uint16_t type, uint64_t sub,
+void wd_frame_header(uint8_t out[WD_FRAME_HEADER], uint16_t type, uint64_t sub,
                      uint64_t seq, uint32_t len);
-enum hx_frame_status hx_frame_parse(const uint8_t *buf, size_t avail,
-                                    hx_frame *out, size_t *used);
+enum wd_frame_status wd_frame_parse(const uint8_t *buf, size_t avail,
+                                    wd_frame *out, size_t *used);
 
 #endif

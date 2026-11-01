@@ -9,45 +9,45 @@
 #include <string.h>
 
 static const char *const error_names[] = {
-    [HX_OK] = "ok",
-    [HX_ERR_INVALID_FRAME] = "invalid_frame",
-    [HX_ERR_VERSION] = "version",
-    [HX_ERR_UNAUTHENTICATED] = "unauthenticated",
-    [HX_ERR_NOT_FOUND] = "not_found",
-    [HX_ERR_INVALID_PARAMS] = "invalid_params",
-    [HX_ERR_ALREADY_RESOLVED] = "already_resolved",
-    [HX_ERR_BUSY] = "busy",
-    [HX_ERR_INTERNAL] = "internal",
-    [HX_ERR_NOT_SUPPORTED] = "not_supported",
-    [HX_ERR_CONFLICT] = "conflict",
-    [HX_ERR_CANCELLED] = "cancelled",
-    [HX_ERR_LIMIT] = "limit",
+    [WD_OK] = "ok",
+    [WD_ERR_INVALID_FRAME] = "invalid_frame",
+    [WD_ERR_VERSION] = "version",
+    [WD_ERR_UNAUTHENTICATED] = "unauthenticated",
+    [WD_ERR_NOT_FOUND] = "not_found",
+    [WD_ERR_INVALID_PARAMS] = "invalid_params",
+    [WD_ERR_ALREADY_RESOLVED] = "already_resolved",
+    [WD_ERR_BUSY] = "busy",
+    [WD_ERR_INTERNAL] = "internal",
+    [WD_ERR_NOT_SUPPORTED] = "not_supported",
+    [WD_ERR_CONFLICT] = "conflict",
+    [WD_ERR_CANCELLED] = "cancelled",
+    [WD_ERR_LIMIT] = "limit",
 };
 
-const char *hx_error_name(hx_error err) {
+const char *wd_error_name(wd_error err) {
   if (err < 0 || (size_t)err >= sizeof(error_names) / sizeof(error_names[0]) ||
       error_names[err] == NULL)
     return "internal";
   return error_names[err];
 }
 
-cbor_item_t *hx_map(uint64_t n) { return cbor_new_definite_map((size_t)n); }
+cbor_item_t *wd_map(uint64_t n) { return cbor_new_definite_map((size_t)n); }
 
-cbor_item_t *hx_array(uint64_t n) {
+cbor_item_t *wd_array(uint64_t n) {
   return cbor_new_definite_array((size_t)n);
 }
 
-cbor_item_t *hx_uint(uint64_t v) { return cbor_build_uint64(v); }
+cbor_item_t *wd_uint(uint64_t v) { return cbor_build_uint64(v); }
 
-cbor_item_t *hx_text_len(const char *s, size_t len) {
+cbor_item_t *wd_text_len(const char *s, size_t len) {
   return cbor_build_stringn(s, len);
 }
 
-cbor_item_t *hx_text(const char *s) { return cbor_build_string(s); }
+cbor_item_t *wd_text(const char *s) { return cbor_build_string(s); }
 
-cbor_item_t *hx_bool(bool v) { return cbor_build_bool(v); }
+cbor_item_t *wd_bool(bool v) { return cbor_build_bool(v); }
 
-void hx_put(cbor_item_t *map, const char *key, cbor_item_t *value) {
+void wd_put(cbor_item_t *map, const char *key, cbor_item_t *value) {
   cbor_item_t *k = cbor_build_string(key);
   struct cbor_pair pair = {.key = k, .value = value};
   bool added = cbor_map_add(map, pair);
@@ -56,7 +56,7 @@ void hx_put(cbor_item_t *map, const char *key, cbor_item_t *value) {
   cbor_decref(&value);
 }
 
-cbor_item_t *hx_get(cbor_item_t *map, const char *key) {
+cbor_item_t *wd_get(cbor_item_t *map, const char *key) {
   if (map == NULL || !cbor_isa_map(map)) return NULL;
   struct cbor_pair *pairs = cbor_map_handle(map);
   size_t n = cbor_map_size(map);
@@ -71,19 +71,19 @@ cbor_item_t *hx_get(cbor_item_t *map, const char *key) {
   return NULL;
 }
 
-bool hx_uint_of(cbor_item_t *item, uint64_t *out) {
+bool wd_uint_of(cbor_item_t *item, uint64_t *out) {
   if (item == NULL || !cbor_isa_uint(item)) return false;
   *out = cbor_get_uint64(item);
   return true;
 }
 
-bool hx_bool_of(cbor_item_t *item, bool *out) {
+bool wd_bool_of(cbor_item_t *item, bool *out) {
   if (item == NULL || !cbor_is_bool(item)) return false;
   *out = cbor_get_bool(item);
   return true;
 }
 
-char *hx_text_copy(cbor_item_t *item) {
+char *wd_text_copy(cbor_item_t *item) {
   if (item == NULL || !cbor_isa_string(item)) return NULL;
   size_t n = cbor_string_length(item);
   char *s = malloc(n + 1);
@@ -93,20 +93,20 @@ char *hx_text_copy(cbor_item_t *item) {
   return s;
 }
 
-uint8_t *hx_encode(cbor_item_t *item, size_t *len) {
+uint8_t *wd_encode(cbor_item_t *item, size_t *len) {
   if (item == NULL) return NULL;
   size_t need = cbor_serialized_size(item);
   if (need == 0) {
-    hx_free(item);
+    wd_free(item);
     return NULL;
   }
   uint8_t *buf = malloc(need);
   if (buf == NULL) {
-    hx_free(item);
+    wd_free(item);
     return NULL;
   }
   size_t written = cbor_serialize(item, buf, need);
-  hx_free(item);
+  wd_free(item);
   if (written == 0) {
     free(buf);
     return NULL;
@@ -234,7 +234,7 @@ static bool scan_cbor(const uint8_t *buf, size_t len) {
   return p == end;
 }
 
-cbor_item_t *hx_decode(const uint8_t *buf, size_t len) {
+cbor_item_t *wd_decode(const uint8_t *buf, size_t len) {
   if (!scan_cbor(buf, len)) return NULL;
   struct cbor_load_result result;
   memset(&result, 0, sizeof(result));
@@ -246,110 +246,110 @@ cbor_item_t *hx_decode(const uint8_t *buf, size_t len) {
   return root;
 }
 
-void hx_free(cbor_item_t *item) {
+void wd_free(cbor_item_t *item) {
   if (item != NULL) cbor_decref(&item);
 }
 
-cbor_item_t *hx_hello(void) {
-  cbor_item_t *root = hx_map(3);
-  hx_put(root, "v", hx_uint(HX_PROTOCOL_VERSION));
-  hx_put(root, "client", hx_text("harness-cli/" HX_VERSION_TEXT));
-  cbor_item_t *caps = hx_array(1);
-  cbor_item_t *cap = hx_text("events");
+cbor_item_t *wd_hello(void) {
+  cbor_item_t *root = wd_map(3);
+  wd_put(root, "v", wd_uint(WD_PROTOCOL_VERSION));
+  wd_put(root, "client", wd_text("ward-cli/" WD_VERSION_TEXT));
+  cbor_item_t *caps = wd_array(1);
+  cbor_item_t *cap = wd_text("events");
   bool pushed = cbor_array_push(caps, cap);
   (void)pushed;
   cbor_decref(&cap);
-  hx_put(root, "caps", caps);
+  wd_put(root, "caps", caps);
   return root;
 }
 
-cbor_item_t *hx_welcome(uid_t uid, uint64_t max_body) {
-  cbor_item_t *root = hx_map(4);
-  hx_put(root, "v", hx_uint(HX_PROTOCOL_VERSION));
-  hx_put(root, "server", hx_text("harness/" HX_VERSION_TEXT));
-  cbor_item_t *auth = hx_map(2);
-  hx_put(auth, "uid", hx_uint((uint64_t)uid));
-  hx_put(auth, "scope", hx_text("local"));
-  hx_put(root, "auth", auth);
-  cbor_item_t *limits = hx_map(2);
-  hx_put(limits, "body", hx_uint(max_body));
-  hx_put(limits, "inflight", hx_uint(64));
-  hx_put(root, "limits", limits);
+cbor_item_t *wd_welcome(uid_t uid, uint64_t max_body) {
+  cbor_item_t *root = wd_map(4);
+  wd_put(root, "v", wd_uint(WD_PROTOCOL_VERSION));
+  wd_put(root, "server", wd_text("ward/" WD_VERSION_TEXT));
+  cbor_item_t *auth = wd_map(2);
+  wd_put(auth, "uid", wd_uint((uint64_t)uid));
+  wd_put(auth, "scope", wd_text("local"));
+  wd_put(root, "auth", auth);
+  cbor_item_t *limits = wd_map(2);
+  wd_put(limits, "body", wd_uint(max_body));
+  wd_put(limits, "inflight", wd_uint(64));
+  wd_put(root, "limits", limits);
   return root;
 }
 
-cbor_item_t *hx_request(uint64_t id, const char *method, cbor_item_t *params) {
-  cbor_item_t *root = hx_map(3);
-  hx_put(root, "id", hx_uint(id));
-  hx_put(root, "method", hx_text(method));
-  hx_put(root, "params", params != NULL ? params : hx_map(0));
+cbor_item_t *wd_request(uint64_t id, const char *method, cbor_item_t *params) {
+  cbor_item_t *root = wd_map(3);
+  wd_put(root, "id", wd_uint(id));
+  wd_put(root, "method", wd_text(method));
+  wd_put(root, "params", params != NULL ? params : wd_map(0));
   return root;
 }
 
-cbor_item_t *hx_response_ok(uint64_t id, cbor_item_t *result) {
-  cbor_item_t *root = hx_map(3);
-  hx_put(root, "id", hx_uint(id));
-  hx_put(root, "ok", hx_bool(true));
-  hx_put(root, "result", result != NULL ? result : hx_map(0));
+cbor_item_t *wd_response_ok(uint64_t id, cbor_item_t *result) {
+  cbor_item_t *root = wd_map(3);
+  wd_put(root, "id", wd_uint(id));
+  wd_put(root, "ok", wd_bool(true));
+  wd_put(root, "result", result != NULL ? result : wd_map(0));
   return root;
 }
 
-cbor_item_t *hx_response_err(uint64_t id, hx_error err, const char *message) {
-  cbor_item_t *root = hx_map(3);
-  hx_put(root, "id", hx_uint(id));
-  hx_put(root, "ok", hx_bool(false));
-  cbor_item_t *detail = hx_map(3);
-  hx_put(detail, "code", hx_uint((uint64_t)err));
-  hx_put(detail, "name", hx_text(hx_error_name(err)));
-  hx_put(detail, "message", hx_text(message != NULL ? message : ""));
-  hx_put(root, "error", detail);
+cbor_item_t *wd_response_err(uint64_t id, wd_error err, const char *message) {
+  cbor_item_t *root = wd_map(3);
+  wd_put(root, "id", wd_uint(id));
+  wd_put(root, "ok", wd_bool(false));
+  cbor_item_t *detail = wd_map(3);
+  wd_put(detail, "code", wd_uint((uint64_t)err));
+  wd_put(detail, "name", wd_text(wd_error_name(err)));
+  wd_put(detail, "message", wd_text(message != NULL ? message : ""));
+  wd_put(root, "error", detail);
   return root;
 }
 
-cbor_item_t *hx_event(const char *kind, cbor_item_t *payload) {
-  cbor_item_t *root = hx_map(2);
-  hx_put(root, "kind", hx_text(kind));
-  hx_put(root, "payload", payload != NULL ? payload : hx_map(0));
+cbor_item_t *wd_event(const char *kind, cbor_item_t *payload) {
+  cbor_item_t *root = wd_map(2);
+  wd_put(root, "kind", wd_text(kind));
+  wd_put(root, "payload", payload != NULL ? payload : wd_map(0));
   return root;
 }
 
-int hx_read_hello(cbor_item_t *root, unsigned *version, char **client) {
+int wd_read_hello(cbor_item_t *root, unsigned *version, char **client) {
   if (root == NULL || !cbor_isa_map(root)) return 0;
   uint64_t v = 0;
-  if (!hx_uint_of(hx_get(root, "v"), &v)) return 0;
+  if (!wd_uint_of(wd_get(root, "v"), &v)) return 0;
   *version = (unsigned)v;
-  cbor_item_t *c = hx_get(root, "client");
+  cbor_item_t *c = wd_get(root, "client");
   if (c != NULL && !cbor_isa_string(c)) return 0;
-  if (client != NULL) *client = hx_text_copy(c);
+  if (client != NULL) *client = wd_text_copy(c);
   return 1;
 }
 
-int hx_read_welcome(cbor_item_t *root, unsigned *version, uint64_t *uid) {
+int wd_read_welcome(cbor_item_t *root, unsigned *version, uint64_t *uid) {
   if (root == NULL || !cbor_isa_map(root)) return 0;
   uint64_t v = 0;
-  if (!hx_uint_of(hx_get(root, "v"), &v)) return 0;
+  if (!wd_uint_of(wd_get(root, "v"), &v)) return 0;
   *version = (unsigned)v;
   if (uid != NULL) {
-    cbor_item_t *auth = hx_get(root, "auth");
+    cbor_item_t *auth = wd_get(root, "auth");
     uint64_t u = 0;
-    if (auth == NULL || !hx_uint_of(hx_get(auth, "uid"), &u)) return 0;
+    if (auth == NULL || !wd_uint_of(wd_get(auth, "uid"), &u)) return 0;
     *uid = u;
   }
   return 1;
 }
 
-int hx_read_request(cbor_item_t *root, uint64_t *id,
-                    char method[HX_MAX_METHOD], cbor_item_t **params) {
+int wd_read_request(cbor_item_t *root, uint64_t *id,
+                    char method[WD_MAX_METHOD], cbor_item_t **params) {
   if (root == NULL || !cbor_isa_map(root)) return 0;
   uint64_t mid = 0;
-  if (!hx_uint_of(hx_get(root, "id"), &mid) || mid == 0) return 0;
-  char *m = hx_text_copy(hx_get(root, "method"));
+  if (!wd_uint_of(wd_get(root, "id"), &mid) || mid == 0) return 0;
+  char *m = wd_text_copy(wd_get(root, "method"));
   if (m == NULL) return 0;
-  if (strlen(m) >= HX_MAX_METHOD) {
+  if (strlen(m) >= WD_MAX_METHOD) {
     free(m);
     return 0;
   }
-  cbor_item_t *p = hx_get(root, "params");
+  cbor_item_t *p = wd_get(root, "params");
   if (p == NULL || !cbor_isa_map(p)) {
     free(m);
     return 0;
@@ -361,14 +361,14 @@ int hx_read_request(cbor_item_t *root, uint64_t *id,
   return 1;
 }
 
-int hx_read_response(cbor_item_t *root, uint64_t *id, bool *ok,
+int wd_read_response(cbor_item_t *root, uint64_t *id, bool *ok,
                      cbor_item_t **value) {
   if (root == NULL || !cbor_isa_map(root)) return 0;
   uint64_t mid = 0;
   bool good = false;
-  if (!hx_uint_of(hx_get(root, "id"), &mid) || mid == 0) return 0;
-  if (!hx_bool_of(hx_get(root, "ok"), &good)) return 0;
-  cbor_item_t *v = hx_get(root, good ? "result" : "error");
+  if (!wd_uint_of(wd_get(root, "id"), &mid) || mid == 0) return 0;
+  if (!wd_bool_of(wd_get(root, "ok"), &good)) return 0;
+  cbor_item_t *v = wd_get(root, good ? "result" : "error");
   if (v == NULL) return 0;
   *id = mid;
   *ok = good;
@@ -376,11 +376,11 @@ int hx_read_response(cbor_item_t *root, uint64_t *id, bool *ok,
   return 1;
 }
 
-int hx_read_event(cbor_item_t *root, char **kind, cbor_item_t **payload) {
+int wd_read_event(cbor_item_t *root, char **kind, cbor_item_t **payload) {
   if (root == NULL || !cbor_isa_map(root)) return 0;
-  char *k = hx_text_copy(hx_get(root, "kind"));
+  char *k = wd_text_copy(wd_get(root, "kind"));
   if (k == NULL) return 0;
-  cbor_item_t *p = hx_get(root, "payload");
+  cbor_item_t *p = wd_get(root, "payload");
   if (p == NULL || !cbor_isa_map(p)) {
     free(k);
     return 0;
@@ -495,7 +495,7 @@ static size_t json_value(cbor_item_t *item, char *out, size_t cap, size_t pos) {
   }
 }
 
-size_t hx_json(cbor_item_t *item, char *out, size_t cap) {
+size_t wd_json(cbor_item_t *item, char *out, size_t cap) {
   if (cap == 0) return 0;
   out[0] = '\0';
   return json_value(item, out, cap, 0);

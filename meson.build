@@ -1,4 +1,4 @@
-project('harness', 'c',
+project('ward', 'c',
   version: '0.0.1',
   meson_version: '>=1.2.0',
   default_options: [
@@ -22,7 +22,7 @@ endif
 
 inc = include_directories('src')
 
-core = static_library('harness-core',
+core = static_library('ward-core',
   files(
     'src/proto/frame.c',
     'src/proto/codec.c',
@@ -36,7 +36,7 @@ core = static_library('harness-core',
   install: false,
 )
 
-harness = executable('harness',
+ward = executable('ward',
   files('src/cli/main.c', 'src/daemon/server.c'),
   include_directories: inc,
   link_with: core,
@@ -45,7 +45,7 @@ harness = executable('harness',
 )
 
 test_env = environment()
-test_env.set('HARNESS_BIN', harness.full_path())
+test_env.set('HARNESS_BIN', ward.full_path())
 
 foreach t : [
   ['frame', 'tests/frame_test.c'],

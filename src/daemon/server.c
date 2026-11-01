@@ -27,47 +27,47 @@
 #include "proto/codec.h"
 #include "proto/frame.h"
 
-#define HX_MAX_CONNS 256
-#define HX_MAX_SUBS 16
-#define HX_CACHE 16
-#define HX_MAX_OUT (8u << 20)
-#define HX_HANDSHAKE_MS 5000u
+#define WD_MAX_CONNS 256
+#define WD_MAX_SUBS 16
+#define WD_CACHE 16
+#define WD_MAX_OUT (8u << 20)
+#define WD_HANDSHAKE_MS 5000u
 
-typedef struct hx_out {
-  struct hx_out *next;
+typedef struct wd_out {
+  struct wd_out *next;
   size_t len;
   size_t off;
   uint8_t *data;
-} hx_out;
+} wd_out;
 
 typedef struct {
   uint64_t id;
-  char session_id[HX_ID_LEN];
-} hx_sub;
+  char session_id[WD_ID_LEN];
+} wd_sub;
 
 typedef struct {
   bool used;
   uint64_t id;
   uint8_t *body;
   size_t len;
-} hx_cache;
+} wd_cache;
 
-typedef struct hx_conn {
+typedef struct wd_conn {
   int fd;
   bool hello;
   bool closing;
   uint64_t deadline_ms;
   uint8_t *in;
   size_t in_len;
-  hx_out *out_head;
-  hx_out *out_tail;
+  wd_out *out_head;
+  wd_out *out_tail;
   size_t out_bytes;
-  hx_sub subs[HX_MAX_SUBS];
+  wd_sub subs[WD_MAX_SUBS];
   size_t subs_len;
   uint64_t next_sub;
-  hx_cache cache[HX_CACHE];
+  wd_cache cache[WD_CACHE];
   size_t cache_at;
-} hx_conn;
+} wd_conn;
 
 typedef struct {
   int listen_fd;
@@ -77,35 +77,35 @@ typedef struct {
   char *state_dir;
   char *lock_path;
   hs_store store;
-  hx_conn *conns[HX_MAX_CONNS];
+  wd_conn *conns[WD_MAX_CONNS];
   bool stop;
-} hx_server;
+} wd_server;
 
 static int token_listen;
 static int token_signal;
 
-static void conn_close(hx_server *srv, hx_conn *conn);
-static int conn_arm(hx_server *srv, hx_conn *conn);
-static int conn_flush(hx_conn *conn);
-static int conn_read(hx_server *srv, hx_conn *conn);
-static void handle_frame(hx_server *srv, hx_conn *conn, const hx_frame *frame);
-static void handle_request(hx_server *srv, hx_conn *conn, uint64_t id,
+static void conn_close(wd_server *srv, wd_conn *conn);
+static int conn_arm(wd_server *srv, wd_conn *conn);
+static int conn_flush(wd_conn *conn);
+static int conn_read(wd_server *srv, wd_conn *conn);
+static void handle_frame(wd_server *srv, wd_conn *conn, const wd_frame *frame);
+static void handle_request(wd_server *srv, wd_conn *conn, uint64_t id,
                            const char *method, cbor_item_t *params);
-static void handle_control(hx_server *srv, hx_conn *conn, cbor_item_t *root);
+static void handle_control(wd_server *srv, wd_conn *conn, cbor_item_t *root);
 
 static uint8_t *encode_item(cbor_item_t *item, size_t *len, bool take) {
   size_t need = cbor_serialized_size(item);
   if (need == 0) {
-    if (take) hx_free(item);
+    if (take) wd_free(item);
     return NULL;
   }
   uint8_t *buf = malloc(need);
   if (buf == NULL) {
-    if (take) hx_free(item);
+    if (take) wd_free(item);
     return NULL;
   }
   size_t written = cbor_serialize(item, buf, need);
-  if (take) hx_free(item);
+  if (take) wd_free(item);
   if (written == 0) {
     free(buf);
     return NULL;
@@ -114,12 +114,12 @@ static uint8_t *encode_item(cbor_item_t *item, size_t *len, bool take) {
   return buf;
 }
 
-static int conn_queue(hx_conn *conn, uint16_t type, uint64_t sub, uint64_t seq,
+static int conn_queue(wd_conn *conn, uint16_t type, uint64_t sub, uint64_t seq,
                       const uint8_t *body, size_t len) {
-  if (len == 0 || len > HX_MAX_BODY) return -1;
-  size_t total = HX_FRAME_HEADER + len;
-  if (conn->out_bytes + total > HX_MAX_OUT) return -1;
-  hx_out *out = calloc(1, sizeof(*out));
+  if (len == 0 || len > WD_MAX_BODY) return -1;
+  size_t total = WD_FRAME_HEADER + len;
+  if (conn->out_bytes + total > WD_MAX_OUT) return -1;
+  wd_out *out = calloc(1, sizeof(*out));
   if (out == NULL) return -1;
   out->data = malloc(total);
   if (out->data == NULL) {
@@ -127,8 +127,8 @@ static int conn_queue(hx_conn *conn, uint16_t type, uint64_t sub, uint64_t seq,
     return -1;
   }
   out->len = total;
-  hx_frame_header(out->data, type, sub, seq, (uint32_t)len);
-  memcpy(out->data + HX_FRAME_HEADER, body, len);
+  wd_frame_header(out->data, type, sub, seq, (uint32_t)len);
+  memcpy(out->data + WD_FRAME_HEADER, body, len);
   if (conn->out_tail != NULL)
     conn->out_tail->next = out;
   else
@@ -138,7 +138,7 @@ static int conn_queue(hx_conn *conn, uint16_t type, uint64_t sub, uint64_t seq,
   return 0;
 }
 
-static int conn_send_item(hx_conn *conn, uint16_t type, uint64_t sub,
+static int conn_send_item(wd_conn *conn, uint16_t type, uint64_t sub,
                           uint64_t seq, cbor_item_t *item, bool take) {
   size_t len = 0;
   uint8_t *body = encode_item(item, &len, take);
@@ -148,9 +148,9 @@ static int conn_send_item(hx_conn *conn, uint16_t type, uint64_t sub,
   return rc;
 }
 
-static void cache_store(hx_conn *conn, uint64_t id, const uint8_t *body,
+static void cache_store(wd_conn *conn, uint64_t id, const uint8_t *body,
                         size_t len) {
-  hx_cache *slot = &conn->cache[conn->cache_at % HX_CACHE];
+  wd_cache *slot = &conn->cache[conn->cache_at % WD_CACHE];
   conn->cache_at++;
   free(slot->body);
   slot->body = malloc(len);
@@ -164,41 +164,41 @@ static void cache_store(hx_conn *conn, uint64_t id, const uint8_t *body,
   slot->used = true;
 }
 
-static hx_cache *cache_find(hx_conn *conn, uint64_t id) {
-  for (size_t i = 0; i < HX_CACHE; i++)
+static wd_cache *cache_find(wd_conn *conn, uint64_t id) {
+  for (size_t i = 0; i < WD_CACHE; i++)
     if (conn->cache[i].used && conn->cache[i].id == id) return &conn->cache[i];
   return NULL;
 }
 
-static int conn_send_cached(hx_conn *conn, uint64_t id, cbor_item_t *response) {
+static int conn_send_cached(wd_conn *conn, uint64_t id, cbor_item_t *response) {
   size_t len = 0;
   uint8_t *body = encode_item(response, &len, true);
   if (body == NULL) return -1;
   cache_store(conn, id, body, len);
-  int rc = conn_queue(conn, HX_FRAME_RESPONSE, 0, 0, body, len);
+  int rc = conn_queue(conn, WD_FRAME_RESPONSE, 0, 0, body, len);
   free(body);
   return rc;
 }
 
-static int conn_send_error(hx_conn *conn, uint64_t id, hx_error err,
+static int conn_send_error(wd_conn *conn, uint64_t id, wd_error err,
                            const char *message) {
-  return conn_send_item(conn, HX_FRAME_RESPONSE, 0, 0,
-                        hx_response_err(id, err, message), true);
+  return conn_send_item(conn, WD_FRAME_RESPONSE, 0, 0,
+                        wd_response_err(id, err, message), true);
 }
 
-static void conn_broadcast(hx_server *srv, hs_session *session,
+static void conn_broadcast(wd_server *srv, hs_session *session,
                            const char *kind, uint64_t seq,
                            cbor_item_t *payload) {
-  cbor_item_t *event = hx_event(kind, payload);
+  cbor_item_t *event = wd_event(kind, payload);
   size_t len = 0;
   uint8_t *body = encode_item(event, &len, true);
   if (body == NULL) return;
-  for (size_t i = 0; i < HX_MAX_CONNS; i++) {
-    hx_conn *conn = srv->conns[i];
+  for (size_t i = 0; i < WD_MAX_CONNS; i++) {
+    wd_conn *conn = srv->conns[i];
     if (conn == NULL || !conn->hello) continue;
     for (size_t j = 0; j < conn->subs_len; j++) {
       if (strcmp(conn->subs[j].session_id, session->id) != 0) continue;
-      if (conn_queue(conn, HX_FRAME_EVENT, conn->subs[j].id, seq, body, len) != 0)
+      if (conn_queue(conn, WD_FRAME_EVENT, conn->subs[j].id, seq, body, len) != 0)
         conn->closing = true;
       conn_arm(srv, conn);
     }
@@ -206,11 +206,11 @@ static void conn_broadcast(hx_server *srv, hs_session *session,
   free(body);
 }
 
-static void respond_internal(hx_server *srv, hx_conn *conn, uint64_t id,
+static void respond_internal(wd_server *srv, wd_conn *conn, uint64_t id,
                              const char *where) {
   char message[128];
   snprintf(message, sizeof(message), "%s", where);
-  conn_send_error(conn, id, HX_ERR_INTERNAL, message);
+  conn_send_error(conn, id, WD_ERR_INTERNAL, message);
   conn_arm(srv, conn);
 }
 
@@ -220,10 +220,10 @@ static bool valid_cwd(const char *path) {
   return stat(path, &sb) == 0 && S_ISDIR(sb.st_mode);
 }
 
-static void handle_session_create(hx_server *srv, hx_conn *conn, uint64_t id,
+static void handle_session_create(wd_server *srv, wd_conn *conn, uint64_t id,
                                   cbor_item_t *params) {
-  char *cwd = hx_text_copy(hx_get(params, "cwd"));
-  char *model = hx_text_copy(hx_get(params, "model"));
+  char *cwd = wd_text_copy(wd_get(params, "cwd"));
+  char *model = wd_text_copy(wd_get(params, "model"));
   char buffer[PATH_MAX];
   if (cwd == NULL) {
     if (getcwd(buffer, sizeof(buffer)) == NULL) {
@@ -236,7 +236,7 @@ static void handle_session_create(hx_server *srv, hx_conn *conn, uint64_t id,
   if (cwd == NULL || !valid_cwd(cwd)) {
     free(cwd);
     free(model);
-    conn_send_error(conn, id, HX_ERR_INVALID_PARAMS, "cwd is not a directory");
+    conn_send_error(conn, id, WD_ERR_INVALID_PARAMS, "cwd is not a directory");
     conn_arm(srv, conn);
     return;
   }
@@ -254,110 +254,110 @@ static void handle_session_create(hx_server *srv, hx_conn *conn, uint64_t id,
   free(cwd);
   free(model);
 
-  cbor_item_t *logged = hx_map(1);
-  hx_put(logged, "session", hs_to_cbor(session));
+  cbor_item_t *logged = wd_map(1);
+  wd_put(logged, "session", hs_to_cbor(session));
   uint64_t seq = 0;
   if (hs_emit(session, "session.updated", logged, &seq) != 0) {
     respond_internal(srv, conn, id, "cannot append session event");
     return;
   }
-  cbor_item_t *event = hx_map(1);
-  hx_put(event, "session", hs_to_cbor(session));
+  cbor_item_t *event = wd_map(1);
+  wd_put(event, "session", hs_to_cbor(session));
   conn_broadcast(srv, session, "session.updated", seq, event);
 
-  cbor_item_t *result = hx_map(1);
-  hx_put(result, "session", hs_to_cbor(session));
-  conn_send_cached(conn, id, hx_response_ok(id, result));
+  cbor_item_t *result = wd_map(1);
+  wd_put(result, "session", hs_to_cbor(session));
+  conn_send_cached(conn, id, wd_response_ok(id, result));
   conn_arm(srv, conn);
 }
 
-static void handle_session_list(hx_server *srv, hx_conn *conn, uint64_t id,
+static void handle_session_list(wd_server *srv, wd_conn *conn, uint64_t id,
                                 cbor_item_t *params) {
   uint64_t limit = 100;
-  if (hx_get(params, "limit") != NULL) {
-    if (!hx_uint_of(hx_get(params, "limit"), &limit) || limit == 0 ||
+  if (wd_get(params, "limit") != NULL) {
+    if (!wd_uint_of(wd_get(params, "limit"), &limit) || limit == 0 ||
         limit > 1000) {
-      conn_send_error(conn, id, HX_ERR_INVALID_PARAMS, "limit must be 1..1000");
+      conn_send_error(conn, id, WD_ERR_INVALID_PARAMS, "limit must be 1..1000");
       conn_arm(srv, conn);
       return;
     }
   }
   size_t count = srv->store.len < limit ? srv->store.len : (size_t)limit;
-  cbor_item_t *list = hx_array(count);
+  cbor_item_t *list = wd_array(count);
   for (size_t i = 0; i < count; i++) {
     cbor_item_t *entry = hs_to_cbor(srv->store.items[i]);
     bool pushed = cbor_array_push(list, entry);
     (void)pushed;
     cbor_decref(&entry);
   }
-  cbor_item_t *result = hx_map(1);
-  hx_put(result, "sessions", list);
-  conn_send_cached(conn, id, hx_response_ok(id, result));
+  cbor_item_t *result = wd_map(1);
+  wd_put(result, "sessions", list);
+  conn_send_cached(conn, id, wd_response_ok(id, result));
   conn_arm(srv, conn);
 }
 
-static void handle_session_get(hx_server *srv, hx_conn *conn, uint64_t id,
+static void handle_session_get(wd_server *srv, wd_conn *conn, uint64_t id,
                                cbor_item_t *params) {
-  char *want = hx_text_copy(hx_get(params, "id"));
+  char *want = wd_text_copy(wd_get(params, "id"));
   if (want == NULL) {
-    conn_send_error(conn, id, HX_ERR_INVALID_PARAMS, "id is required");
+    conn_send_error(conn, id, WD_ERR_INVALID_PARAMS, "id is required");
     conn_arm(srv, conn);
     return;
   }
   hs_session *session = hs_find(&srv->store, want);
   free(want);
   if (session == NULL) {
-    conn_send_error(conn, id, HX_ERR_NOT_FOUND, "no such session");
+    conn_send_error(conn, id, WD_ERR_NOT_FOUND, "no such session");
     conn_arm(srv, conn);
     return;
   }
-  cbor_item_t *result = hx_map(1);
-  hx_put(result, "session", hs_to_cbor(session));
-  conn_send_cached(conn, id, hx_response_ok(id, result));
+  cbor_item_t *result = wd_map(1);
+  wd_put(result, "session", hs_to_cbor(session));
+  conn_send_cached(conn, id, wd_response_ok(id, result));
   conn_arm(srv, conn);
 }
 
 typedef struct {
-  hx_server *srv;
-  hx_conn *conn;
+  wd_server *srv;
+  wd_conn *conn;
   uint64_t sub;
 } replay_ctx;
 
 static int replay_event(void *ctx, uint64_t seq, cbor_item_t *event) {
   replay_ctx *rc = ctx;
-  if (conn_send_item(rc->conn, HX_FRAME_EVENT, rc->sub, seq, event, false) != 0)
+  if (conn_send_item(rc->conn, WD_FRAME_EVENT, rc->sub, seq, event, false) != 0)
     return 1;
   conn_arm(rc->srv, rc->conn);
   return 0;
 }
 
-static void replay_into(hx_server *srv, hx_conn *conn, hs_session *session,
+static void replay_into(wd_server *srv, wd_conn *conn, hs_session *session,
                         uint64_t sub, uint64_t from) {
   uint64_t to = session->last_seq;
   replay_ctx rc = {.srv = srv, .conn = conn, .sub = sub};
   hs_replay(session, from, replay_event, &rc);
-  cbor_item_t *done = hx_map(2);
-  hx_put(done, "from", hx_uint(from));
-  hx_put(done, "to", hx_uint(to));
-  conn_send_item(conn, HX_FRAME_EVENT, sub, to, hx_event("replay.end", done),
+  cbor_item_t *done = wd_map(2);
+  wd_put(done, "from", wd_uint(from));
+  wd_put(done, "to", wd_uint(to));
+  conn_send_item(conn, WD_FRAME_EVENT, sub, to, wd_event("replay.end", done),
                  true);
   conn_arm(srv, conn);
 }
 
-static void handle_session_resume(hx_server *srv, hx_conn *conn, uint64_t id,
+static void handle_session_resume(wd_server *srv, wd_conn *conn, uint64_t id,
                                   cbor_item_t *params) {
-  char *want = hx_text_copy(hx_get(params, "id"));
+  char *want = wd_text_copy(wd_get(params, "id"));
   if (want == NULL) {
-    conn_send_error(conn, id, HX_ERR_INVALID_PARAMS, "id is required");
+    conn_send_error(conn, id, WD_ERR_INVALID_PARAMS, "id is required");
     conn_arm(srv, conn);
     return;
   }
   uint64_t from = 0;
   bool have_from = false;
-  if (hx_get(params, "from") != NULL) {
-    if (!hx_uint_of(hx_get(params, "from"), &from)) {
+  if (wd_get(params, "from") != NULL) {
+    if (!wd_uint_of(wd_get(params, "from"), &from)) {
       free(want);
-      conn_send_error(conn, id, HX_ERR_INVALID_PARAMS, "from must be a uint");
+      conn_send_error(conn, id, WD_ERR_INVALID_PARAMS, "from must be a uint");
       conn_arm(srv, conn);
       return;
     }
@@ -366,31 +366,31 @@ static void handle_session_resume(hx_server *srv, hx_conn *conn, uint64_t id,
   hs_session *session = hs_find(&srv->store, want);
   free(want);
   if (session == NULL) {
-    conn_send_error(conn, id, HX_ERR_NOT_FOUND, "no such session");
+    conn_send_error(conn, id, WD_ERR_NOT_FOUND, "no such session");
     conn_arm(srv, conn);
     return;
   }
-  if (conn->subs_len == HX_MAX_SUBS) {
-    conn_send_error(conn, id, HX_ERR_BUSY, "too many subscriptions");
+  if (conn->subs_len == WD_MAX_SUBS) {
+    conn_send_error(conn, id, WD_ERR_BUSY, "too many subscriptions");
     conn_arm(srv, conn);
     return;
   }
   uint64_t sub = conn->next_sub++;
   if (sub == 0) sub = conn->next_sub++;
   conn->subs[conn->subs_len].id = sub;
-  snprintf(conn->subs[conn->subs_len].session_id, HX_ID_LEN, "%s", session->id);
+  snprintf(conn->subs[conn->subs_len].session_id, WD_ID_LEN, "%s", session->id);
   conn->subs_len++;
 
-  cbor_item_t *result = hx_map(3);
-  hx_put(result, "session", hs_to_cbor(session));
-  hx_put(result, "sub", hx_uint(sub));
-  hx_put(result, "last_seq", hx_uint(session->last_seq));
-  conn_send_cached(conn, id, hx_response_ok(id, result));
+  cbor_item_t *result = wd_map(3);
+  wd_put(result, "session", hs_to_cbor(session));
+  wd_put(result, "sub", wd_uint(sub));
+  wd_put(result, "last_seq", wd_uint(session->last_seq));
+  conn_send_cached(conn, id, wd_response_ok(id, result));
   conn_arm(srv, conn);
   if (have_from) replay_into(srv, conn, session, sub, from);
 }
 
-static void handle_request(hx_server *srv, hx_conn *conn, uint64_t id,
+static void handle_request(wd_server *srv, wd_conn *conn, uint64_t id,
                            const char *method, cbor_item_t *params) {
   if (strcmp(method, "session.create") == 0) {
     handle_session_create(srv, conn, id, params);
@@ -401,16 +401,16 @@ static void handle_request(hx_server *srv, hx_conn *conn, uint64_t id,
   } else if (strcmp(method, "session.resume") == 0) {
     handle_session_resume(srv, conn, id, params);
   } else {
-    conn_send_error(conn, id, HX_ERR_NOT_SUPPORTED, "method not served yet");
+    conn_send_error(conn, id, WD_ERR_NOT_SUPPORTED, "method not served yet");
     conn_arm(srv, conn);
   }
 }
 
-static void handle_control(hx_server *srv, hx_conn *conn, cbor_item_t *root) {
+static void handle_control(wd_server *srv, wd_conn *conn, cbor_item_t *root) {
   uint64_t sub = 0;
-  if (!hx_uint_of(hx_get(root, "replay"), &sub) || sub == 0) return;
+  if (!wd_uint_of(wd_get(root, "replay"), &sub) || sub == 0) return;
   uint64_t from = 0;
-  if (!hx_uint_of(hx_get(root, "from"), &from)) return;
+  if (!wd_uint_of(wd_get(root, "from"), &from)) return;
   for (size_t i = 0; i < conn->subs_len; i++) {
     if (conn->subs[i].id != sub) continue;
     hs_session *session = hs_find(&srv->store, conn->subs[i].session_id);
@@ -419,10 +419,10 @@ static void handle_control(hx_server *srv, hx_conn *conn, cbor_item_t *root) {
   }
 }
 
-static void handle_frame(hx_server *srv, hx_conn *conn, const hx_frame *frame) {
-  cbor_item_t *root = hx_decode(frame->body, frame->len);
+static void handle_frame(wd_server *srv, wd_conn *conn, const wd_frame *frame) {
+  cbor_item_t *root = wd_decode(frame->body, frame->len);
   if (root == NULL) {
-    conn_send_error(conn, 0, HX_ERR_INVALID_FRAME, "body is not cbor");
+    conn_send_error(conn, 0, WD_ERR_INVALID_FRAME, "body is not cbor");
     conn->closing = true;
     conn_arm(srv, conn);
     return;
@@ -430,80 +430,80 @@ static void handle_frame(hx_server *srv, hx_conn *conn, const hx_frame *frame) {
   if (!conn->hello) {
     unsigned version = 0;
     char *client = NULL;
-    if (frame->type != HX_FRAME_HELLO ||
-        !hx_read_hello(root, &version, &client)) {
+    if (frame->type != WD_FRAME_HELLO ||
+        !wd_read_hello(root, &version, &client)) {
       free(client);
-      hx_free(root);
-      conn_send_error(conn, 0, HX_ERR_INVALID_FRAME, "hello expected first");
+      wd_free(root);
+      conn_send_error(conn, 0, WD_ERR_INVALID_FRAME, "hello expected first");
       conn->closing = true;
       conn_arm(srv, conn);
       return;
     }
     free(client);
-    if (version != HX_PROTOCOL_VERSION) {
-      hx_free(root);
-      conn_send_error(conn, 0, HX_ERR_VERSION, "only protocol version 1");
+    if (version != WD_PROTOCOL_VERSION) {
+      wd_free(root);
+      conn_send_error(conn, 0, WD_ERR_VERSION, "only protocol version 1");
       conn->closing = true;
       conn_arm(srv, conn);
       return;
     }
     conn->hello = true;
     conn->deadline_ms = 0;
-    conn_send_item(conn, HX_FRAME_WELCOME, 0, 0,
-                   hx_welcome(geteuid(), HX_MAX_BODY), true);
+    conn_send_item(conn, WD_FRAME_WELCOME, 0, 0,
+                   wd_welcome(geteuid(), WD_MAX_BODY), true);
     conn_arm(srv, conn);
-    hx_free(root);
+    wd_free(root);
     return;
   }
-  if (frame->type == HX_FRAME_REQUEST) {
+  if (frame->type == WD_FRAME_REQUEST) {
     uint64_t id = 0;
-    char method[HX_MAX_METHOD];
+    char method[WD_MAX_METHOD];
     cbor_item_t *params = NULL;
-    if (!hx_read_request(root, &id, method, &params)) {
-      conn_send_error(conn, 0, HX_ERR_INVALID_PARAMS, "malformed request");
-      hx_free(root);
+    if (!wd_read_request(root, &id, method, &params)) {
+      conn_send_error(conn, 0, WD_ERR_INVALID_PARAMS, "malformed request");
+      wd_free(root);
       conn_arm(srv, conn);
       return;
     }
-    hx_cache *hit = cache_find(conn, id);
+    wd_cache *hit = cache_find(conn, id);
     if (hit != NULL) {
-      conn_queue(conn, HX_FRAME_RESPONSE, 0, 0, hit->body, hit->len);
+      conn_queue(conn, WD_FRAME_RESPONSE, 0, 0, hit->body, hit->len);
       conn_arm(srv, conn);
-      hx_free(root);
+      wd_free(root);
       return;
     }
     handle_request(srv, conn, id, method, params);
-  } else if (frame->type == HX_FRAME_CONTROL) {
+  } else if (frame->type == WD_FRAME_CONTROL) {
     handle_control(srv, conn, root);
     conn_arm(srv, conn);
   } else {
-    conn_send_error(conn, 0, HX_ERR_INVALID_FRAME, "unexpected frame type");
+    conn_send_error(conn, 0, WD_ERR_INVALID_FRAME, "unexpected frame type");
     conn->closing = true;
     conn_arm(srv, conn);
   }
-  hx_free(root);
+  wd_free(root);
 }
 
-static void conn_close(hx_server *srv, hx_conn *conn) {
+static void conn_close(wd_server *srv, wd_conn *conn) {
   epoll_ctl(srv->epoll_fd, EPOLL_CTL_DEL, conn->fd, NULL);
   close(conn->fd);
-  for (size_t i = 0; i < HX_CACHE; i++) free(conn->cache[i].body);
-  hx_out *out = conn->out_head;
+  for (size_t i = 0; i < WD_CACHE; i++) free(conn->cache[i].body);
+  wd_out *out = conn->out_head;
   while (out != NULL) {
-    hx_out *next = out->next;
+    wd_out *next = out->next;
     free(out->data);
     free(out);
     out = next;
   }
   free(conn->in);
-  for (size_t i = 0; i < HX_MAX_CONNS; i++)
+  for (size_t i = 0; i < WD_MAX_CONNS; i++)
     if (srv->conns[i] == conn) srv->conns[i] = NULL;
   free(conn);
 }
 
-static int conn_flush(hx_conn *conn) {
+static int conn_flush(wd_conn *conn) {
   while (conn->out_head != NULL) {
-    hx_out *out = conn->out_head;
+    wd_out *out = conn->out_head;
     ssize_t n = write(conn->fd, out->data + out->off, out->len - out->off);
     if (n < 0) {
       if (errno == EINTR) continue;
@@ -521,7 +521,7 @@ static int conn_flush(hx_conn *conn) {
   return 0;
 }
 
-static int conn_arm(hx_server *srv, hx_conn *conn) {
+static int conn_arm(wd_server *srv, wd_conn *conn) {
   struct epoll_event ev;
   memset(&ev, 0, sizeof(ev));
   ev.events = EPOLLIN | (conn->out_head != NULL ? EPOLLOUT : 0);
@@ -529,11 +529,11 @@ static int conn_arm(hx_server *srv, hx_conn *conn) {
   return epoll_ctl(srv->epoll_fd, EPOLL_CTL_MOD, conn->fd, &ev);
 }
 
-static int conn_read(hx_server *srv, hx_conn *conn) {
+static int conn_read(wd_server *srv, wd_conn *conn) {
   for (;;) {
-    if (conn->in_len == HX_FRAME_HEADER + HX_MAX_BODY) return -1;
+    if (conn->in_len == WD_FRAME_HEADER + WD_MAX_BODY) return -1;
     ssize_t n = read(conn->fd, conn->in + conn->in_len,
-                     HX_FRAME_HEADER + HX_MAX_BODY - conn->in_len);
+                     WD_FRAME_HEADER + WD_MAX_BODY - conn->in_len);
     if (n == 0) return -1;
     if (n < 0) {
       if (errno == EINTR) continue;
@@ -542,14 +542,14 @@ static int conn_read(hx_server *srv, hx_conn *conn) {
     }
     conn->in_len += (size_t)n;
     size_t off = 0;
-    while (conn->in_len - off >= HX_FRAME_HEADER) {
-      hx_frame frame;
+    while (conn->in_len - off >= WD_FRAME_HEADER) {
+      wd_frame frame;
       size_t used = 0;
-      enum hx_frame_status status =
-          hx_frame_parse(conn->in + off, conn->in_len - off, &frame, &used);
-      if (status == HX_FRAME_PARTIAL) break;
-      if (status == HX_FRAME_INVALID) {
-        conn_send_error(conn, 0, HX_ERR_INVALID_FRAME, "frame rejected");
+      enum wd_frame_status status =
+          wd_frame_parse(conn->in + off, conn->in_len - off, &frame, &used);
+      if (status == WD_FRAME_PARTIAL) break;
+      if (status == WD_FRAME_INVALID) {
+        conn_send_error(conn, 0, WD_ERR_INVALID_FRAME, "frame rejected");
         conn->closing = true;
         conn_arm(srv, conn);
         return 0;
@@ -567,9 +567,9 @@ static int conn_read(hx_server *srv, hx_conn *conn) {
   return 0;
 }
 
-static void sweep(hx_server *srv, uint64_t now) {
-  for (size_t i = 0; i < HX_MAX_CONNS; i++) {
-    hx_conn *conn = srv->conns[i];
+static void sweep(wd_server *srv, uint64_t now) {
+  for (size_t i = 0; i < WD_MAX_CONNS; i++) {
+    wd_conn *conn = srv->conns[i];
     if (conn == NULL) continue;
     if (!conn->hello && conn->deadline_ms != 0 && now >= conn->deadline_ms)
       conn_close(srv, conn);
@@ -578,10 +578,10 @@ static void sweep(hx_server *srv, uint64_t now) {
   }
 }
 
-static int next_timeout(hx_server *srv, uint64_t now) {
+static int next_timeout(wd_server *srv, uint64_t now) {
   uint64_t best = 0;
-  for (size_t i = 0; i < HX_MAX_CONNS; i++) {
-    hx_conn *conn = srv->conns[i];
+  for (size_t i = 0; i < WD_MAX_CONNS; i++) {
+    wd_conn *conn = srv->conns[i];
     if (conn == NULL || conn->hello || conn->deadline_ms == 0) continue;
     if (best == 0 || conn->deadline_ms < best) best = conn->deadline_ms;
   }
@@ -591,7 +591,7 @@ static int next_timeout(hx_server *srv, uint64_t now) {
   return delta > 60000 ? 60000 : (int)delta;
 }
 
-static void server_accept(hx_server *srv) {
+static void server_accept(wd_server *srv) {
   for (;;) {
     int fd = accept4(srv->listen_fd, NULL, NULL, SOCK_NONBLOCK | SOCK_CLOEXEC);
     if (fd < 0) {
@@ -603,14 +603,14 @@ static void server_accept(hx_server *srv) {
     bool ok = getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &cred, &len) == 0 &&
               cred.uid == geteuid();
     if (!ok) {
-      hx_conn temp;
+      wd_conn temp;
       memset(&temp, 0, sizeof(temp));
       temp.fd = fd;
-      conn_send_error(&temp, 0, HX_ERR_UNAUTHENTICATED, "peer uid mismatch");
+      conn_send_error(&temp, 0, WD_ERR_UNAUTHENTICATED, "peer uid mismatch");
       conn_flush(&temp);
-      hx_out *out = temp.out_head;
+      wd_out *out = temp.out_head;
       while (out != NULL) {
-        hx_out *next = out->next;
+        wd_out *next = out->next;
         free(out->data);
         free(out);
         out = next;
@@ -618,29 +618,29 @@ static void server_accept(hx_server *srv) {
       close(fd);
       continue;
     }
-    size_t slot = HX_MAX_CONNS;
-    for (size_t i = 0; i < HX_MAX_CONNS; i++)
+    size_t slot = WD_MAX_CONNS;
+    for (size_t i = 0; i < WD_MAX_CONNS; i++)
       if (srv->conns[i] == NULL) {
         slot = i;
         break;
       }
-    if (slot == HX_MAX_CONNS) {
+    if (slot == WD_MAX_CONNS) {
       close(fd);
       continue;
     }
-    hx_conn *conn = calloc(1, sizeof(*conn));
+    wd_conn *conn = calloc(1, sizeof(*conn));
     if (conn == NULL) {
       close(fd);
       continue;
     }
     conn->fd = fd;
-    conn->in = malloc(HX_FRAME_HEADER + HX_MAX_BODY);
+    conn->in = malloc(WD_FRAME_HEADER + WD_MAX_BODY);
     if (conn->in == NULL) {
       free(conn);
       close(fd);
       continue;
     }
-    conn->deadline_ms = hu_now_ms() + HX_HANDSHAKE_MS;
+    conn->deadline_ms = wu_now_ms() + WD_HANDSHAKE_MS;
     conn->next_sub = 1;
     srv->conns[slot] = conn;
     struct epoll_event ev;
@@ -655,7 +655,7 @@ static void server_accept(hx_server *srv) {
 }
 
 static int acquire_lock(const char *path) {
-  char *boot = hu_boot_id();
+  char *boot = wu_boot_id();
   if (boot == NULL) return -1;
   for (int attempt = 0; attempt < 2; attempt++) {
     int fd = open(path, O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC, 0600);
@@ -663,7 +663,7 @@ static int acquire_lock(const char *path) {
       char body[256];
       int n = snprintf(body, sizeof(body),
                        "{\"pid\":%ld,\"boot_id\":\"%s\",\"started_at\":%llu}\n",
-                       (long)getpid(), boot, (unsigned long long)hu_now_ms());
+                       (long)getpid(), boot, (unsigned long long)wu_now_ms());
       ssize_t written = write(fd, body, (size_t)n);
       close(fd);
       free(boot);
@@ -696,7 +696,7 @@ static int acquire_lock(const char *path) {
       same_boot = end != NULL && (size_t)(end - start) == strlen(boot) &&
                   memcmp(start, boot, strlen(boot)) == 0;
     }
-    if (same_boot && hu_pid_alive(pid)) {
+    if (same_boot && wu_pid_alive(pid)) {
       free(boot);
       errno = EEXIST;
       return -1;
@@ -745,8 +745,8 @@ static int setup_signals(void) {
   return signalfd(-1, &mask, SFD_NONBLOCK | SFD_CLOEXEC);
 }
 
-int hx_up_run(const hx_up_config *cfg) {
-  hx_server srv;
+int wd_up_run(const wd_up_config *cfg) {
+  wd_server srv;
   memset(&srv, 0, sizeof(srv));
   srv.listen_fd = -1;
   srv.epoll_fd = -1;
@@ -754,25 +754,25 @@ int hx_up_run(const hx_up_config *cfg) {
   srv.socket_path = strdup(cfg->socket_path);
   srv.state_dir = strdup(cfg->state_dir);
   if (srv.socket_path == NULL || srv.state_dir == NULL) goto cleanup;
-  if (hu_mkdir_p(srv.state_dir, 0700) != 0) {
-    fprintf(stderr, "harness: cannot create %s: %s\n", srv.state_dir,
+  if (wu_mkdir_p(srv.state_dir, 0700) != 0) {
+    fprintf(stderr, "ward: cannot create %s: %s\n", srv.state_dir,
             strerror(errno));
     goto cleanup;
   }
-  srv.lock_path = hu_path_join(srv.state_dir, "harness.lock");
+  srv.lock_path = wu_path_join(srv.state_dir, "ward.lock");
   if (srv.lock_path == NULL) goto cleanup;
   if (acquire_lock(srv.lock_path) != 0) {
-    fprintf(stderr, "harness: %s is already served by another daemon\n",
+    fprintf(stderr, "ward: %s is already served by another daemon\n",
             srv.state_dir);
     goto cleanup;
   }
   if (hs_open(&srv.store, srv.state_dir) != 0) {
-    fprintf(stderr, "harness: cannot open state directory\n");
+    fprintf(stderr, "ward: cannot open state directory\n");
     goto cleanup;
   }
   srv.listen_fd = setup_listener(srv.socket_path);
   if (srv.listen_fd < 0) {
-    fprintf(stderr, "harness: cannot listen on %s: %s\n", srv.socket_path,
+    fprintf(stderr, "ward: cannot listen on %s: %s\n", srv.socket_path,
             strerror(errno));
     goto cleanup;
   }
@@ -797,7 +797,7 @@ int hx_up_run(const hx_up_config *cfg) {
 
   struct epoll_event events[64];
   while (!srv.stop) {
-    uint64_t now = hu_now_ms();
+    uint64_t now = wu_now_ms();
     int timeout = next_timeout(&srv, now);
     int n = epoll_wait(srv.epoll_fd, events, 64, timeout);
     if (n < 0) {
@@ -816,7 +816,7 @@ int hx_up_run(const hx_up_config *cfg) {
           srv.stop = true;
         continue;
       }
-      hx_conn *conn = ptr;
+      wd_conn *conn = ptr;
       uint32_t mask = events[i].events;
       if (mask & (EPOLLERR | EPOLLHUP)) {
         conn_close(&srv, conn);
@@ -844,11 +844,11 @@ int hx_up_run(const hx_up_config *cfg) {
         }
       }
     }
-    sweep(&srv, hu_now_ms());
+    sweep(&srv, wu_now_ms());
   }
 
 cleanup:
-  for (size_t i = 0; i < HX_MAX_CONNS; i++)
+  for (size_t i = 0; i < WD_MAX_CONNS; i++)
     if (srv.conns[i] != NULL && srv.epoll_fd >= 0) conn_close(&srv, srv.conns[i]);
   if (srv.socket_path != NULL) unlink(srv.socket_path);
   if (srv.lock_path != NULL) unlink(srv.lock_path);

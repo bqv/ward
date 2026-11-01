@@ -22,18 +22,18 @@ typedef struct {
 
 static int load_record(void *ctx, const uint8_t *data, size_t len) {
   load_ctx *lc = ctx;
-  cbor_item_t *root = hx_decode(data, len);
+  cbor_item_t *root = wd_decode(data, len);
   if (root == NULL) return 1;
   int stop = 0;
   if (!lc->header) {
     uint64_t v = 0;
-    char *id = hx_text_copy(hx_get(root, "id"));
-    char *cwd = hx_text_copy(hx_get(root, "cwd"));
-    char *model = hx_text_copy(hx_get(root, "model"));
+    char *id = wd_text_copy(wd_get(root, "id"));
+    char *cwd = wd_text_copy(wd_get(root, "cwd"));
+    char *model = wd_text_copy(wd_get(root, "model"));
     uint64_t created = 0;
-    bool ok = hx_uint_of(hx_get(root, "v"), &v) && v == 1 && id != NULL &&
+    bool ok = wd_uint_of(wd_get(root, "v"), &v) && v == 1 && id != NULL &&
               cwd != NULL && model != NULL &&
-              hx_uint_of(hx_get(root, "created"), &created);
+              wd_uint_of(wd_get(root, "created"), &created);
     if (ok) {
       snprintf(lc->session.id, sizeof(lc->session.id), "%s", id);
       lc->session.cwd = cwd;
@@ -48,10 +48,10 @@ static int load_record(void *ctx, const uint8_t *data, size_t len) {
     free(id);
   } else {
     uint64_t seq = 0;
-    if (hx_uint_of(hx_get(root, "seq"), &seq) && seq > lc->session.last_seq)
+    if (wd_uint_of(wd_get(root, "seq"), &seq) && seq > lc->session.last_seq)
       lc->session.last_seq = seq;
   }
-  hx_free(root);
+  wd_free(root);
   return stop;
 }
 
@@ -68,9 +68,9 @@ static int session_load(const char *root, const char *id, hs_session **out) {
   hs_session *s = calloc(1, sizeof(*s));
   if (s == NULL) return -1;
   s->log.fd = -1;
-  s->dir = hu_path_join(root, id);
+  s->dir = wu_path_join(root, id);
   if (s->dir == NULL) goto fail;
-  s->log_path = hu_path_join(s->dir, "events.zst");
+  s->log_path = wu_path_join(s->dir, "events.zst");
   if (s->log_path == NULL) goto fail;
   load_ctx lc = {.header = false};
   lc.session.log.fd = -1;
@@ -114,13 +114,13 @@ int hs_open(hs_store *st, const char *root) {
   memset(st, 0, sizeof(*st));
   st->root = strdup(root);
   if (st->root == NULL) return -1;
-  if (hu_mkdir_p(st->root, 0700) != 0) return -1;
+  if (wu_mkdir_p(st->root, 0700) != 0) return -1;
   DIR *dir = opendir(st->root);
   if (dir == NULL) return -1;
   struct dirent *entry;
   while ((entry = readdir(dir)) != NULL) {
     if (entry->d_name[0] == '.') continue;
-    char *path = hu_path_join(st->root, entry->d_name);
+    char *path = wu_path_join(st->root, entry->d_name);
     if (path == NULL) continue;
     struct stat sb;
     bool is_dir = stat(path, &sb) == 0 && S_ISDIR(sb.st_mode);
@@ -130,7 +130,7 @@ int hs_open(hs_store *st, const char *root) {
     if (session_load(st->root, entry->d_name, &s) == 0) {
       store_push(st, s);
     } else {
-      fprintf(stderr, "harness: skipping unreadable session %s\n",
+      fprintf(stderr, "ward: skipping unreadable session %s\n",
               entry->d_name);
     }
   }
@@ -160,9 +160,9 @@ int hs_create(hs_store *st, const char *cwd, const char *model,
   if (s == NULL) return -1;
   s->log.fd = -1;
   for (int attempt = 0; attempt < 16; attempt++) {
-    if (hx_new_id(s->id) != 0) goto fail;
+    if (wd_new_id(s->id) != 0) goto fail;
     if (hs_find(st, s->id) != NULL) continue;
-    s->dir = hu_path_join(st->root, s->id);
+    s->dir = wu_path_join(st->root, s->id);
     if (s->dir == NULL) goto fail;
     if (mkdir(s->dir, 0700) == 0) break;
     free(s->dir);
@@ -170,26 +170,26 @@ int hs_create(hs_store *st, const char *cwd, const char *model,
     if (errno != EEXIST) goto fail;
   }
   if (s->dir == NULL) goto fail;
-  s->log_path = hu_path_join(s->dir, "events.zst");
+  s->log_path = wu_path_join(s->dir, "events.zst");
   if (s->log_path == NULL) goto fail;
   s->cwd = strdup(cwd);
   s->model = strdup(model != NULL ? model : "unset");
   if (s->cwd == NULL || s->model == NULL) goto fail;
-  s->created_ms = (int64_t)hu_now_ms();
+  s->created_ms = (int64_t)wu_now_ms();
   if (hlog_create(&s->log, s->log_path) != 0) goto fail;
-  cbor_item_t *header = hx_map(5);
-  hx_put(header, "v", hx_uint(1));
-  hx_put(header, "id", hx_text(s->id));
-  hx_put(header, "cwd", hx_text(s->cwd));
-  hx_put(header, "created", hx_uint((uint64_t)s->created_ms));
-  hx_put(header, "model", hx_text(s->model));
+  cbor_item_t *header = wd_map(5);
+  wd_put(header, "v", wd_uint(1));
+  wd_put(header, "id", wd_text(s->id));
+  wd_put(header, "cwd", wd_text(s->cwd));
+  wd_put(header, "created", wd_uint((uint64_t)s->created_ms));
+  wd_put(header, "model", wd_text(s->model));
   size_t len = 0;
-  uint8_t *bytes = hx_encode(header, &len);
+  uint8_t *bytes = wd_encode(header, &len);
   if (bytes == NULL) goto fail;
   int rc = hlog_append(&s->log, bytes, len);
   free(bytes);
   if (rc != 0) goto fail;
-  if (hu_fsync_dir(s->dir) != 0) goto fail;
+  if (wu_fsync_dir(s->dir) != 0) goto fail;
   store_push(st, s);
   if (st->len > 1) qsort(st->items, st->len, sizeof(*st->items), compare_sessions);
   *out = s;
@@ -200,24 +200,24 @@ fail:
 }
 
 cbor_item_t *hs_to_cbor(const hs_session *s) {
-  cbor_item_t *root = hx_map(5);
-  hx_put(root, "id", hx_text(s->id));
-  hx_put(root, "cwd", hx_text(s->cwd));
-  hx_put(root, "model", hx_text(s->model));
-  hx_put(root, "created", hx_uint((uint64_t)s->created_ms));
-  hx_put(root, "last_seq", hx_uint(s->last_seq));
+  cbor_item_t *root = wd_map(5);
+  wd_put(root, "id", wd_text(s->id));
+  wd_put(root, "cwd", wd_text(s->cwd));
+  wd_put(root, "model", wd_text(s->model));
+  wd_put(root, "created", wd_uint((uint64_t)s->created_ms));
+  wd_put(root, "last_seq", wd_uint(s->last_seq));
   return root;
 }
 
 int hs_emit(hs_session *s, const char *kind, cbor_item_t *payload,
             uint64_t *seq_out) {
   uint64_t seq = s->last_seq + 1;
-  cbor_item_t *record = hx_map(3);
-  hx_put(record, "seq", hx_uint(seq));
-  hx_put(record, "kind", hx_text(kind));
-  hx_put(record, "payload", payload != NULL ? payload : hx_map(0));
+  cbor_item_t *record = wd_map(3);
+  wd_put(record, "seq", wd_uint(seq));
+  wd_put(record, "kind", wd_text(kind));
+  wd_put(record, "payload", payload != NULL ? payload : wd_map(0));
   size_t len = 0;
-  uint8_t *bytes = hx_encode(record, &len);
+  uint8_t *bytes = wd_encode(record, &len);
   if (bytes == NULL) return -1;
   int rc = hlog_append(&s->log, bytes, len);
   free(bytes);
@@ -236,24 +236,24 @@ typedef struct {
 
 static int replay_record(void *ctx, const uint8_t *data, size_t len) {
   replay_ctx *rc = ctx;
-  cbor_item_t *root = hx_decode(data, len);
+  cbor_item_t *root = wd_decode(data, len);
   if (root == NULL) return 1;
   uint64_t seq = 0;
   int stop = 0;
-  if (hx_uint_of(hx_get(root, "seq"), &seq) && seq > rc->from) {
-    cbor_item_t *kind = hx_get(root, "kind");
-    cbor_item_t *payload = hx_get(root, "payload");
-    char *name = hx_text_copy(kind);
+  if (wd_uint_of(wd_get(root, "seq"), &seq) && seq > rc->from) {
+    cbor_item_t *kind = wd_get(root, "kind");
+    cbor_item_t *payload = wd_get(root, "payload");
+    char *name = wd_text_copy(kind);
     if (name != NULL && payload != NULL) {
       (void)cbor_incref(payload);
-      cbor_item_t *event = hx_event(name, payload);
+      cbor_item_t *event = wd_event(name, payload);
       stop = rc->cb(rc->ctx, seq, event) != 0;
-      hx_free(event);
+      wd_free(event);
       rc->emitted++;
     }
     free(name);
   }
-  hx_free(root);
+  wd_free(root);
   return stop;
 }
 

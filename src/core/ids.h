@@ -5,8 +5,8 @@
 #ifndef HARNESS_CORE_IDS_H
 #define HARNESS_CORE_IDS_H
 
-#define HX_ID_LEN 17
+#define WD_ID_LEN 17
 
-int hx_new_id(char out[HX_ID_LEN]);
+int wd_new_id(char out[WD_ID_LEN]);
 
 #endif

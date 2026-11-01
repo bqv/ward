@@ -32,7 +32,7 @@ Three tenants are on notice (tokenizer, judge, recall); the README says why.
 
 Done, in the README's own order: `meson.build` and options with libcbor and zstd;
 `docs/protocol.md`, frozen before the codec; `src/proto` frame and message codecs
-with a fuzz gate; `harness up` with handshake, `session.create/list/get/resume`
+with a fuzz gate; `ward up` with handshake, `session.create/list/get/resume`
 and replay; a CLI client; and the M0 gate, which measures round-trips rather
 than assuming them.
 
@@ -100,7 +100,7 @@ core change and therefore needs the authority argument above.
 
 `cbor_load` allocates from the lengths declared in the input, so a 41-byte frame
 claiming a 2^39-element array hangs the decoder with no syscall in sight. Every
-decode in core goes through `hx_decode`, which pre-scans with `scan_cbor`
+decode in core goes through `wd_decode`, which pre-scans with `scan_cbor`
 (bounds, depth, chunk types) before libcbor sees anything. Do not call
 `cbor_load` directly.
 

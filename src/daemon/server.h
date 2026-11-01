@@ -8,8 +8,8 @@
 typedef struct {
   const char *socket_path;
   const char *state_dir;
-} hx_up_config;
+} wd_up_config;
 
-int hx_up_run(const hx_up_config *cfg);
+int wd_up_run(const wd_up_config *cfg);
 
 #endif

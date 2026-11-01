@@ -13,7 +13,7 @@
 #include "core/log.h"
 
 typedef struct {
-  char id[HX_ID_LEN];
+  char id[WD_ID_LEN];
   char *dir;
   char *log_path;
   char *cwd;

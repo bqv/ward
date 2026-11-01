@@ -1,4 +1,4 @@
-# harness protocol
+# ward protocol
 
 Version 1, frozen at M0. This file is the wire contract: method names, event kinds, error
 names and the frame layout are a compatibility surface. Anything that changes them is a
@@ -29,11 +29,11 @@ certificates and tokens.
 
 Paths:
 
-- socket: `$XDG_RUNTIME_DIR/harness.sock`, else `/tmp/harness-$UID.sock`
-- state: `$XDG_STATE_HOME/harness`, else `~/.local/state/harness`
-- lock: `<state>/harness.lock`, holding `{pid, boot_id, started_at}`
+- socket: `$XDG_RUNTIME_DIR/ward.sock`, else `/tmp/ward-$UID.sock`
+- state: `$XDG_STATE_HOME/ward`, else `~/.local/state/ward`
+- lock: `<state>/ward.lock`, holding `{pid, boot_id, started_at}`
 
-One state directory is served by one daemon. A second `harness up` on the same state
+One state directory is served by one daemon. A second `ward up` on the same state
 directory refuses to start.
 
 ## Frame
@@ -60,8 +60,8 @@ CBOR, definitive lengths, text keys, no tags and no floating point. Unknown map 
 ignored, so a newer peer may add fields. Every structure below is a map.
 
 ```
-hello    {v: 1, client: "harness-cli/0.0.1", caps: ["events"]}
-welcome  {v: 1, server: "harness/0.0.1",
+hello    {v: 1, client: "ward-cli/0.0.1", caps: ["events"]}
+welcome  {v: 1, server: "ward/0.0.1",
           auth: {uid: <uint>, scope: "local"},
           limits: {body: 65536, inflight: 64}}
 request  {id: <uint>, method: <text>, params: <map>}

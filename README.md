@@ -1,4 +1,4 @@
-# harness
+# ward
 
 A coding agent harness with a small native core and a reloadable WebAssembly logic layer.
 Feature parity with DSH, minus the web UI, with a binary protocol instead of HTTP.
@@ -18,7 +18,7 @@ while the logic above it changes constantly and reloads without dropping a sessi
 ## Processes
 
 ```
-harness (core)          one process, C, epoll
+ward (core)          one process, C, epoll
  └─ session worker      one sandboxed process per active session, for exec/PTY
      └─ commands        ordinary children of the worker
  clients                n, over a Unix socket
@@ -116,11 +116,11 @@ Modules are core wasm modules targeting `wasm32-wasip1`, not components, at leas
 The component model and WIT still churn; the C ABI is stable and language-agnostic.
 
 ```
-harness_alloc(len) -> ptr
-harness_call(ptr, len) -> {ptr, len}                  // one message, CBOR in and out
-harness_state_export() -> {ptr, len}                  // serialised state, CBOR
-harness_state_import(ptr, len)                        // may fail
-harness_state_migrate(from_schema, ptr, len) -> {ptr, len}
+ward_alloc(len) -> ptr
+ward_call(ptr, len) -> {ptr, len}                  // one message, CBOR in and out
+ward_state_export() -> {ptr, len}                  // serialised state, CBOR
+ward_state_import(ptr, len)                        // may fail
+ward_state_migrate(from_schema, ptr, len) -> {ptr, len}
 ```
 
 Each module ships a manifest:
@@ -148,7 +148,7 @@ What runs in WASM, and therefore reloads without dropping a session:
 | `driver` | action interpreter, prompt assembly, time injection, compaction, plan gate | C++20 |
 | `provider` | request building, SSE parsing, reasoning blocks | C++20 |
 | `tools` | read, write, edit, grep, exec wrappers, ask | Zig |
-| `python` | embedded CPython kernel and harness bindings, lazy and per turn | C |
+| `python` | embedded CPython kernel and ward bindings, lazy and per turn | C |
 | `recall` | chunking, ranking and snippet shaping over the core-held index | Zig |
 | `code` | tree-sitter grammars, outline and symbol queries | Zig |
 | `policy` | which calls require approval, including judge escalation | Janet |
@@ -231,23 +231,23 @@ The judge is an escalation, not a dependency: with llamb down the rule verdict s
 existed.
 
 `python` is the eval surface: a C guest embedding CPython built for `wasm32-wasip1`, plus a
-`harness` extension module exposing `read`, `write`, `grep`, `exec`, `fetch`, `state` and
+`ward` extension module exposing `read`, `write`, `grep`, `exec`, `fetch`, `state` and
 `log`. Thin pure-Python shims map common stdlib calls onto those bindings — `open`,
 `subprocess.run`, `urllib.request`, `os.getenv` — with each divergence documented, so the
 model's usual idioms work without pretending the missing stdlib exists. Each of those is a host import, so approvals and audit apply inside the script
 rather than around it. The interpreter is **lazy and per turn**: nothing is instantiated
 until a turn actually calls it, and the instance is destroyed at the boundary. A live
-CPython heap cannot be exported, so anything that must outlive the turn goes through `harness.state`, which is the core's store and is
+CPython heap cannot be exported, so anything that must outlive the turn goes through `ward.state`, which is the core's store and is
 therefore migratable. Per-turn keeps sessions replayable and gives the module the same
 versioning and reload behaviour as every other guest.
 
-`recall` is the harness's memory, split the same way as judge. The core owns the index: vectors in a cache beside
+`recall` is the ward's memory, split the same way as judge. The core owns the index: vectors in a cache beside
 the session logs, and the incremental indexing job (session closed, `~/ref`
 file changed). The module does the text work — chunking, query shaping, ranking, snippets —
 and calls the embedder over a `net` grant scoped to llamb. That scoped `net` is its only
 capability; it never touches fs or the store directly. `recall.search(query, k, scope)` takes
 `sessions`, `notes` or `all`. During migration the old `dsh-recall` service is a source for
-DSH history; once the harness's own sessions are indexed it is no longer a dependency.
+DSH history; once the ward's own sessions are indexed it is no longer a dependency.
 
 `code` is tree-sitter, and deliberately not an IDE. The core owns a symbol index in a cache beside the
 session logs: `symbols(path, name, kind, line)` and `edges(from, to, kind)`,
@@ -284,7 +284,7 @@ covers the case that matters.
 
 The `python` module is the exception that proves the rule: a CPython heap cannot be exported,
 so its interpreter lives exactly one turn and has nothing to migrate. Persistent data belongs
-in `store`, reached from Python as `harness.state`, which the core versions like any other
+in `store`, reached from Python as `ward.state`, which the core versions like any other
 session record.
 
 ## Storage
@@ -294,7 +294,7 @@ Three tiers, and only the first is a database.
 **`config/*.toml`** — human-authored and diffable: the model list, defaults, judge endpoint,
 paths, policy location. Watched, validated, and reloaded on change.
 
-**SQLite (`harness.db`, WAL)** — app-mutable state that benefits from atomic row updates and
+**SQLite (`ward.db`, WAL)** — app-mutable state that benefits from atomic row updates and
 that you may still edit by hand: `settings` overrides, session labels (`title`, `pinned`,
 `archived`, `order`), the device registry, and module pins. It is
 validated on load, reloaded when `PRAGMA data_version` changes, and every accepted change emits
@@ -329,9 +329,9 @@ file atomically. SQLite is not involved. A parse failure keeps the last good lis
 reports it; the daemon never serves a half-parsed catalog.
 
 ```
-harness model add deepseek:deepseek-v4-flash --ctx 128k --price 0.04,2,8
-harness tool enable grep@2 --session <id>
-harness module reload loop@3
+ward model add deepseek:deepseek-v4-flash --ctx 128k --price 0.04,2,8
+ward tool enable grep@2 --session <id>
+ward module reload loop@3
 ```
 
 Composition is read at turn start and held for the turn. That is atomic by design: no tool
@@ -353,8 +353,8 @@ Auth is two layers:
 
 - **Transport.** A self-signed server certificate whose fingerprint is pinned at pairing.
   Devices authenticate with client certificates issued by a small CA in the config directory.
-  `harness device pair` mints a five-minute enrolment token and prints a QR carrying the token,
-  the fingerprint and the endpoint; `harness device revoke` writes the device to a CRL
+  `ward device pair` mints a five-minute enrolment token and prints a QR carrying the token,
+  the fingerprint and the endpoint; `ward device revoke` writes the device to a CRL
   consulted at handshake. Certificates carry a scope: `readonly`, `phone`, `desktop`.
 - **Session.** A token minted at `session.create`, bound to `(device, session, epoch)`, required
   on `prompt` and `approval.respond`. Approvals are single-use and expire.
@@ -485,7 +485,7 @@ Fences, in order of severity:
 
 Crash and restart:
 
-- The daemon writes `<state>/harness.lock` with `{pid, boot_id, started_at}`, `O_EXCL`
+- The daemon writes `<state>/ward.lock` with `{pid, boot_id, started_at}`, `O_EXCL`
   and stale-detected by boot id. Two daemons can never share a state directory.
 - Workers get `PDEATHSIG(SIGTERM)` and live in the session cgroup, so `cgroup.kill` reaps the
   tree. On daemon death a worker finishes the operation it is in, bounded by its own timeout,
@@ -505,7 +505,7 @@ Module upgrades are three separate mechanisms:
 Provenance: the registry refuses modules whose manifest is unsigned or whose hash is not in the
 allowlist, and installs only through `module.install`, never by scanning a directory.
 
-Module artifacts are one file. The signature lives in a wasm custom section, `harness.sig`,
+Module artifacts are one file. The signature lives in a wasm custom section, `ward.sig`,
 holding `{alg, key_id, sig}` over the SHA-256 of the module with that section removed; the
 artifact is then zstd-compressed, so `grep@2.wasm.zst` is what you copy and what the registry
 verifies after decompression. Custom sections are ignored by every wasm tool, so the bytes
@@ -554,7 +554,7 @@ profile at `-O2` with symbols stripped. Both are Meson options, not edited build
 ## Repo layout
 
 ```
-harness/
+ward/
 ├── src/core/        loop, sessions, capabilities, scheduler
 ├── src/proto/       frames, CBOR, method table
 ├── src/wasm/        registry, instance pool, migration, ABI
@@ -571,6 +571,6 @@ harness/
 1. `meson.build` and `meson_options.txt`, pinned deps, CI with the sanitizers.
 2. `docs/protocol.md`: freeze the frame table and method list before writing code.
 3. `src/proto`: frame codec, CBOR wrapper, fuzz harness.
-4. `harness up` serving the socket with handshake and `session.create`, plus a CLI client
+4. `ward up` serving the socket with handshake and `session.create`, plus a CLI client
    printing events.
 5. The SSE client, before anything touches a model.

@@ -37,10 +37,10 @@ static int read_full(int fd, void *buf, size_t len) {
 static int send_item(int fd, uint16_t type, uint64_t sub, uint64_t seq,
                      cbor_item_t *item) {
   size_t len = 0;
-  uint8_t *body = hx_encode(item, &len);
+  uint8_t *body = wd_encode(item, &len);
   if (body == NULL) return -1;
-  uint8_t header[HX_FRAME_HEADER];
-  hx_frame_header(header, type, sub, seq, (uint32_t)len);
+  uint8_t header[WD_FRAME_HEADER];
+  wd_frame_header(header, type, sub, seq, (uint32_t)len);
   int rc = 0;
   if (write(fd, header, sizeof(header)) != (ssize_t)sizeof(header)) rc = -1;
   if (rc == 0 && write(fd, body, len) != (ssize_t)len) rc = -1;
@@ -48,12 +48,12 @@ static int send_item(int fd, uint16_t type, uint64_t sub, uint64_t seq,
   return rc;
 }
 
-static cbor_item_t *next_frame(int fd, hx_frame *frame) {
-  uint8_t header[HX_FRAME_HEADER];
+static cbor_item_t *next_frame(int fd, wd_frame *frame) {
+  uint8_t header[WD_FRAME_HEADER];
   if (read_full(fd, header, sizeof(header)) != 0) return NULL;
   uint32_t len = (uint32_t)header[0] | ((uint32_t)header[1] << 8) |
                  ((uint32_t)header[2] << 16) | ((uint32_t)header[3] << 24);
-  if (len == 0 || len > HX_MAX_BODY) return NULL;
+  if (len == 0 || len > WD_MAX_BODY) return NULL;
   uint8_t *body = malloc(len);
   if (body == NULL) return NULL;
   if (read_full(fd, body, len) != 0) {
@@ -68,41 +68,41 @@ static cbor_item_t *next_frame(int fd, hx_frame *frame) {
     frame->seq |= (uint64_t)header[14 + i] << (8 * i);
   }
   frame->len = len;
-  cbor_item_t *root = hx_decode(body, len);
+  cbor_item_t *root = wd_decode(body, len);
   free(body);
   return root;
 }
 
 static int request(int fd, uint64_t id, const char *method, cbor_item_t *params,
                    cbor_item_t **result) {
-  if (send_item(fd, HX_FRAME_REQUEST, 0, 0, hx_request(id, method, params)) != 0)
+  if (send_item(fd, WD_FRAME_REQUEST, 0, 0, wd_request(id, method, params)) != 0)
     return -1;
   for (;;) {
-    hx_frame frame;
+    wd_frame frame;
     cbor_item_t *root = next_frame(fd, &frame);
     if (root == NULL) return -1;
-    if (frame.type == HX_FRAME_EVENT) {
-      hx_free(root);
+    if (frame.type == WD_FRAME_EVENT) {
+      wd_free(root);
       continue;
     }
     uint64_t got = 0;
     bool ok = false;
     cbor_item_t *value = NULL;
-    if (frame.type != HX_FRAME_RESPONSE ||
-        !hx_read_response(root, &got, &ok, &value) || got != id) {
-      hx_free(root);
+    if (frame.type != WD_FRAME_RESPONSE ||
+        !wd_read_response(root, &got, &ok, &value) || got != id) {
+      wd_free(root);
       return -1;
     }
     if (!ok) {
-      char *name = hx_text_copy(hx_get(value, "name"));
+      char *name = wd_text_copy(wd_get(value, "name"));
       fprintf(stderr, "gate: %s failed: %s\n", method,
               name != NULL ? name : "?");
       free(name);
-      hx_free(root);
+      wd_free(root);
       return -1;
     }
     (void)cbor_incref(value);
-    hx_free(root);
+    wd_free(root);
     *result = value;
     return 0;
   }
@@ -111,10 +111,10 @@ static int request(int fd, uint64_t id, const char *method, cbor_item_t *params,
 static int session_count(int fd) {
   static uint64_t next_id = 5000;
   cbor_item_t *result = NULL;
-  if (request(fd, next_id++, "session.list", hx_map(0), &result) != 0) return -1;
-  cbor_item_t *sessions = hx_get(result, "sessions");
+  if (request(fd, next_id++, "session.list", wd_map(0), &result) != 0) return -1;
+  cbor_item_t *sessions = wd_get(result, "sessions");
   int n = (int)cbor_array_size(sessions);
-  hx_free(result);
+  wd_free(result);
   return n;
 }
 
@@ -132,7 +132,7 @@ int main(void) {
     fprintf(stderr, "gate: HARNESS_BIN is not set\n");
     return 1;
   }
-  char root[] = "/tmp/harness-gate-XXXXXX";
+  char root[] = "/tmp/ward-gate-XXXXXX";
   if (mkdtemp(root) == NULL) return 1;
   char *state = malloc(strlen(root) + 8);
   char *sock = malloc(strlen(root) + 8);
@@ -148,7 +148,7 @@ int main(void) {
     close(ready[0]);
     dup2(ready[1], 1);
     close(ready[1]);
-    execl(bin, "harness", "up", "--socket", sock, "--state", state,
+    execl(bin, "ward", "up", "--socket", sock, "--state", state,
           (char *)NULL);
     _exit(127);
   }
@@ -180,88 +180,88 @@ int main(void) {
     return 1;
   }
 
-  if (send_item(fd, HX_FRAME_HELLO, 0, 0, hx_hello()) != 0) return 1;
-  hx_frame frame;
+  if (send_item(fd, WD_FRAME_HELLO, 0, 0, wd_hello()) != 0) return 1;
+  wd_frame frame;
   cbor_item_t *welcome = next_frame(fd, &frame);
   assert(welcome != NULL);
-  assert(frame.type == HX_FRAME_WELCOME);
+  assert(frame.type == WD_FRAME_WELCOME);
   unsigned version = 0;
   uint64_t uid = 0;
-  assert(hx_read_welcome(welcome, &version, &uid));
-  assert(version == HX_PROTOCOL_VERSION);
-  hx_free(welcome);
+  assert(wd_read_welcome(welcome, &version, &uid));
+  assert(version == WD_PROTOCOL_VERSION);
+  wd_free(welcome);
 
   cbor_item_t *created = NULL;
-  assert(request(fd, 1, "session.create", hx_map(0), &created) == 0);
-  cbor_item_t *session = hx_get(created, "session");
-  char *id = hx_text_copy(hx_get(session, "id"));
+  assert(request(fd, 1, "session.create", wd_map(0), &created) == 0);
+  cbor_item_t *session = wd_get(created, "session");
+  char *id = wd_text_copy(wd_get(session, "id"));
   assert(id != NULL && strlen(id) == 16);
-  hx_free(created);
+  wd_free(created);
   assert(session_count(fd) == 1);
 
-  cbor_item_t *params = hx_map(1);
-  hx_put(params, "id", hx_text(id));
+  cbor_item_t *params = wd_map(1);
+  wd_put(params, "id", wd_text(id));
   cbor_item_t *got = NULL;
   assert(request(fd, 2, "session.get", params, &got) == 0);
-  char *got_id = hx_text_copy(hx_get(hx_get(got, "session"), "id"));
+  char *got_id = wd_text_copy(wd_get(wd_get(got, "session"), "id"));
   assert(got_id != NULL && strcmp(got_id, id) == 0);
   free(got_id);
-  hx_free(got);
+  wd_free(got);
 
-  cbor_item_t *resume_params = hx_map(2);
-  hx_put(resume_params, "id", hx_text(id));
-  hx_put(resume_params, "from", hx_uint(0));
+  cbor_item_t *resume_params = wd_map(2);
+  wd_put(resume_params, "id", wd_text(id));
+  wd_put(resume_params, "from", wd_uint(0));
   cbor_item_t *resumed = NULL;
   assert(request(fd, 3, "session.resume", resume_params, &resumed) == 0);
   uint64_t sub = 0;
   uint64_t last_seq = 0;
-  assert(hx_uint_of(hx_get(resumed, "sub"), &sub) && sub >= 1);
-  assert(hx_uint_of(hx_get(resumed, "last_seq"), &last_seq) && last_seq >= 1);
-  hx_free(resumed);
+  assert(wd_uint_of(wd_get(resumed, "sub"), &sub) && sub >= 1);
+  assert(wd_uint_of(wd_get(resumed, "last_seq"), &last_seq) && last_seq >= 1);
+  wd_free(resumed);
 
   cbor_item_t *event = next_frame(fd, &frame);
-  assert(event != NULL && frame.type == HX_FRAME_EVENT && frame.sub == sub);
+  assert(event != NULL && frame.type == WD_FRAME_EVENT && frame.sub == sub);
   char *kind = NULL;
   cbor_item_t *payload = NULL;
-  assert(hx_read_event(event, &kind, &payload));
+  assert(wd_read_event(event, &kind, &payload));
   assert(strcmp(kind, "session.updated") == 0);
   assert(frame.seq == 1);
   free(kind);
-  hx_free(event);
+  wd_free(event);
   event = next_frame(fd, &frame);
-  assert(event != NULL && frame.type == HX_FRAME_EVENT);
-  assert(hx_read_event(event, &kind, &payload));
+  assert(event != NULL && frame.type == WD_FRAME_EVENT);
+  assert(wd_read_event(event, &kind, &payload));
   assert(strcmp(kind, "replay.end") == 0);
-  hx_free(event);
+  wd_free(event);
   free(kind);
 
-  cbor_item_t *replay = hx_map(2);
-  hx_put(replay, "replay", hx_uint(sub));
-  hx_put(replay, "from", hx_uint(0));
-  assert(send_item(fd, HX_FRAME_CONTROL, 0, 0, replay) == 0);
+  cbor_item_t *replay = wd_map(2);
+  wd_put(replay, "replay", wd_uint(sub));
+  wd_put(replay, "from", wd_uint(0));
+  assert(send_item(fd, WD_FRAME_CONTROL, 0, 0, replay) == 0);
   event = next_frame(fd, &frame);
-  assert(event != NULL && frame.type == HX_FRAME_EVENT && frame.seq == 1);
-  assert(hx_read_event(event, &kind, &payload));
+  assert(event != NULL && frame.type == WD_FRAME_EVENT && frame.seq == 1);
+  assert(wd_read_event(event, &kind, &payload));
   assert(strcmp(kind, "session.updated") == 0);
   free(kind);
-  hx_free(event);
+  wd_free(event);
   event = next_frame(fd, &frame);
-  assert(event != NULL && hx_read_event(event, &kind, &payload));
+  assert(event != NULL && wd_read_event(event, &kind, &payload));
   assert(strcmp(kind, "replay.end") == 0);
   assert(frame.seq == last_seq);
   free(kind);
-  hx_free(event);
+  wd_free(event);
 
-  cbor_item_t *dup = hx_map(0);
+  cbor_item_t *dup = wd_map(0);
   cbor_item_t *first_reply = NULL;
   assert(request(fd, 77, "session.create", dup, &first_reply) == 0);
-  char *dup_id = hx_text_copy(hx_get(hx_get(first_reply, "session"), "id"));
-  hx_free(first_reply);
+  char *dup_id = wd_text_copy(wd_get(wd_get(first_reply, "session"), "id"));
+  wd_free(first_reply);
   int before = session_count(fd);
   cbor_item_t *second_reply = NULL;
-  assert(request(fd, 77, "session.create", hx_map(0), &second_reply) == 0);
-  char *dup_id2 = hx_text_copy(hx_get(hx_get(second_reply, "session"), "id"));
-  hx_free(second_reply);
+  assert(request(fd, 77, "session.create", wd_map(0), &second_reply) == 0);
+  char *dup_id2 = wd_text_copy(wd_get(wd_get(second_reply, "session"), "id"));
+  wd_free(second_reply);
   assert(dup_id != NULL && dup_id2 != NULL && strcmp(dup_id, dup_id2) == 0);
   int after = session_count(fd);
   assert(before == 2 && after == 2);
@@ -273,9 +273,9 @@ int main(void) {
   clock_gettime(CLOCK_MONOTONIC, &start);
   for (int i = 0; i < rounds; i++) {
     cbor_item_t *result = NULL;
-    if (request(fd, 1000 + (uint64_t)i, "session.list", hx_map(0), &result) != 0)
+    if (request(fd, 1000 + (uint64_t)i, "session.list", wd_map(0), &result) != 0)
       return 1;
-    hx_free(result);
+    wd_free(result);
   }
   double elapsed = seconds_since(&start);
   double rate = (double)rounds / elapsed;

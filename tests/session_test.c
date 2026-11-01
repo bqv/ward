@@ -21,7 +21,7 @@ static int note(void *ctx, uint64_t seq, cbor_item_t *event) {
   seen *s = ctx;
   if (s->count < 8) {
     s->seqs[s->count] = seq;
-    char *kind = hx_text_copy(hx_get(event, "kind"));
+    char *kind = wd_text_copy(wd_get(event, "kind"));
     snprintf(s->kinds[s->count], sizeof(s->kinds[0]), "%s", kind ? kind : "?");
     free(kind);
   }
@@ -30,7 +30,7 @@ static int note(void *ctx, uint64_t seq, cbor_item_t *event) {
 }
 
 int main(void) {
-  char dir[] = "/tmp/harness-session-XXXXXX";
+  char dir[] = "/tmp/ward-session-XXXXXX";
   assert(mkdtemp(dir) != NULL);
 
   hs_store store;
@@ -49,8 +49,8 @@ int main(void) {
   assert(hs_find(&store, "nope") == NULL);
 
   uint64_t seq = 0;
-  cbor_item_t *payload = hx_map(1);
-  hx_put(payload, "session", hs_to_cbor(first));
+  cbor_item_t *payload = wd_map(1);
+  wd_put(payload, "session", hs_to_cbor(first));
   assert(hs_emit(first, "session.updated", payload, &seq) == 0);
   assert(seq == 1);
   assert(first->last_seq == 1);
@@ -65,7 +65,7 @@ int main(void) {
   assert(hs_replay(first, 1, note, &from_one) == 0);
   assert(from_one.count == 0);
 
-  char first_id[HX_ID_LEN];
+  char first_id[WD_ID_LEN];
   snprintf(first_id, sizeof(first_id), "%s", first->id);
   hs_close(&store);
 

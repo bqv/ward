@@ -8,13 +8,13 @@
 
 static const char hex[] = "0123456789abcdef";
 
-int hx_new_id(char out[HX_ID_LEN]) {
+int wd_new_id(char out[WD_ID_LEN]) {
   uint8_t raw[8];
-  if (hu_random_bytes(raw, sizeof(raw)) != 0) return -1;
+  if (wu_random_bytes(raw, sizeof(raw)) != 0) return -1;
   for (size_t i = 0; i < sizeof(raw); i++) {
     out[2 * i] = hex[raw[i] >> 4];
     out[2 * i + 1] = hex[raw[i] & 0x0f];
   }
-  out[HX_ID_LEN - 1] = '\0';
+  out[WD_ID_LEN - 1] = '\0';
   return 0;
 }

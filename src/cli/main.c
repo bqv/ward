@@ -24,11 +24,11 @@
 typedef struct {
   int fd;
   uint64_t next_id;
-} hx_client;
+} wd_client;
 
 static void usage(FILE *out) {
   fprintf(out,
-          "usage: harness <command>\n"
+          "usage: ward <command>\n"
           "\n"
           "  up      [--socket PATH] [--state DIR]\n"
           "  version\n"
@@ -37,7 +37,7 @@ static void usage(FILE *out) {
           "  session get    <id> [--json]\n"
           "  session resume <id> [--from SEQ] [--follow] [--json]\n"
           "\n"
-          "socket defaults to $XDG_RUNTIME_DIR/harness.sock or /tmp/harness-$UID.sock\n");
+          "socket defaults to $XDG_RUNTIME_DIR/ward.sock or /tmp/ward-$UID.sock\n");
 }
 
 static int read_full(int fd, void *buf, size_t len) {
@@ -56,7 +56,7 @@ static int read_full(int fd, void *buf, size_t len) {
 }
 
 static int write_full(int fd, const void *buf, size_t len) {
-  return hu_write_all(fd, buf, len);
+  return wu_write_all(fd, buf, len);
 }
 
 static char *socket_from_args(int argc, char **argv) {
@@ -65,22 +65,22 @@ static char *socket_from_args(int argc, char **argv) {
       return strdup(argv[i + 1]);
   const char *env = getenv("HARNESS_SOCKET");
   if (env != NULL && env[0] != '\0') return strdup(env);
-  return hu_default_socket_path();
+  return wu_default_socket_path();
 }
 
-static int client_connect(hx_client *client, const char *path) {
+static int client_connect(wd_client *client, const char *path) {
   struct sockaddr_un addr;
   memset(&addr, 0, sizeof(addr));
   addr.sun_family = AF_UNIX;
   if (strlen(path) >= sizeof(addr.sun_path)) {
-    fprintf(stderr, "harness: socket path too long\n");
+    fprintf(stderr, "ward: socket path too long\n");
     return -1;
   }
   snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", path);
   int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
   if (fd < 0) return -1;
   if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
-    fprintf(stderr, "harness: no daemon at %s: %s\n", path, strerror(errno));
+    fprintf(stderr, "ward: no daemon at %s: %s\n", path, strerror(errno));
     close(fd);
     return -1;
   }
@@ -89,24 +89,24 @@ static int client_connect(hx_client *client, const char *path) {
   return 0;
 }
 
-static int client_send_item(hx_client *client, cbor_item_t *item) {
+static int client_send_item(wd_client *client, cbor_item_t *item) {
   size_t len = 0;
-  uint8_t *body = hx_encode(item, &len);
+  uint8_t *body = wd_encode(item, &len);
   if (body == NULL) return -1;
-  uint8_t header[HX_FRAME_HEADER];
-  hx_frame_header(header, HX_FRAME_REQUEST, 0, 0, (uint32_t)len);
+  uint8_t header[WD_FRAME_HEADER];
+  wd_frame_header(header, WD_FRAME_REQUEST, 0, 0, (uint32_t)len);
   int rc = write_full(client->fd, header, sizeof(header));
   if (rc == 0) rc = write_full(client->fd, body, len);
   free(body);
   return rc;
 }
 
-static uint8_t *client_read_frame(int fd, hx_frame *frame) {
-  uint8_t header[HX_FRAME_HEADER];
+static uint8_t *client_read_frame(int fd, wd_frame *frame) {
+  uint8_t header[WD_FRAME_HEADER];
   if (read_full(fd, header, sizeof(header)) != 0) return NULL;
   uint32_t len = (uint32_t)header[0] | ((uint32_t)header[1] << 8) |
                  ((uint32_t)header[2] << 16) | ((uint32_t)header[3] << 24);
-  if (len == 0 || len > HX_MAX_BODY) return NULL;
+  if (len == 0 || len > WD_MAX_BODY) return NULL;
   uint8_t *body = malloc(len);
   if (body == NULL) return NULL;
   if (read_full(fd, body, len) != 0) {
@@ -125,79 +125,79 @@ static uint8_t *client_read_frame(int fd, hx_frame *frame) {
   return body;
 }
 
-static int client_handshake(hx_client *client) {
-  cbor_item_t *hello = hx_hello();
+static int client_handshake(wd_client *client) {
+  cbor_item_t *hello = wd_hello();
   size_t len = 0;
-  uint8_t *body = hx_encode(hello, &len);
+  uint8_t *body = wd_encode(hello, &len);
   if (body == NULL) return -1;
-  uint8_t header[HX_FRAME_HEADER];
-  hx_frame_header(header, HX_FRAME_HELLO, 0, 0, (uint32_t)len);
+  uint8_t header[WD_FRAME_HEADER];
+  wd_frame_header(header, WD_FRAME_HELLO, 0, 0, (uint32_t)len);
   int rc = write_full(client->fd, header, sizeof(header));
   if (rc == 0) rc = write_full(client->fd, body, len);
   free(body);
   if (rc != 0) return -1;
-  hx_frame frame;
+  wd_frame frame;
   uint8_t *frame_body = client_read_frame(client->fd, &frame);
   if (frame_body == NULL) return -1;
-  cbor_item_t *root = hx_decode(frame_body, frame.len);
+  cbor_item_t *root = wd_decode(frame_body, frame.len);
   free(frame_body);
   if (root == NULL) return -1;
   unsigned version = 0;
   uint64_t uid = 0;
-  int ok = frame.type == HX_FRAME_WELCOME &&
-           hx_read_welcome(root, &version, &uid) && version == HX_PROTOCOL_VERSION;
+  int ok = frame.type == WD_FRAME_WELCOME &&
+           wd_read_welcome(root, &version, &uid) && version == WD_PROTOCOL_VERSION;
   if (!ok) {
-    char *name = hx_text_copy(hx_get(root, "error"));
+    char *name = wd_text_copy(wd_get(root, "error"));
     if (name != NULL) free(name);
-    fprintf(stderr, "harness: handshake refused\n");
+    fprintf(stderr, "ward: handshake refused\n");
   }
-  hx_free(root);
+  wd_free(root);
   return ok ? 0 : -1;
 }
 
-static int client_request(hx_client *client, const char *method,
+static int client_request(wd_client *client, const char *method,
                           cbor_item_t *params, cbor_item_t **result) {
   uint64_t id = client->next_id++;
-  if (client_send_item(client, hx_request(id, method, params)) != 0) return -1;
+  if (client_send_item(client, wd_request(id, method, params)) != 0) return -1;
   for (;;) {
-    hx_frame frame;
+    wd_frame frame;
     uint8_t *body = client_read_frame(client->fd, &frame);
     if (body == NULL) return -1;
-    cbor_item_t *root = hx_decode(body, frame.len);
+    cbor_item_t *root = wd_decode(body, frame.len);
     free(body);
     if (root == NULL) return -1;
-    if (frame.type == HX_FRAME_EVENT) {
+    if (frame.type == WD_FRAME_EVENT) {
       char *kind = NULL;
       cbor_item_t *payload = NULL;
-      if (hx_read_event(root, &kind, &payload) && strcmp(kind, "replay.end") != 0)
+      if (wd_read_event(root, &kind, &payload) && strcmp(kind, "replay.end") != 0)
         continue;
       free(kind);
-      hx_free(root);
+      wd_free(root);
       continue;
     }
-    if (frame.type != HX_FRAME_RESPONSE) {
-      hx_free(root);
+    if (frame.type != WD_FRAME_RESPONSE) {
+      wd_free(root);
       return -1;
     }
     uint64_t got = 0;
     bool ok = false;
     cbor_item_t *value = NULL;
-    if (!hx_read_response(root, &got, &ok, &value) || got != id) {
-      hx_free(root);
+    if (!wd_read_response(root, &got, &ok, &value) || got != id) {
+      wd_free(root);
       return -1;
     }
     if (!ok) {
-      char *name = hx_text_copy(hx_get(value, "name"));
-      char *message = hx_text_copy(hx_get(value, "message"));
-      fprintf(stderr, "harness: %s: %s\n", name != NULL ? name : "error",
+      char *name = wd_text_copy(wd_get(value, "name"));
+      char *message = wd_text_copy(wd_get(value, "message"));
+      fprintf(stderr, "ward: %s: %s\n", name != NULL ? name : "error",
               message != NULL ? message : "");
       free(name);
       free(message);
-      hx_free(root);
+      wd_free(root);
       return -1;
     }
     (void)cbor_incref(value);
-    hx_free(root);
+    wd_free(root);
     *result = value;
     return 0;
   }
@@ -205,7 +205,7 @@ static int client_request(hx_client *client, const char *method,
 
 static void print_json(cbor_item_t *item) {
   char buffer[65536];
-  hx_json(item, buffer, sizeof(buffer));
+  wd_json(item, buffer, sizeof(buffer));
   printf("%s\n", buffer);
 }
 
@@ -219,11 +219,11 @@ static const char *format_time(int64_t ms) {
 }
 
 static void print_session_line(cbor_item_t *session) {
-  char *id = hx_text_copy(hx_get(session, "id"));
-  char *cwd = hx_text_copy(hx_get(session, "cwd"));
-  char *model = hx_text_copy(hx_get(session, "model"));
+  char *id = wd_text_copy(wd_get(session, "id"));
+  char *cwd = wd_text_copy(wd_get(session, "cwd"));
+  char *model = wd_text_copy(wd_get(session, "model"));
   uint64_t created = 0;
-  hx_uint_of(hx_get(session, "created"), &created);
+  wd_uint_of(wd_get(session, "created"), &created);
   printf("%-16s %s %-20s %s\n", id ? id : "?", format_time((int64_t)created),
          model ? model : "?", cwd ? cwd : "?");
   free(id);
@@ -243,22 +243,22 @@ static int do_up(int argc, char **argv) {
       usage(stdout);
       return 0;
     } else {
-      fprintf(stderr, "harness: unknown option %s\n", argv[i]);
+      fprintf(stderr, "ward: unknown option %s\n", argv[i]);
       return 2;
     }
   }
   char *socket_default = NULL;
   char *state_default = NULL;
   if (socket_path == NULL) {
-    socket_default = hu_default_socket_path();
+    socket_default = wu_default_socket_path();
     socket_path = socket_default;
   }
   if (state_dir == NULL) {
-    state_default = hu_default_state_dir();
+    state_default = wu_default_state_dir();
     state_dir = state_default;
   }
-  hx_up_config cfg = {.socket_path = socket_path, .state_dir = state_dir};
-  int rc = hx_up_run(&cfg);
+  wd_up_config cfg = {.socket_path = socket_path, .state_dir = state_dir};
+  int rc = wd_up_run(&cfg);
   free(socket_default);
   free(state_default);
   return rc == 0 ? 0 : 1;
@@ -297,14 +297,14 @@ static int command_session(int argc, char **argv) {
     } else if (argv[i][0] != '-') {
       id = argv[i];
     } else {
-      fprintf(stderr, "harness: unknown option %s\n", argv[i]);
+      fprintf(stderr, "ward: unknown option %s\n", argv[i]);
       return 2;
     }
   }
 
   char *path = socket_from_args(argc, argv);
   if (path == NULL) return 1;
-  hx_client client;
+  wd_client client;
   if (client_connect(&client, path) != 0) {
     free(path);
     return 1;
@@ -318,27 +318,27 @@ static int command_session(int argc, char **argv) {
   int rc = 1;
   cbor_item_t *result = NULL;
   if (strcmp(sub, "create") == 0) {
-    cbor_item_t *params = hx_map(2);
-    if (cwd != NULL) hx_put(params, "cwd", hx_text(cwd));
-    if (model != NULL) hx_put(params, "model", hx_text(model));
+    cbor_item_t *params = wd_map(2);
+    if (cwd != NULL) wd_put(params, "cwd", wd_text(cwd));
+    if (model != NULL) wd_put(params, "model", wd_text(model));
     if (client_request(&client, "session.create", params, &result) != 0) goto done;
     if (json) {
       print_json(result);
     } else {
-      cbor_item_t *session = hx_get(result, "session");
-      char *created = hx_text_copy(hx_get(session, "id"));
+      cbor_item_t *session = wd_get(result, "session");
+      char *created = wd_text_copy(wd_get(session, "id"));
       printf("created %s\n", created != NULL ? created : "?");
       free(created);
     }
     rc = 0;
   } else if (strcmp(sub, "list") == 0) {
-    cbor_item_t *params = hx_map(1);
-    hx_put(params, "limit", hx_uint(limit));
+    cbor_item_t *params = wd_map(1);
+    wd_put(params, "limit", wd_uint(limit));
     if (client_request(&client, "session.list", params, &result) != 0) goto done;
     if (json) {
       print_json(result);
     } else {
-      cbor_item_t *sessions = hx_get(result, "sessions");
+      cbor_item_t *sessions = wd_get(result, "sessions");
       size_t n = cbor_array_size(sessions);
       cbor_item_t **items = cbor_array_handle(sessions);
       for (size_t i = 0; i < n; i++) print_session_line(items[i]);
@@ -346,21 +346,21 @@ static int command_session(int argc, char **argv) {
     rc = 0;
   } else if (strcmp(sub, "get") == 0) {
     if (id == NULL) {
-      fprintf(stderr, "harness: session get needs an id\n");
+      fprintf(stderr, "ward: session get needs an id\n");
       goto done;
     }
-    cbor_item_t *params = hx_map(1);
-    hx_put(params, "id", hx_text(id));
+    cbor_item_t *params = wd_map(1);
+    wd_put(params, "id", wd_text(id));
     if (client_request(&client, "session.get", params, &result) != 0) goto done;
-    cbor_item_t *session = hx_get(result, "session");
+    cbor_item_t *session = wd_get(result, "session");
     if (json) {
       print_json(session);
     } else {
-      char *sid = hx_text_copy(hx_get(session, "id"));
-      char *scwd = hx_text_copy(hx_get(session, "cwd"));
-      char *smodel = hx_text_copy(hx_get(session, "model"));
+      char *sid = wd_text_copy(wd_get(session, "id"));
+      char *scwd = wd_text_copy(wd_get(session, "cwd"));
+      char *smodel = wd_text_copy(wd_get(session, "model"));
       uint64_t created = 0;
-      hx_uint_of(hx_get(session, "created"), &created);
+      wd_uint_of(wd_get(session, "created"), &created);
       printf("id      %s\ncwd     %s\nmodel   %s\ncreated %s\n", sid ? sid : "?",
              scwd ? scwd : "?", smodel ? smodel : "?",
              format_time((int64_t)created));
@@ -371,27 +371,27 @@ static int command_session(int argc, char **argv) {
     rc = 0;
   } else if (strcmp(sub, "resume") == 0) {
     if (id == NULL) {
-      fprintf(stderr, "harness: session resume needs an id\n");
+      fprintf(stderr, "ward: session resume needs an id\n");
       goto done;
     }
-    cbor_item_t *params = hx_map(2);
-    hx_put(params, "id", hx_text(id));
-    if (have_from) hx_put(params, "from", hx_uint(from));
+    cbor_item_t *params = wd_map(2);
+    wd_put(params, "id", wd_text(id));
+    if (have_from) wd_put(params, "from", wd_uint(from));
     if (client_request(&client, "session.resume", params, &result) != 0) goto done;
     if (json) print_json(result);
     for (;;) {
       struct pollfd pfd = {.fd = client.fd, .events = POLLIN};
       int ready = poll(&pfd, 1, follow || have_from ? 1000 : 0);
       if (ready <= 0) break;
-      hx_frame frame;
+      wd_frame frame;
       uint8_t *body = client_read_frame(client.fd, &frame);
       if (body == NULL) break;
-      cbor_item_t *root = hx_decode(body, frame.len);
+      cbor_item_t *root = wd_decode(body, frame.len);
       free(body);
       if (root == NULL) break;
       char *kind = NULL;
       cbor_item_t *payload = NULL;
-      if (frame.type == HX_FRAME_EVENT && hx_read_event(root, &kind, &payload)) {
+      if (frame.type == WD_FRAME_EVENT && wd_read_event(root, &kind, &payload)) {
         if (json) {
           print_json(root);
         } else {
@@ -400,21 +400,21 @@ static int command_session(int argc, char **argv) {
         }
         bool end = strcmp(kind, "replay.end") == 0;
         free(kind);
-        hx_free(root);
+        wd_free(root);
         if (end) break;
         continue;
       }
       free(kind);
-      hx_free(root);
+      wd_free(root);
       if (!follow) break;
     }
     rc = 0;
   } else {
-    fprintf(stderr, "harness: unknown session command %s\n", sub);
+    fprintf(stderr, "ward: unknown session command %s\n", sub);
     rc = 2;
   }
 done:
-  if (result != NULL) hx_free(result);
+  if (result != NULL) wd_free(result);
   close(client.fd);
   return rc;
 }
@@ -427,7 +427,7 @@ int main(int argc, char **argv) {
   const char *command = argv[1];
   if (strcmp(command, "up") == 0) return do_up(argc - 2, argv + 2);
   if (strcmp(command, "version") == 0) {
-    printf("harness %s protocol %d\n", HX_VERSION_TEXT, HX_PROTOCOL_VERSION);
+    printf("ward %s protocol %d\n", WD_VERSION_TEXT, WD_PROTOCOL_VERSION);
     return 0;
   }
   if (strcmp(command, "help") == 0 || strcmp(command, "--help") == 0) {
@@ -435,7 +435,7 @@ int main(int argc, char **argv) {
     return 0;
   }
   if (strcmp(command, "session") == 0) return command_session(argc - 2, argv + 2);
-  fprintf(stderr, "harness: unknown command %s\n", command);
+  fprintf(stderr, "ward: unknown command %s\n", command);
   usage(stderr);
   return 2;
 }
