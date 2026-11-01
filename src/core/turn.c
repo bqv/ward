@@ -62,6 +62,7 @@ struct wd_turn {
   bool remote_ok;
   char api_key[256];
   char *session_system;
+  char *head;
   wd_judge *judge_cache;
   cbor_item_t *judge_event;
   char *worker_root;
@@ -148,9 +149,16 @@ static wd_module *load_pinned(wd_engine *engine, const char *dir,
   return load_module(engine, dir, file, spec, err);
 }
 
+void wd_turn_set_head(wd_turn *turn, const char *text) {
+  if (turn == NULL) return;
+  free(turn->head);
+  turn->head = text != NULL && text[0] != '\0' ? strdup(text) : NULL;
+}
+
 void wd_turn_set_session_system(wd_turn *turn, const char *text) {
   if (turn == NULL) return;
   free(turn->session_system);
+  free(turn->head);
   turn->session_system = text != NULL && text[0] != '\0' ? strdup(text) : NULL;
 }
 
@@ -1734,16 +1742,21 @@ void wd_turn_set_context(wd_turn *turn, const char *text) {
 }
 
 
-static cbor_item_t *history_with_context(cbor_item_t *history,
-                                        const char *root,
-                                        const char *context,
-                                        const char *state_dir,
-                                        const char *session_system) {
-  wd_prompt *prompt =
-      wd_prompt_build(state_dir, root, context, session_system);
-  cbor_item_t *combined = wd_prompt_to_history(prompt, history);
-  wd_prompt_free(prompt);
-  if (combined == NULL) return history;
+static cbor_item_t *history_with_head(cbor_item_t *history, const char *head) {
+  if (head == NULL || head[0] == '\0') return history;
+  size_t extra = history != NULL ? cbor_array_size(history) : 0;
+  cbor_item_t *combined = wd_array(extra + 1);
+  cbor_item_t *entry = wd_map(2);
+  wd_put(entry, "role", wd_text("system"));
+  wd_put(entry, "text", wd_text(head));
+  bool pushed = cbor_array_push(combined, entry);
+  cbor_decref(&entry);
+  if (pushed && history != NULL) {
+    cbor_item_t **items = cbor_array_handle(history);
+    for (size_t i = 0; i < extra; i++) {
+      if (!cbor_array_push(combined, items[i])) break;
+    }
+  }
   if (history != NULL) wd_free(history);
   return combined;
 }
@@ -1751,9 +1764,7 @@ static cbor_item_t *history_with_context(cbor_item_t *history,
 int wd_turn_prompt(wd_turn *turn, const char *text, wd_turn_emit emit, void *ctx,
                    char **err) {
   turn->id = next_turn_id();
-  turn->history = history_with_context(turn->history, turn->root, turn->context,
-                                       wd_engine_state_dir(turn->engine),
-                                       turn->session_system);
+  turn->history = history_with_head(turn->history, turn->head);
   cbor_item_t *message = wd_map(2);
   if (message == NULL) {
     *err = strdup("out of memory");

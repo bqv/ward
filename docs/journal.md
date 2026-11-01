@@ -1277,3 +1277,20 @@ check when this was written.
 Worth recording from that attempt: a 6 KB user prompt does not overflow anything, it fails at the driver's
 512-byte text buffer and surfaces as a bare "turn failed". The error taxonomy covers provider failures only,
 so a local failure like that one is still silent. That is a gap in §6's reach, not in §2.
+
+Ninety-seventh: the head is frozen. On a session's first run the daemon assembles the sections once, renders
+them into one text with blank lines between, and appends a durable `session.head {text}`; every later turn
+sends that stored text as the single leading system message instead of re-reading `AGENTS.md` and rebuilding.
+
+`session.set_system` does not silently invalidate it — a session whose system text changes keeps its old head
+until something explicit resets it, which is deliberate: rewriting the head mid-session is exactly the
+re-prefill this work exists to avoid. Changing a frozen head wants a branch, and that is the same decision the
+note asks for around compaction.
+
+Measured: two prompts in one session now emit exactly one `session.head`, and the gate's rules assertion still
+passes because the head is built from the same sections that carried `[rules]` before.
+
+A wrong turn worth recording: the first attempt put the freeze in a spot that compiled but never ran, so the
+gate failed on `[rules]` and the live session had no head at all. The test caught it in one run; the fix was
+to place the block in `run_new` beside the model and system wiring, and to re-apply the head in the rebuild
+branch too.

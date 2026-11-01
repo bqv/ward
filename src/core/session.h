@@ -26,6 +26,7 @@ typedef struct {
   char *cwd;
   char *model;
   char *system;
+  char *head;
   int64_t created_ms;
   uint64_t last_seq;
   hlog log;
@@ -59,6 +60,7 @@ int wd_session_set_pins(wd_session *s, const wd_pin *pins, size_t n,
                        uint64_t *seq_out);
 int wd_session_set_model(wd_session *s, const char *model, uint64_t *seq_out);
 int wd_session_set_system(wd_session *s, const char *text, uint64_t *seq_out);
+int wd_session_set_head(wd_session *s, const char *text, uint64_t *seq_out);
 int wd_session_fork(wd_store *st, wd_session *parent, uint64_t upto, wd_session **out);
 int wd_session_checkpoint(wd_session *s, const char *label, uint64_t *seq_out);
 int wd_session_last_checkpoint(wd_session *s, uint64_t *seq_out);

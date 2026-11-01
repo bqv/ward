@@ -64,6 +64,7 @@ static void session_free(wd_session *s) {
   free(s->cwd);
   free(s->model);
   free(s->system);
+  free(s->head);
   free(s);
 }
 
@@ -71,6 +72,13 @@ static int apply_model(void *ctx, uint64_t seq, cbor_item_t *event) {
   wd_session *s = ctx;
   (void)seq;
   char *kind = wd_text_copy(wd_get(event, "kind"));
+  if (kind != NULL && strcmp(kind, "session.head") == 0) {
+    char *text = wd_text_copy(wd_get(wd_get(event, "payload"), "text"));
+    if (text != NULL) {
+      free(s->head);
+      s->head = text;
+    }
+  }
   if (kind != NULL && strcmp(kind, "session.system") == 0) {
     char *text = wd_text_copy(wd_get(wd_get(event, "payload"), "text"));
     if (text != NULL) {
@@ -465,6 +473,21 @@ int wd_session_set_model(wd_session *s, const char *model, uint64_t *seq_out) {
   }
   free(s->model);
   s->model = copy;
+  return 0;
+}
+
+int wd_session_set_head(wd_session *s, const char *text, uint64_t *seq_out) {
+  char *copy = text != NULL ? strdup(text) : NULL;
+  if (text != NULL && copy == NULL) return -1;
+  cbor_item_t *payload = wd_map(1);
+  wd_put(payload, "text", wd_text(text != NULL ? text : ""));
+  int rc = wd_session_emit(s, "session.head", payload, seq_out);
+  if (rc != 0) {
+    free(copy);
+    return -1;
+  }
+  free(s->head);
+  s->head = copy;
   return 0;
 }
 

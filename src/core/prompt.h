@@ -17,5 +17,6 @@ size_t wd_prompt_len(const wd_prompt *prompt);
 cbor_item_t *wd_prompt_to_cbor(const wd_prompt *prompt);
 cbor_item_t *wd_prompt_to_history(const wd_prompt *prompt,
                                  cbor_item_t *history);
+char *wd_prompt_render(const wd_prompt *prompt);
 
 #endif

@@ -2020,7 +2020,27 @@ static wd_run *run_new(wd_server *srv, wd_session *session, char **err) {
     free(run);
     return NULL;
   }
-  if (session->system != NULL) wd_turn_set_session_system(run->turn, session->system);
+  if (session->system != NULL)
+    wd_turn_set_session_system(run->turn, session->system);
+  if (session->head == NULL || session->head[0] == '\0') {
+    char attach_buf[512];
+    attachment_context(session, attach_buf, sizeof(attach_buf));
+    wd_prompt *prompt = wd_prompt_build(
+        srv->state_dir, session->cwd,
+        attach_buf[0] != '\0' ? attach_buf : NULL, session->system);
+    char *rendered = wd_prompt_render(prompt);
+    wd_prompt_free(prompt);
+    if (rendered != NULL) {
+      uint64_t head_seq = 0;
+      if (wd_session_set_head(session, rendered, &head_seq) == 0) {
+        cbor_item_t *head_event = wd_map(1);
+        wd_put(head_event, "text", wd_text(rendered));
+        conn_broadcast(srv, session, "session.head", head_seq, head_event);
+      }
+      free(rendered);
+    }
+  }
+  if (session->head != NULL) wd_turn_set_head(run->turn, session->head);
   const wd_model *chosen = wd_models_find(srv->models, session->model);
   if (chosen != NULL) {
     if (chosen->key != NULL)
@@ -2042,6 +2062,7 @@ static wd_run *run_new(wd_server *srv, wd_session *session, char **err) {
     }
     if (session->system != NULL)
       wd_turn_set_session_system(run->turn, session->system);
+    if (session->head != NULL) wd_turn_set_head(run->turn, session->head);
     if (chosen != NULL) {
       if (chosen->key != NULL)
         wd_turn_set_api_key(run->turn,

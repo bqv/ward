@@ -167,6 +167,27 @@ cbor_item_t *wd_prompt_to_cbor(const wd_prompt *prompt) {
   return array;
 }
 
+char *wd_prompt_render(const wd_prompt *prompt) {
+  size_t len = wd_prompt_len(prompt);
+  if (len == 0) return NULL;
+  size_t total = 1;
+  for (size_t i = 0; i < len; i++) total += strlen(prompt->items[i].text) + 2;
+  char *out = malloc(total);
+  if (out == NULL) return NULL;
+  size_t used = 0;
+  for (size_t i = 0; i < len; i++) {
+    size_t add = strlen(prompt->items[i].text);
+    memcpy(out + used, prompt->items[i].text, add);
+    used += add;
+    if (i + 1 < len) {
+      out[used++] = '\n';
+      out[used++] = '\n';
+    }
+  }
+  out[used] = '\0';
+  return out;
+}
+
 cbor_item_t *wd_prompt_to_history(const wd_prompt *prompt,
                                  cbor_item_t *history) {
   size_t len = wd_prompt_len(prompt);
