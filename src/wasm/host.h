@@ -54,6 +54,9 @@ int wd_instance_state_export(wd_instance *instance, uint8_t **out,
                              size_t *out_len, char **err);
 int wd_instance_state_import(wd_instance *instance, const uint8_t *in,
                              size_t in_len, char **err);
+int wd_state_import_migrated(wd_instance *to, const uint8_t *blob,
+                             size_t blob_len, uint32_t from_schema,
+                             uint32_t to_schema, char **err);
 int wd_state_handover(wd_instance *from, wd_instance *to,
                       uint32_t from_schema, uint32_t to_schema, char **err);
 int wd_instance_state_migrate(wd_instance *instance, uint32_t from_schema,

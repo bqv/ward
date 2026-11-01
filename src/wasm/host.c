@@ -668,6 +668,25 @@ int wd_instance_state_export(wd_instance *instance, uint8_t **out,
   return 0;
 }
 
+int wd_state_import_migrated(wd_instance *to, const uint8_t *blob,
+                             size_t blob_len, uint32_t from_schema,
+                             uint32_t to_schema, char **err) {
+  if (to == NULL) {
+    set_err(err, "no instance to import into");
+    return -1;
+  }
+  if (from_schema == to_schema)
+    return wd_instance_state_import(to, blob, blob_len, err);
+  uint8_t *migrated = NULL;
+  size_t migrated_len = 0;
+  if (wd_instance_state_migrate(to, from_schema, blob, blob_len, &migrated,
+                                &migrated_len, err) != 0)
+    return -1;
+  int rc = wd_instance_state_import(to, migrated, migrated_len, err);
+  free(migrated);
+  return rc;
+}
+
 int wd_state_handover(wd_instance *from, wd_instance *to,
                       uint32_t from_schema, uint32_t to_schema, char **err) {
   if (from == NULL || to == NULL) {

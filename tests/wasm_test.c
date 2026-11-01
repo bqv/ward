@@ -171,6 +171,12 @@ static void test_state(void) {
   assert(wd_state_handover(a, t, 1, 2, &err) == 0);
   static const uint8_t migrated_expected[] = {2, 's', 't', 'a', 't', 'e'};
   expect_call(t, get, 1, migrated_expected, sizeof(migrated_expected));
+  wd_instance *im = instantiate(module, GRANTED, 1, &calls, &err);
+  assert(im != NULL);
+  assert(wd_state_import_migrated(im, state, state_len, 1, 2, &err) == 0);
+  static const uint8_t migrated_only[] = {2, 's', 't', 'a', 't', 'e'};
+  expect_call(im, get, 1, migrated_only, sizeof(migrated_only));
+  wd_instance_free(im);
   wd_instance_free(h);
   wd_instance_free(t);
   free(state);

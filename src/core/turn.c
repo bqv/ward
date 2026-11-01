@@ -161,6 +161,16 @@ int wd_turn_state_export(wd_turn *turn, const char *name, uint8_t **blob,
   return 0;
 }
 
+int wd_turn_state_import(wd_turn *turn, const char *name, const uint8_t *blob,
+                         size_t len, uint32_t from_schema, uint32_t to_schema,
+                         char **err) {
+  if (turn == NULL || name == NULL || blob == NULL) return -1;
+  wd_instance *instance = instance_named(turn, name);
+  if (instance == NULL) return -1;
+  return wd_state_import_migrated(instance, blob, len, from_schema, to_schema,
+                                  err);
+}
+
 static int net_request(wd_turn *turn, const uint8_t *in, size_t in_len,
                        uint8_t **out, size_t *out_len, char **err) {
   if (turn->endpoint == NULL) {

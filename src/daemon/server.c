@@ -29,6 +29,7 @@
 #include "core/ids.h"
 #include "core/labels.h"
 #include "core/models.h"
+#include "core/manifest.h"
 #include "core/modstate.h"
 #include "core/pty.h"
 #include "core/registry.h"
@@ -175,6 +176,7 @@ static cbor_item_t *session_cbor(wd_server *srv, wd_session *session);
 static void handle_session_prompt(wd_server *srv, wd_conn *conn, uint64_t id,
                                   cbor_item_t *params);
 static wd_run *run_new(wd_server *srv, wd_session *session, char **err);
+static int apply_state(wd_server *srv, wd_session *session, wd_run *run);
 static wd_run *run_find(wd_server *srv, const char *session_id);
 static void run_free(wd_server *srv, wd_run *run);
 static void run_park(wd_server *srv, wd_run *run, int kind);
@@ -1846,6 +1848,16 @@ static wd_run *run_new(wd_server *srv, wd_session *session, char **err) {
     free(run);
     return NULL;
   }
+  if (apply_state(srv, session, run) != 0) {
+    wd_turn_free(run->turn);
+    run->turn = wd_turn_new_pinned(srv->engine, dir, session->cwd,
+                                   session->pins, session->pins_len, err);
+    if (run->turn == NULL) {
+      free(run);
+      return NULL;
+    }
+    (void)apply_state(srv, session, run);
+  }
   wd_turn_set_root(run->turn, session->cwd);
   char attach_buf[768];
   attachment_context(session, attach_buf, sizeof(attach_buf));
@@ -1900,6 +1912,58 @@ static void run_watch(wd_server *srv, wd_run *run, int kind) {
     *slot = fd;
     return;
   }
+}
+
+static uint32_t module_schema(wd_server *srv, const char *name) {
+  wd_manifest manifest;
+  char *err = NULL;
+  uint32_t schema = 1;
+  if (wd_manifest_load(srv->module_dir, name, &manifest, &err) == 0)
+    schema = manifest.state_schema;
+  free(err);
+  return schema;
+}
+
+static int apply_state(wd_server *srv, wd_session *session, wd_run *run) {
+  if (srv->state_dir == NULL || run->turn == NULL) return 0;
+  static const char *const names[] = {"engine",  "driver", "provider", "tools",
+                                      "policy", "skills", "judge"};
+  int failed = 0;
+  for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+    char stored[32];
+    if (wd_module_state_find(srv->state_dir, session->id, names[i], stored,
+                             sizeof(stored)) != 0)
+      continue;
+    const char *pinned = "1";
+    for (size_t p = 0; p < session->pins_len; p++)
+      if (strcmp(session->pins[p].name, names[i]) == 0)
+        pinned = session->pins[p].version;
+    if (strcmp(stored, pinned) == 0) continue;
+    char *path = wd_module_state_path(srv->state_dir, session->id, names[i],
+                                      stored);
+    uint8_t *blob = NULL;
+    size_t len = 0;
+    if (path == NULL || wd_module_state_read(path, &blob, &len) != 0) {
+      free(path);
+      free(blob);
+      continue;
+    }
+    uint32_t schema = module_schema(srv, names[i]);
+    char *err = NULL;
+    if (wd_turn_state_import(run->turn, names[i], blob, len, schema, schema,
+                             &err) == 0) {
+      remove(path);
+    } else {
+      uint64_t seq = 0;
+      wd_session_note_migration(session, names[i], stored, pinned,
+                                err != NULL ? err : "refused", &seq);
+      failed = 1;
+    }
+    free(err);
+    free(blob);
+    free(path);
+  }
+  return failed ? -1 : 0;
 }
 
 static void persist_state(wd_server *srv, wd_run *run) {

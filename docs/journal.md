@@ -898,3 +898,20 @@ answer, so the API's three outcomes are all measured even though no guest carrie
 The read side of the handover — finding a blob whose version differs from the pinned one and
 handing over into the turn's instance — is the next slice, and it is now the only one missing
 between a written blob and a moved session.
+
+Seventy-third: the join is closed at the daemon. At `run_new`, after the turn is built on the
+session's pins, `apply_state` looks for a stored blob for each module. Same version as the pin is
+left alone — the blob is already valid. A different version is read, imported into the turn's own
+instance, and the old file removed, because the next turn will export the new version's state
+afresh. A refusal records `session.migration_failed`, which returns the pin to the old version, and
+the turn is thrown away and rebuilt on that reverted pin: the run continues on the version that
+worked rather than failing the prompt.
+
+`wd_state_import_migrated` is the piece that made this small: the old instance is gone — its turn
+ended — so the handover no longer starts from a live instance but from the blob the old one left.
+Same schema imports directly; a different schema runs `ward_state_migrate` first. `wasm_test` drives
+it with the conformance guest and checks the migrated bytes.
+
+One limit is written down rather than hidden: the daemon passes the same schema in and out, because
+manifests are per module and not per version. Real migration between versions needs per-version
+manifests, and that is the next thing a stateful module will force.
