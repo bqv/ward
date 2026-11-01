@@ -26,6 +26,7 @@
 #include <unistd.h>
 
 #include "core/approval.h"
+#include "core/labels.h"
 #include "core/models.h"
 #include "core/session.h"
 #include "core/util.h"
@@ -95,6 +96,7 @@ typedef struct {
   wd_approvals *approvals;
   int worker_fd;
   wd_models *models;
+  wd_labels *labels;
   char *default_model;
   char turn_session[WD_ID_LEN];
   uint64_t turn_call;
@@ -112,6 +114,7 @@ static int token_worker;
 
 static void conn_close(wd_server *srv, wd_conn *conn);
 static void conn_release(wd_server *srv, wd_conn *conn);
+static cbor_item_t *session_cbor(wd_server *srv, hs_session *session);
 static void watch_worker(wd_server *srv);
 static void unwatch_worker(wd_server *srv);
 static int conn_arm(wd_server *srv, wd_conn *conn);
@@ -333,7 +336,7 @@ static void handle_session_fork(wd_server *srv, wd_conn *conn, uint64_t id,
   }
   free(session_id);
   cbor_item_t *result = wd_map(1);
-  wd_put(result, "session", hs_to_cbor(child));
+  wd_put(result, "session", session_cbor(srv, child));
   conn_send_cached(conn, id, wd_response_ok(id, result));
   conn_arm(srv, conn);
 }
@@ -371,11 +374,114 @@ static void handle_session_set_model(wd_server *srv, wd_conn *conn, uint64_t id,
   wd_put(event, "model", wd_text(name));
   conn_broadcast(srv, session, "session.model", seq, event);
   cbor_item_t *result = wd_map(1);
-  wd_put(result, "session", hs_to_cbor(session));
+  wd_put(result, "session", session_cbor(srv, session));
   conn_send_cached(conn, id, wd_response_ok(id, result));
   conn_arm(srv, conn);
   free(session_id);
   free(name);
+}
+
+static cbor_item_t *session_cbor(wd_server *srv, hs_session *session) {
+  wd_label label;
+  bool tagged = wd_labels_get(srv->labels, session->id, &label) == 0;
+  cbor_item_t *item = wd_map(tagged ? 9 : 5);
+  wd_put(item, "id", wd_text(session->id));
+  wd_put(item, "cwd", wd_text(session->cwd));
+  wd_put(item, "model", wd_text(session->model));
+  wd_put(item, "created", wd_uint((uint64_t)session->created_ms));
+  wd_put(item, "last_seq", wd_uint(session->last_seq));
+  if (tagged) {
+    wd_put(item, "name", wd_text(label.name));
+    wd_put(item, "archived", cbor_build_bool(label.archived));
+    wd_put(item, "pinned", cbor_build_bool(label.pinned));
+    wd_put(item, "updated_ms", wd_uint(label.updated_ms));
+  }
+  return item;
+}
+
+static void handle_session_label(wd_server *srv, wd_conn *conn, uint64_t id,
+                                 cbor_item_t *params, int kind) {
+  char *session_id = wd_text_copy(wd_get(params, "id"));
+  hs_session *session =
+      session_id != NULL ? hs_find(&srv->store, session_id) : NULL;
+  if (session == NULL) {
+    free(session_id);
+    conn_send_error(conn, id, WD_ERR_NOT_FOUND, "no such session");
+    conn_arm(srv, conn);
+    return;
+  }
+  int rc = 0;
+  if (kind == 0) {
+    char *name = wd_text_copy(wd_get(params, "name"));
+    if (name == NULL || strlen(name) >= WD_LABEL_NAME) {
+      free(name);
+      free(session_id);
+      conn_send_error(conn, id, WD_ERR_INVALID_PARAMS,
+                      "name must be 1..127 bytes");
+      conn_arm(srv, conn);
+      return;
+    }
+    rc = wd_labels_set_name(srv->labels, session_id, name);
+    free(name);
+  } else {
+    char *key = kind == 1 ? "archived" : "pinned";
+    bool value = false;
+    if (!wd_bool_of(wd_get(params, key), &value)) {
+      free(session_id);
+      conn_send_error(conn, id, WD_ERR_INVALID_PARAMS, "a boolean is required");
+      conn_arm(srv, conn);
+      return;
+    }
+    rc = kind == 1 ? wd_labels_set_archived(srv->labels, session_id, value)
+                   : wd_labels_set_pinned(srv->labels, session_id, value);
+  }
+  if (rc != 0) {
+    free(session_id);
+    respond_internal(srv, conn, id, "cannot write the session label");
+    return;
+  }
+  cbor_item_t *logged = wd_map(1);
+  wd_put(logged, "session", session_cbor(srv, session));
+  uint64_t seq = 0;
+  if (hs_emit(session, "session.updated", logged, &seq) == 0) {
+    cbor_item_t *event = wd_map(1);
+    wd_put(event, "session", session_cbor(srv, session));
+    conn_broadcast(srv, session, "session.updated", seq, event);
+  }
+  cbor_item_t *result = wd_map(1);
+  wd_put(result, "session", session_cbor(srv, session));
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+  free(session_id);
+}
+
+static void handle_session_search(wd_server *srv, wd_conn *conn, uint64_t id,
+                                  cbor_item_t *params) {
+  char *query = wd_text_copy(wd_get(params, "query"));
+  uint64_t limit = 50;
+  wd_uint_of(wd_get(params, "limit"), &limit);
+  wd_label *rows = NULL;
+  size_t count = 0;
+  int rc = wd_labels_search(srv->labels, query, (size_t)limit, &rows, &count);
+  free(query);
+  if (rc != 0) {
+    respond_internal(srv, conn, id, "cannot search the labels");
+    return;
+  }
+  cbor_item_t *list = wd_array(count);
+  for (size_t i = 0; i < count; i++) {
+    hs_session *session = hs_find(&srv->store, rows[i].id);
+    if (session == NULL) continue;
+    cbor_item_t *entry = session_cbor(srv, session);
+    bool pushed = cbor_array_push(list, entry);
+    cbor_decref(&entry);
+    if (!pushed) break;
+  }
+  free(rows);
+  cbor_item_t *result = wd_map(1);
+  wd_put(result, "sessions", list);
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
 }
 
 static void handle_session_create(wd_server *srv, wd_conn *conn, uint64_t id,
@@ -422,19 +528,20 @@ static void handle_session_create(wd_server *srv, wd_conn *conn, uint64_t id,
   free(cwd);
   free(model);
 
+  wd_labels_touch(srv->labels, session->id);
   cbor_item_t *logged = wd_map(1);
-  wd_put(logged, "session", hs_to_cbor(session));
+  wd_put(logged, "session", session_cbor(srv, session));
   uint64_t seq = 0;
   if (hs_emit(session, "session.updated", logged, &seq) != 0) {
     respond_internal(srv, conn, id, "cannot append session event");
     return;
   }
   cbor_item_t *event = wd_map(1);
-  wd_put(event, "session", hs_to_cbor(session));
+  wd_put(event, "session", session_cbor(srv, session));
   conn_broadcast(srv, session, "session.updated", seq, event);
 
   cbor_item_t *result = wd_map(1);
-  wd_put(result, "session", hs_to_cbor(session));
+  wd_put(result, "session", session_cbor(srv, session));
   conn_send_cached(conn, id, wd_response_ok(id, result));
   conn_arm(srv, conn);
 }
@@ -450,13 +557,30 @@ static void handle_session_list(wd_server *srv, wd_conn *conn, uint64_t id,
       return;
     }
   }
-  size_t count = srv->store.len < limit ? srv->store.len : (size_t)limit;
-  cbor_item_t *list = wd_array(count);
-  for (size_t i = 0; i < count; i++) {
-    cbor_item_t *entry = hs_to_cbor(srv->store.items[i]);
+  bool include_archived = false;
+  wd_bool_of(wd_get(params, "include_archived"), &include_archived);
+  size_t show = 0;
+  for (size_t i = 0; i < srv->store.len && show < limit; i++) {
+    const hs_session *session = srv->store.items[i];
+    wd_label label;
+    if (wd_labels_get(srv->labels, session->id, &label) == 0 &&
+        label.archived && !include_archived)
+      continue;
+    show++;
+  }
+  cbor_item_t *list = wd_array(show);
+  size_t pushed_count = 0;
+  for (size_t i = 0; i < srv->store.len && pushed_count < show; i++) {
+    hs_session *session = srv->store.items[i];
+    wd_label label;
+    if (wd_labels_get(srv->labels, session->id, &label) == 0 &&
+        label.archived && !include_archived)
+      continue;
+    cbor_item_t *entry = session_cbor(srv, session);
     bool pushed = cbor_array_push(list, entry);
-    (void)pushed;
     cbor_decref(&entry);
+    if (!pushed) break;
+    pushed_count++;
   }
   cbor_item_t *result = wd_map(1);
   wd_put(result, "sessions", list);
@@ -480,7 +604,7 @@ static void handle_session_get(wd_server *srv, wd_conn *conn, uint64_t id,
     return;
   }
   cbor_item_t *result = wd_map(1);
-  wd_put(result, "session", hs_to_cbor(session));
+  wd_put(result, "session", session_cbor(srv, session));
   conn_send_cached(conn, id, wd_response_ok(id, result));
   conn_arm(srv, conn);
 }
@@ -550,7 +674,7 @@ static void handle_session_resume(wd_server *srv, wd_conn *conn, uint64_t id,
   conn->subs_len++;
 
   cbor_item_t *result = wd_map(3);
-  wd_put(result, "session", hs_to_cbor(session));
+  wd_put(result, "session", session_cbor(srv, session));
   wd_put(result, "sub", wd_uint(sub));
   wd_put(result, "last_seq", wd_uint(session->last_seq));
   conn_send_cached(conn, id, wd_response_ok(id, result));
@@ -1059,6 +1183,14 @@ static void handle_request(wd_server *srv, wd_conn *conn, uint64_t id,
     handle_session_get(srv, conn, id, params);
   } else if (strcmp(method, "session.resume") == 0) {
     handle_session_resume(srv, conn, id, params);
+  } else if (strcmp(method, "session.rename") == 0) {
+    handle_session_label(srv, conn, id, params, 0);
+  } else if (strcmp(method, "session.archive") == 0) {
+    handle_session_label(srv, conn, id, params, 1);
+  } else if (strcmp(method, "session.pin") == 0) {
+    handle_session_label(srv, conn, id, params, 2);
+  } else if (strcmp(method, "session.search") == 0) {
+    handle_session_search(srv, conn, id, params);
   } else if (strcmp(method, "session.cancel") == 0) {
     handle_session_cancel(srv, conn, id, params);
   } else if (strcmp(method, "session.fork") == 0) {
@@ -1582,6 +1714,14 @@ int wd_up_run(const wd_up_config *cfg) {
   if (srv.signal_fd < 0) goto cleanup;
   srv.approvals = wd_approvals_new();
   if (srv.approvals == NULL) goto cleanup;
+  char *labels_err = NULL;
+  srv.labels = wd_labels_open(srv.state_dir, &labels_err);
+  if (srv.labels == NULL) {
+    fprintf(stderr, "ward: labels: %s\n",
+            labels_err != NULL ? labels_err : "cannot open labels.db");
+    free(labels_err);
+    goto cleanup;
+  }
   char *models_path = wd_models_path(srv.state_dir);
   if (models_path != NULL) {
     char *models_err = NULL;
@@ -1710,6 +1850,7 @@ cleanup:
   wd_pki_free(srv.pki);
   wd_approvals_free(srv.approvals);
   wd_models_free(srv.models);
+  wd_labels_free(srv.labels);
   free(srv.default_model);
   free(srv.quic_endpoint);
   hs_close(&srv.store);

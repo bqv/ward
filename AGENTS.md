@@ -174,6 +174,20 @@ Writing it found a small but real bug: `hs_open` scanned every directory under t
 root as a session, so `cache/` and `pki/` produced "skipping unreadable session" warnings on
 every start. It now treats only a 16-hex-character name as a session id.
 
+Fifteenth: session labels in SQLite. `src/core/labels.c` keeps `<state>/labels.db` with one
+row per session — `name`, `archived`, `pinned`, `updated_ms` — and the daemon serves
+`session.rename`, `session.pin`, `session.archive` and `session.search`, each appending a
+durable `session.updated` and answering the labelled session object. `session.list` hides
+archived sessions unless `include_archived` is set, and the session object now carries the
+label fields whenever a row exists. `ward session rename|pin|archive|search` are the client
+side, and `session list` prints the name and the pin/archive state.
+
+A trap worth more than the feature: **libcbor's definite containers are fixed-size.**
+Building a `wd_map(5)`, then adding four more keys, encodes five and silently drops the
+rest — the label fields vanished from every response while the daemon log showed them being
+read. `session_cbor` now builds the map at its exact size, and `session.list` counts first
+and then allocates the array, because the same bug bites `cbor_array_push` on a `wd_array(0)`.
+
 What is still missing from M1 is therefore the provider half of the asynchronous split.
 
 M0's acceptance is 1,000 round-trips/s over UDS and a fuzz-clean decoder. A

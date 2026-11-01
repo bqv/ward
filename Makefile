@@ -9,7 +9,7 @@ TEST_TIMEOUT ?= 300
 
 PREFIX ?= /usr/local
 
-PKG := libcbor libzstd wasmtime libcurl openssl libngtcp2 libngtcp2_crypto_ossl
+PKG := libcbor libzstd wasmtime libcurl openssl libngtcp2 libngtcp2_crypto_ossl sqlite3
 PKG_CFLAGS := $(shell pkg-config --cflags $(PKG))
 PKG_LIBS := $(shell pkg-config --libs $(PKG))
 
@@ -46,6 +46,7 @@ CORE_SRC := \
   src/core/turn.c \
   src/core/models.c \
   src/core/worker.c \
+  src/core/labels.c \
   src/core/proc.c \
   src/wasm/host.c \
   src/net/http.c \

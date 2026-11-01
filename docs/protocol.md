@@ -116,6 +116,19 @@ to `"unset"`. The id is minted by the daemon, never supplied by the client.
 
 **`session.get`** — params `{id: text}`. Returns `{session: <session>}`, or `not_found`.
 
+**`session.rename`** — params `{id, name}`. Stores the label in the label database and
+appends `session.updated` so subscribers see it. Answers `{session}`.
+
+**`session.pin`** / **`session.archive`** — params `{id, pinned}` / `{id, archived}`, both
+booleans. Same event and answer as rename. An archived session disappears from
+`session.list` unless `include_archived` is true.
+
+**`session.search`** — params `{query, limit?}`. Matches the name or the id, substring,
+case-insensitively, newest first. Answers `{sessions: [...]}`.
+
+A session object is `{id, cwd, model, created, last_seq}` plus, once it has a label row,
+`{name, archived, pinned, updated_ms}`.
+
 **`session.cancel`** — params `{id}`. Kills the command running for that session, if one is:
 the worker dies, the turn takes the failure as the tool result and finishes with `turn.end`.
 Answers `{cancelled: bool}`, false when nothing was running.

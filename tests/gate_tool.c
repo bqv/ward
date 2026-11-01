@@ -320,6 +320,62 @@ int main(void) {
   assert(!catalog_ok);
   wd_free(bad_create);
 
+  cbor_item_t *renamed = NULL;
+  cbor_item_t *rename_params = wd_map(2);
+  wd_put(rename_params, "id", wd_text(session));
+  wd_put(rename_params, "name", wd_text("gated session"));
+  assert(request(&a, a.next_id++, "session.rename", rename_params, &renamed,
+                 NULL) == 0);
+  wd_free(renamed);
+  cbor_item_t *named_get = NULL;
+  cbor_item_t *named_params = wd_map(1);
+  wd_put(named_params, "id", wd_text(session));
+  assert(request(&a, a.next_id++, "session.get", named_params, &named_get,
+                 NULL) == 0);
+  char *named = wd_text_copy(wd_get(wd_get(named_get, "session"), "name"));
+  assert(named != NULL && strcmp(named, "gated session") == 0);
+  free(named);
+  wd_free(named_get);
+
+  cbor_item_t *found = NULL;
+  cbor_item_t *search = wd_map(1);
+  wd_put(search, "query", wd_text("gated"));
+  assert(request(&a, a.next_id++, "session.search", search, &found, NULL) == 0);
+  assert(cbor_array_size(wd_get(found, "sessions")) == 1);
+  wd_free(found);
+
+  cbor_item_t *pinned = NULL;
+  cbor_item_t *pin = wd_map(2);
+  wd_put(pin, "id", wd_text(session));
+  wd_put(pin, "pinned", cbor_build_bool(true));
+  assert(request(&a, a.next_id++, "session.pin", pin, &pinned, NULL) == 0);
+  bool is_pinned = false;
+  assert(wd_bool_of(wd_get(wd_get(pinned, "session"), "pinned"), &is_pinned));
+  assert(is_pinned);
+  wd_free(pinned);
+
+  cbor_item_t *archived = NULL;
+  cbor_item_t *archive = wd_map(2);
+  wd_put(archive, "id", wd_text(session));
+  wd_put(archive, "archived", cbor_build_bool(true));
+  assert(request(&a, a.next_id++, "session.archive", archive, &archived, NULL) ==
+         0);
+  wd_free(archived);
+
+  cbor_item_t *visible = NULL;
+  assert(request(&a, a.next_id++, "session.list", wd_map(0), &visible, NULL) ==
+         0);
+  assert(cbor_array_size(wd_get(visible, "sessions")) == 0);
+  wd_free(visible);
+
+  cbor_item_t *visible_all = NULL;
+  cbor_item_t *list_params = wd_map(1);
+  wd_put(list_params, "include_archived", cbor_build_bool(true));
+  assert(request(&a, a.next_id++, "session.list", list_params, &visible_all,
+                 NULL) == 0);
+  assert(cbor_array_size(wd_get(visible_all, "sessions")) == 1);
+  wd_free(visible_all);
+
   cbor_item_t *resumed = NULL;
   cbor_item_t *resume = wd_map(1);
   wd_put(resume, "id", wd_text(session));

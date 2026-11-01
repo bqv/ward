@@ -39,6 +39,9 @@ static void usage(FILE *out) {
           "  session resume <id> [--from SEQ] [--follow] [--json]\n"
           "  session approve <id> --call N --epoch N (--allow|--deny)\n"
           "  session cancel <id>\n"
+          "  session rename <id> <name>\n"
+          "  session pin|archive <id> on|off\n"
+          "  session search <query> [--json]\n"
           "  session fork   <id> [--from SEQ] [--json]\n"
           "  session set-model <id> <model>\n"
           "  model list     [--json]\n"
@@ -232,13 +235,21 @@ static void print_session_line(cbor_item_t *session) {
   char *id = wd_text_copy(wd_get(session, "id"));
   char *cwd = wd_text_copy(wd_get(session, "cwd"));
   char *model = wd_text_copy(wd_get(session, "model"));
+  char *name = wd_text_copy(wd_get(session, "name"));
+  bool archived = false;
+  bool pinned = false;
+  wd_bool_of(wd_get(session, "archived"), &archived);
+  wd_bool_of(wd_get(session, "pinned"), &pinned);
   uint64_t created = 0;
   wd_uint_of(wd_get(session, "created"), &created);
-  printf("%-16s %s %-20s %s\n", id ? id : "?", format_time((int64_t)created),
-         model ? model : "?", cwd ? cwd : "?");
+  printf("%-16s %s %-20s %-20s %s%s%s\n", id ? id : "?",
+         format_time((int64_t)created), model ? model : "?",
+         name != NULL ? name : "", cwd ? cwd : "",
+         pinned ? " pinned" : "", archived ? " archived" : "");
   free(id);
   free(cwd);
   free(model);
+  free(name);
 }
 
 static int do_up(int argc, char **argv) {
@@ -436,6 +447,52 @@ static int command_session(int argc, char **argv) {
       free(kind);
       wd_free(root);
       if (!follow) break;
+    }
+    rc = 0;
+  } else if (strcmp(sub, "rename") == 0) {
+    if (id == NULL || text == NULL) {
+      fprintf(stderr, "ward: session rename needs an id and a name\n");
+      goto done;
+    }
+    cbor_item_t *params = wd_map(2);
+    wd_put(params, "id", wd_text(id));
+    wd_put(params, "name", wd_text(text));
+    if (client_request(&client, "session.rename", params, &result) != 0)
+      goto done;
+    printf("renamed %s\n", text);
+    rc = 0;
+  } else if (strcmp(sub, "pin") == 0 || strcmp(sub, "archive") == 0) {
+    if (id == NULL || text == NULL) {
+      fprintf(stderr, "ward: session %s needs an id and on or off\n", sub);
+      goto done;
+    }
+    bool on = strcmp(text, "on") == 0;
+    cbor_item_t *params = wd_map(2);
+    wd_put(params, "id", wd_text(id));
+    wd_put(params, strcmp(sub, "pin") == 0 ? "pinned" : "archived",
+           cbor_build_bool(on));
+    char method[32];
+    snprintf(method, sizeof(method), "session.%s", sub);
+    if (client_request(&client, method, params, &result) != 0) goto done;
+    printf("%s %s\n", sub, on ? "on" : "off");
+    rc = 0;
+  } else if (strcmp(sub, "search") == 0) {
+    if (text == NULL) {
+      fprintf(stderr, "ward: session search needs a query\n");
+      goto done;
+    }
+    cbor_item_t *params = wd_map(1);
+    wd_put(params, "query", wd_text(text));
+    if (client_request(&client, "session.search", params, &result) != 0)
+      goto done;
+    if (json) {
+      print_json(result);
+    } else {
+      cbor_item_t *sessions = wd_get(result, "sessions");
+      size_t n = cbor_array_size(sessions);
+      cbor_item_t **items = cbor_array_handle(sessions);
+      if (n == 0) printf("no matches\n");
+      for (size_t i = 0; i < n; i++) print_session_line(items[i]);
     }
     rc = 0;
   } else if (strcmp(sub, "cancel") == 0) {
