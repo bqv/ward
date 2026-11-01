@@ -130,6 +130,12 @@ fields stay the same when a real tokenizer replaces the estimate.
 **`stats.global`** — no params. The same counters summed over every session, plus
 `{sessions}`.
 
+**The plan gate.** A prompt beginning `/plan ` asks the policy module for `plan`, which answers
+`ask`, so the turn parks on an approval with that reason like any write. Allowing it emits the
+approved text and finishes the turn; denying it ends with the policy's refusal. The plan is a
+tool call in the ordinary shape — `plan.run` in core — so a client cannot tell an approved
+plan from an approved command.
+
 **`goal.set`** — params `{session, text}`. Appends a durable `goal.set {text}` and answers
 `{goal}`; `goal.clear` appends `goal.cleared`. The active goal is prepended to the history
 every later prompt sends, as a `system` message, so the model is reminded what the session is

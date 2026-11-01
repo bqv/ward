@@ -364,6 +364,15 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
       invoke_edit(out, path, find, replace, verdict == 2);
       return;
     }
+    if (text_prefix(text, "/plan ")) {
+      int verdict = policy_check("plan");
+      if (verdict == 0) {
+        emit_text_delta(out, "the policy denied the plan");
+        return;
+      }
+      invoke_tool(out, "plan", text + 6, text + 6, verdict == 2);
+      return;
+    }
     if (text_prefix(text, "/run ")) {
       int verdict = policy_check("exec");
       if (verdict == 0) {

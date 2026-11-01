@@ -44,6 +44,7 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
   if (wd_key_eq((const uint8_t *)tool, wd_len(tool), "exec")) decision = "ask";
   if (wd_key_eq((const uint8_t *)tool, wd_len(tool), "edit")) decision = "ask";
   if (wd_key_eq((const uint8_t *)tool, wd_len(tool), "grep")) decision = "allow";
+  if (wd_key_eq((const uint8_t *)tool, wd_len(tool), "plan")) decision = "ask";
 
   wd_w w;
   wd_w_init(&w, reply, REPLY_SIZE);

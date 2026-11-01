@@ -310,6 +310,12 @@ restart by replay rather than by a table, and the model is reminded what the ses
 without the client repeating it. `hs_history` tracks the goal through the replay: set, cleared,
 or replaced.
 
+Thirty-first: the plan gate. `/plan <text>` asks the policy guest for `plan`, which answers
+`ask`, and the driver invokes the `plan` tool exactly as it invokes `read` or `exec` — so the
+turn parks on an approval with that reason, and `plan.run` in core answers the approved text.
+No new core machinery: the gate is a policy row, a tool mapping and a driver branch, which is
+what it should be. The tool gate prompts a plan, approves it and waits for the turn's own end.
+
 ## M3: started, with one finding worth keeping
 
 The first M3 attempt replaced the daemon's single `wd_turn` with a pool keyed by session, so

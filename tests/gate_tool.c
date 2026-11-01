@@ -756,6 +756,30 @@ int main(void) {
                  NULL) == 0);
   wd_free(watch_b);
 
+  cbor_item_t *plan = NULL;
+  cbor_item_t *plan_prompt = wd_map(2);
+  wd_put(plan_prompt, "id", wd_text(session));
+  wd_put(plan_prompt, "text", wd_text("/plan write the docs first"));
+  assert(request(&a, a.next_id++, "session.prompt", plan_prompt, &plan, NULL) ==
+         0);
+  uint64_t plan_call = 0;
+  uint64_t plan_epoch = 0;
+  assert(wd_uint_of(wd_get(wd_get(plan, "approval"), "call"), &plan_call));
+  assert(wd_uint_of(wd_get(wd_get(plan, "approval"), "epoch"), &plan_epoch));
+  wd_free(plan);
+  cbor_item_t *plan_ok = NULL;
+  cbor_item_t *plan_respond = wd_map(4);
+  wd_put(plan_respond, "session", wd_text(session));
+  wd_put(plan_respond, "call", wd_uint(plan_call));
+  wd_put(plan_respond, "epoch", wd_uint(plan_epoch));
+  wd_put(plan_respond, "allow", cbor_build_bool(true));
+  assert(request(&a, a.next_id++, "approval.respond", plan_respond, &plan_ok,
+                 NULL) == 0);
+  wd_free(plan_ok);
+  cbor_item_t *plan_end = wait_turn_end(&a, last_turn);
+  assert(plan_end != NULL);
+  wd_free(plan_end);
+
   cbor_item_t *goal = NULL;
   cbor_item_t *goal_params = wd_map(2);
   wd_put(goal_params, "session", wd_text(session));

@@ -119,6 +119,11 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
     wd_w_map(&w, 1);
     wd_w_textz(&w, "command");
     wd_w_textz(&w, text);
+  } else if (text_is(tool, "plan")) {
+    call = "plan.run";
+    wd_w_map(&w, 1);
+    wd_w_textz(&w, "plan");
+    wd_w_textz(&w, text);
   }
   if (call == 0 || w.failed) return;
 

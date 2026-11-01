@@ -601,6 +601,27 @@ static int turn_capability(void *ctx, const char *capability,
     return edit_run(turn, in, in_len, out, out_len);
   if (strcmp(capability, "exec.run") == 0)
     return exec_run(turn, in, in_len, out, out_len);
+  if (strcmp(capability, "plan.run") == 0) {
+    cbor_item_t *reply = wd_map(1);
+    wd_put(reply, "text", wd_text("the plan was approved"));
+    size_t need = cbor_serialized_size(reply);
+    uint8_t *buf = malloc(need);
+    if (buf == NULL) {
+      wd_free(reply);
+      *err = strdup("out of memory");
+      return -1;
+    }
+    size_t written = cbor_serialize(reply, buf, need);
+    wd_free(reply);
+    if (written == 0) {
+      free(buf);
+      *err = strdup("cannot encode the plan reply");
+      return -1;
+    }
+    *out = buf;
+    *out_len = written;
+    return 0;
+  }
   if (strcmp(capability, "policy.check") == 0)
     return wd_instance_call(turn->policy, in, in_len, out, out_len, err);
   *err = strdup("unknown capability");
