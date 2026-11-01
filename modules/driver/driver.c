@@ -382,6 +382,49 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
       invoke_tool(out, "exec", text + 5, text + 5, verdict == 2);
       return;
     }
+    if (text[0] == '/') {
+      char command[64];
+      uint32_t k = 0;
+      uint32_t start = 1;
+      while (text[start] != ' ' && text[start] != '\0' && k + 1 < sizeof(command))
+        command[k++] = text[start++];
+      command[k] = '\0';
+      uint8_t payload[256];
+      wd_w w2;
+      wd_w_init(&w2, payload, sizeof(payload));
+      wd_w_map(&w2, 1);
+      wd_w_textz(&w2, "command");
+      wd_w_textz(&w2, command);
+      uint8_t answer[REPLY_SIZE];
+      uint32_t answer_len = 0;
+      if (!w2.failed && cap_call("skills.expand", payload, w2.at, answer,
+                                 &answer_len) == 0) {
+        wd_r r = {answer, answer_len, 0, 0};
+        uint32_t n = 0;
+        char handled[TEXT_SIZE];
+        char text_out[REPLY_SIZE];
+        handled[0] = '\0';
+        text_out[0] = '\0';
+        if (wd_r_map(&r, &n) == 0) {
+          for (uint32_t i = 0; i < n; i++) {
+            const uint8_t *kp = 0;
+            uint32_t kn = 0;
+            if (wd_r_text_ptr(&r, &kp, &kn) != 0) break;
+            if (wd_key_eq(kp, kn, "handled")) {
+              if (wd_r_text(&r, handled, sizeof(handled), 0) != 0) break;
+            } else if (wd_key_eq(kp, kn, "text")) {
+              if (wd_r_text(&r, text_out, sizeof(text_out), 0) != 0) break;
+            } else if (wd_r_skip(&r) != 0) {
+              break;
+            }
+          }
+          if (wd_key_eq((const uint8_t *)handled, wd_len(handled), "yes")) {
+            emit_text_delta(out, text_out);
+            return;
+          }
+        }
+      }
+    }
     char clock[TEXT_SIZE];
     char stamped[TEXT_SIZE];
     stamped[0] = '\0';

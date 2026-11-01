@@ -781,6 +781,23 @@ int main(void) {
   assert(plan_end != NULL);
   wd_free(plan_end);
 
+  cbor_item_t *slash = NULL;
+  cbor_item_t *slash_prompt = wd_map(2);
+  wd_put(slash_prompt, "id", wd_text(session));
+  wd_put(slash_prompt, "text", wd_text("/help"));
+  assert(request(&a, a.next_id++, "session.prompt", slash_prompt, &slash,
+                 NULL) == 0);
+  wd_free(slash);
+  cbor_item_t *slash_delta = wait_event(&a, "text.delta", NULL);
+  assert(slash_delta != NULL);
+  char *slash_text = wd_text_copy(wd_get(slash_delta, "text"));
+  assert(slash_text != NULL && strstr(slash_text, "skills:") != NULL);
+  free(slash_text);
+  wd_free(slash_delta);
+  cbor_item_t *slash_end = wait_turn_end(&a, last_turn);
+  assert(slash_end != NULL);
+  wd_free(slash_end);
+
   cbor_item_t *sched = NULL;
   cbor_item_t *sched_params = wd_map(3);
   wd_put(sched_params, "session", wd_text(session));

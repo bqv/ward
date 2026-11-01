@@ -361,6 +361,17 @@ one queued entry, and the third's turn ends once the others are done.
 M3 is complete: every row on its parity line is delivered, and the acceptance gate — two
 subagents concurrently under one session — passes in all three builds.
 
+Thirty-seventh: the skills guest. A prompt starting `/` that no tool command claims is offered
+to `modules/skills` through the `skills.expand` capability, which answers `{handled, text}`;
+`/help`, `/rules` and `/skills` are its own, and anything unhandled falls through to the
+model. The guest is pure — no imports — so the driver can reach it only through core, and the
+tool gate prompts `/help` and asserts the guest's answer arrives as a text delta.
+
+A first attempt also prepended the repository's AGENTS.md to every prompt. It was withdrawn:
+the driver's fixed 512-byte text buffer and 2 KiB reply cannot carry a real rules file, and a
+300-byte truncation is not "repo rules load". That row needs the rules delivered as a history
+system message with its own budget, which is the next M4 slice.
+
 ## M3: started, with one finding worth keeping
 
 The first M3 attempt replaced the daemon's single `wd_turn` with a pool keyed by session, so

@@ -33,6 +33,7 @@ struct wd_turn {
   wd_module *engine_module;
   wd_module *tools_module;
   wd_module *policy_module;
+  wd_module *skills_module;
   wd_instance *driver;
   wd_instance *provider;
   wd_instance *eng;
@@ -44,6 +45,7 @@ struct wd_turn {
   cbor_item_t *history;
   char *worker_root;
   wd_instance *policy;
+  wd_instance *skills;
   int pending_kind;
   cbor_item_t *parked;
   uint64_t park_call;
@@ -622,6 +624,8 @@ static int turn_capability(void *ctx, const char *capability,
     *out_len = written;
     return 0;
   }
+  if (strcmp(capability, "skills.expand") == 0)
+    return wd_instance_call(turn->skills, in, in_len, out, out_len, err);
   if (strcmp(capability, "policy.check") == 0)
     return wd_instance_call(turn->policy, in, in_len, out, out_len, err);
   *err = strdup("unknown capability");
@@ -644,12 +648,13 @@ wd_turn *wd_turn_new(wd_engine *engine, const char *module_dir, const char *root
                                                   : strdup(root);
   }
   static const char *const driver_caps[] = {"engine.call", "policy.check",
-                                            "clock.now"};
+                                            "clock.now", "skills.expand"};
   static const char *const provider_caps[] = {"net.request"};
   static const char *const no_caps[] = {NULL};
   wd_module_spec engine_spec = {"engine", no_caps, 0, true};
   wd_module_spec driver_spec = {"driver", driver_caps, 3, false};
   wd_module_spec policy_spec = {"policy", no_caps, 0, true};
+  wd_module_spec skills_spec = {"skills", no_caps, 0, true};
   wd_module_spec provider_spec = {"provider", provider_caps, 1, false};
   wd_module_spec tools_spec = {"tools", no_caps, 0, true};
 
@@ -668,6 +673,9 @@ wd_turn *wd_turn_new(wd_engine *engine, const char *module_dir, const char *root
   turn->policy_module = load_module(engine, module_dir, "policy.wasm",
                                     &policy_spec, err);
   if (turn->policy_module == NULL) goto fail;
+  turn->skills_module = load_module(engine, module_dir, "skills.wasm",
+                                    &skills_spec, err);
+  if (turn->skills_module == NULL) goto fail;
 
   turn->eng = wd_instance_new(turn->engine_module, no_caps, 0, &TURN_LIMITS,
                               NULL, NULL, err);
@@ -675,7 +683,7 @@ wd_turn *wd_turn_new(wd_engine *engine, const char *module_dir, const char *root
   turn->provider = wd_instance_new(turn->provider_module, provider_caps, 1,
                                    &TURN_LIMITS, turn_capability, turn, err);
   if (turn->provider == NULL) goto fail;
-  turn->driver = wd_instance_new(turn->driver_module, driver_caps, 3,
+  turn->driver = wd_instance_new(turn->driver_module, driver_caps, 4,
                                  &TURN_LIMITS, turn_capability, turn, err);
   if (turn->driver == NULL) goto fail;
   turn->tools = wd_instance_new(turn->tools_module, no_caps, 0, &TURN_LIMITS,
@@ -684,6 +692,9 @@ wd_turn *wd_turn_new(wd_engine *engine, const char *module_dir, const char *root
   turn->policy = wd_instance_new(turn->policy_module, no_caps, 0, &TURN_LIMITS,
                                  turn_capability, turn, err);
   if (turn->policy == NULL) goto fail;
+  turn->skills = wd_instance_new(turn->skills_module, no_caps, 0, &TURN_LIMITS,
+                                 turn_capability, turn, err);
+  if (turn->skills == NULL) goto fail;
   return turn;
 
 fail:
@@ -716,6 +727,8 @@ void wd_turn_free(wd_turn *turn) {
   wd_instance_free(turn->provider);
   wd_instance_free(turn->tools);
   wd_instance_free(turn->policy);
+  wd_instance_free(turn->skills);
+  wd_module_free(turn->skills_module);
   wd_instance_free(turn->eng);
   wd_module_free(turn->driver_module);
   wd_module_free(turn->provider_module);
@@ -1096,6 +1109,7 @@ static uint64_t next_turn_id(void) {
 }
 
 uint64_t wd_turn_id(wd_turn *turn) { return turn != NULL ? turn->id : 0; }
+
 
 int wd_turn_prompt(wd_turn *turn, const char *text, wd_turn_emit emit, void *ctx,
                    char **err) {

@@ -130,6 +130,10 @@ fields stay the same when a real tokenizer replaces the estimate.
 **`stats.global`** — no params. The same counters summed over every session, plus
 `{sessions}`.
 
+**Slash commands.** A prompt beginning `/` that no tool command claims is offered to the
+`skills` guest, which answers `{handled, text}`. `/help`, `/rules` and `/skills` are handled
+there today; anything unhandled falls through to the model as an ordinary prompt.
+
 **The plan gate.** A prompt beginning `/plan ` asks the policy module for `plan`, which answers
 `ask`, so the turn parks on an approval with that reason like any write. Allowing it emits the
 approved text and finishes the turn; denying it ends with the policy's refusal. The plan is a
