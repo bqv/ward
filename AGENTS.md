@@ -418,6 +418,18 @@ decides and core still only owns the process.
 One request per process is the M4 shape and the note says so: a persistent session with
 `initialize`/`tools/list`/`tools/call` and a framed transport is a later milestone's work.
 
+Forty-second: the rules row, narrowest reproduction. With `history_with_rules` back in and a
+`WARD_DEBUG` line in `process_action`, the daemon reports `provider history=yes size=1` for a
+turn whose root holds an AGENTS.md — so core builds the history correctly. A debug write
+inside the provider guest (`fd_write` on the `history` key) never fires, so the guest never
+sees the key even though core passed it two statements earlier. The gap is therefore in
+`provider_phase`/`invoke` encoding the merged payload, not in reading the file, not in the
+session history, and not in the provider's JSON writer.
+
+That is the whole of the next attempt: read `invoke()` and how it encodes a *borrowed* map,
+with `wd_encode`'s consume-on-encode rule in mind. The diagnostics are reverted again; the
+finding is the deliverable.
+
 ## M3: started, with one finding worth keeping
 
 The first M3 attempt replaced the daemon's single `wd_turn` with a pool keyed by session, so
