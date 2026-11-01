@@ -24,6 +24,8 @@ typedef int (*wd_turn_emit)(void *ctx, const char *event, cbor_item_t *payload,
 
 wd_turn *wd_turn_new(wd_engine *engine, const char *module_dir, const char *root,
                      char **err);
+void wd_turn_set_model_name(wd_turn *turn, const char *name);
+void wd_turn_set_endpoint(wd_turn *turn, const char *endpoint);
 bool wd_turn_trapped(wd_turn *turn, char *name, size_t cap);
 int wd_turn_state_export(wd_turn *turn, const char *name, uint8_t **blob,
                          size_t *len, char **err);

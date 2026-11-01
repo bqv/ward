@@ -1848,6 +1848,11 @@ static wd_run *run_new(wd_server *srv, wd_session *session, char **err) {
     free(run);
     return NULL;
   }
+  const wd_model *chosen = wd_models_find(srv->models, session->model);
+  if (chosen != NULL) {
+    if (chosen->model != NULL) wd_turn_set_model_name(run->turn, chosen->model);
+    if (chosen->endpoint != NULL) wd_turn_set_endpoint(run->turn, chosen->endpoint);
+  }
   if (apply_state(srv, session, run) != 0) {
     wd_turn_free(run->turn);
     run->turn = wd_turn_new_pinned(srv->engine, dir, session->cwd,
@@ -1855,6 +1860,12 @@ static wd_run *run_new(wd_server *srv, wd_session *session, char **err) {
     if (run->turn == NULL) {
       free(run);
       return NULL;
+    }
+    if (chosen != NULL) {
+      if (chosen->model != NULL)
+        wd_turn_set_model_name(run->turn, chosen->model);
+      if (chosen->endpoint != NULL)
+        wd_turn_set_endpoint(run->turn, chosen->endpoint);
     }
     (void)apply_state(srv, session, run);
   }

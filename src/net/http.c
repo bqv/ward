@@ -31,6 +31,17 @@ static size_t write_cb(char *data, size_t size, size_t nmemb, void *userdata) {
   return n;
 }
 
+char *wd_http_auth_header(const char *url) {
+  const char *api_key = getenv("WARD_API_KEY");
+  if (api_key == NULL || api_key[0] == '\0') return NULL;
+  if (url == NULL || wd_http_loopback(url)) return NULL;
+  size_t need = strlen(api_key) + 32;
+  char *line = malloc(need);
+  if (line == NULL) return NULL;
+  snprintf(line, need, "Authorization: Bearer %s", api_key);
+  return line;
+}
+
 bool wd_http_loopback(const char *url) {
   if (url == NULL) return false;
   const char *prefix = "http://127.0.0.1";
@@ -39,7 +50,13 @@ bool wd_http_loopback(const char *url) {
     return true;
   prefix = "http://localhost";
   n = strlen(prefix);
-  return strncmp(url, prefix, n) == 0 && (url[n] == ':' || url[n] == '/');
+  if (strncmp(url, prefix, n) == 0 && (url[n] == ':' || url[n] == '/'))
+    return true;
+  prefix = "http://[::1]";
+  n = strlen(prefix);
+  if (strncmp(url, prefix, n) == 0 && (url[n] == ':' || url[n] == '/'))
+    return true;
+  return false;
 }
 
 int wd_http_request(const char *url, const char *method, const char *body,
@@ -63,15 +80,10 @@ int wd_http_request(const char *url, const char *method, const char *body,
   struct curl_slist *headers = NULL;
   headers = curl_slist_append(headers, "Content-Type: application/json");
   headers = curl_slist_append(headers, "Accept: text/event-stream");
-  const char *api_key = getenv("WARD_API_KEY");
-  if (api_key != NULL && api_key[0] != '\0') {
-    size_t need = strlen(api_key) + 32;
-    char *line = malloc(need);
-    if (line != NULL) {
-      snprintf(line, need, "Authorization: Bearer %s", api_key);
-      headers = curl_slist_append(headers, line);
-      free(line);
-    }
+  char *auth = wd_http_auth_header(url);
+  if (auth != NULL) {
+    headers = curl_slist_append(headers, auth);
+    free(auth);
   }
   curl_easy_setopt(handle, CURLOPT_URL, url);
   curl_easy_setopt(handle, CURLOPT_FOLLOWLOCATION, 0L);

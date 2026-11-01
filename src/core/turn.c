@@ -57,6 +57,7 @@ struct wd_turn {
   wd_module *judge_module;
   wd_module *code_module;
   char trapped[WD_MAX_MODULE_NAME];
+  char model_name[128];
   wd_judge *judge_cache;
   cbor_item_t *judge_event;
   char *worker_root;
@@ -141,6 +142,18 @@ static wd_module *load_pinned(wd_engine *engine, const char *dir,
     break;
   }
   return load_module(engine, dir, file, spec, err);
+}
+
+void wd_turn_set_model_name(wd_turn *turn, const char *name) {
+  if (turn == NULL) return;
+  snprintf(turn->model_name, sizeof(turn->model_name), "%s",
+           name != NULL ? name : "");
+}
+
+void wd_turn_set_endpoint(wd_turn *turn, const char *endpoint) {
+  if (turn == NULL) return;
+  free(turn->endpoint);
+  turn->endpoint = endpoint != NULL ? strdup(endpoint) : NULL;
 }
 
 static const char *module_name_of(wd_turn *turn, wd_instance *instance) {
@@ -1543,18 +1556,19 @@ static int process_action(wd_turn *turn, cbor_item_t *action, wd_turn_emit emit,
       rc = -1;
     } else if (instance == turn->provider) {
       cbor_item_t *request = NULL;
+      char *text = wd_text_copy(wd_get(payload, "prompt"));
+      bool named = turn->model_name[0] != '\0';
+      cbor_item_t *merged =
+          wd_map(1 + (turn->history != NULL ? 1 : 0) + (named ? 1 : 0));
+      wd_put(merged, "prompt", wd_text(text != NULL ? text : ""));
+      free(text);
       if (turn->history != NULL) {
-        char *text = wd_text_copy(wd_get(payload, "prompt"));
-        cbor_item_t *merged = wd_map(2);
-        wd_put(merged, "prompt", wd_text(text != NULL ? text : ""));
-        free(text);
         cbor_item_t *shared = turn->history;
         if (cbor_incref(shared)) wd_put(merged, "history", shared);
-        rc = provider_phase(turn, merged, &request, err);
-        wd_free(merged);
-      } else {
-        rc = provider_phase(turn, payload, &request, err);
       }
+      if (named) wd_put(merged, "model", wd_text(turn->model_name));
+      rc = provider_phase(turn, merged, &request, err);
+      wd_free(merged);
       if (rc == 0) {
         int parked = net_submit(turn, request, err);
         wd_free(request);

@@ -1091,3 +1091,24 @@ whole authority layer — core, proto, wasm, net and daemon — which is 13,749 
 That is well past eight thousand and has been for a while. `src/daemon/server.c` alone is 3,330. This
 is recorded rather than argued away: the next milestone's first work is either deletion or a stated
 case for authority.
+
+Eighty-sixth: two models, and the bugs a live one found. A model entry may now name an `endpoint`, and the
+request names its model and bounds its length (`max_tokens`, 1024 by default) — the router will otherwise
+generate until it feels like stopping, which for a 1.8B is 8191 tokens and 64 s of GPU. The bearer token
+is only attached to non-loopback URLs, so a local router never receives the cloud key.
+
+The live run found three faults that no unit test had:
+
+- the request body was malformed — a stranded `",\"stream\":true` fragment after `"messages":[` — because a
+  string edit left the old fragment in place. The provider test passed anyway, because it only asserted
+  substrings. It now asserts the body has exactly one `"messages"` key and is brace-balanced.
+- the session's model name was never put on the turn, so the router was asked for `"local"`.
+- `max_tokens` was absent, so a small model streamed until it hit the context limit.
+
+Verified end to end: `session resume <id> --from 1 --follow` after a prompt shows
+`text.delta {"text":"Hello from Qwen! How can I assist you today?"}` — the local Qwen1.5-1.8B on llamb,
+answering through ward with no cloud call.
+
+Still open: `ward session prompt` and `ward -p` do not stream deltas; they return before the turn ends, so
+the text is invisible unless the session is replayed. The daemon emits it correctly — this is the CLI's
+subscription gap, and it is the next thing to fix.

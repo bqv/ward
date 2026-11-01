@@ -15,6 +15,7 @@ typedef struct {
   char *context;
   char *tags;
   char *price;
+  char *endpoint;
 } wd_model;
 
 typedef struct wd_models wd_models;

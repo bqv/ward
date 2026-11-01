@@ -53,8 +53,9 @@ int main(void) {
   assert(cbor_array_push(history, entry));
   cbor_decref(&entry);
 
-  cbor_item_t *payload = wd_map(2);
+  cbor_item_t *payload = wd_map(3);
   wd_put(payload, "prompt", wd_text("hello"));
+  wd_put(payload, "model", wd_text("qwen1_5-1_8b-chat-q4_k_m"));
   wd_put(payload, "history", history);
 
   size_t in_len = 0;
@@ -73,8 +74,46 @@ int main(void) {
   assert(body != NULL);
   assert(strstr(body, "be kind to the tools") != NULL);
   assert(strstr(body, "hello") != NULL);
+  assert(strstr(body, "\"model\":\"qwen1_5-1_8b-chat-q4_k_m\"") != NULL);
+  assert(strstr(body, "\"max_tokens\":1024") != NULL);
+  {
+    int messages = 0;
+    for (const char *at = body; (at = strstr(at, "\"messages\"")) != NULL; at++)
+      messages++;
+    assert(messages == 1);
+    assert(strstr(body, "[\",") == NULL);
+    assert(body[0] == '{' && body[strlen(body) - 1] == '}');
+  }
   free(body);
   wd_free(reply);
+
+  static const char stream[] =
+      "data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\","
+      "\"content\":null}}],\"object\":\"chat.completion.chunk\"}\n\n"
+      "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hello\"}}],"
+      "\"object\":\"chat.completion.chunk\"}\n\n"
+      "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\" there\"}}],"
+      "\"object\":\"chat.completion.chunk\"}\n\n"
+      "data: [DONE]\n\n";
+  cbor_item_t *second = wd_map(2);
+  wd_put(second, "status", wd_uint(200));
+  wd_put(second, "body", wd_text(stream));
+  size_t second_len = 0;
+  uint8_t *second_bytes = wd_encode(second, &second_len);
+  assert(second_bytes != NULL);
+  uint8_t *second_out = NULL;
+  size_t second_out_len = 0;
+  assert(wd_instance_call(inst, second_bytes, second_len, &second_out,
+                          &second_out_len, &err) == 0);
+  free(second_bytes);
+  cbor_item_t *answer = wd_decode(second_out, second_out_len);
+  free(second_out);
+  assert(answer != NULL);
+  char *text = wd_text_copy(wd_get(answer, "text"));
+  assert(text != NULL);
+  assert(strcmp(text, "Hello there") == 0);
+  free(text);
+  wd_free(answer);
 
   wd_instance_free(inst);
   wd_module_free(module);

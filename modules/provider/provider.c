@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+#include <stdio.h>
+
 #include "wd_abi.h"
 
 #define HEAP_SIZE (1024u * 1024u)
@@ -134,6 +136,18 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
   uint32_t status = 0;
   int have_prompt = 0;
   int have_body = 0;
+  char model[128];
+  model[0] = '\0';
+  char max_tokens[16];
+  {
+    static const char fallback[] = "1024";
+    uint32_t i = 0;
+    while (fallback[i] != '\0' && i + 1 < sizeof(max_tokens)) {
+      max_tokens[i] = fallback[i];
+      i++;
+    }
+    max_tokens[i] = '\0';
+  }
   const uint8_t *hist_text[32];
   uint32_t hist_text_len[32];
   const uint8_t *hist_role[32];
@@ -147,6 +161,10 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
     if (wd_key_eq(kp, kn, "prompt")) {
       if (wd_r_text(&r, (char *)prompt, sizeof(prompt), &prompt_len) != 0) return;
       have_prompt = 1;
+    } else if (wd_key_eq(kp, kn, "model")) {
+      if (wd_r_text(&r, model, sizeof(model), 0) != 0) return;
+    } else if (wd_key_eq(kp, kn, "max_tokens")) {
+      if (wd_r_text(&r, max_tokens, sizeof(max_tokens), 0) != 0) return;
     } else if (wd_key_eq(kp, kn, "body")) {
       if (wd_r_text(&r, body, sizeof(body), &body_len) != 0) return;
       have_body = 1;
@@ -205,11 +223,24 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
   if (!have_prompt) return;
 
   static const char prefix[] =
-      "{\"model\":\"local\",\"stream\":true,\"messages\":[";
+      "{\"model\":\"";
   char json[JSON_SIZE];
   uint32_t jl = 0;
   for (uint32_t i = 0; prefix[i] != '\0' && jl < sizeof(json); i++)
     json[jl++] = prefix[i];
+  {
+    const char *chosen = model[0] != '\0' ? model : "local";
+    for (uint32_t i = 0; chosen[i] != '\0' && jl < sizeof(json); i++)
+      json[jl++] = chosen[i];
+    static const char rest[] = "\",\"stream\":true,\"max_tokens\":";
+    for (uint32_t i = 0; rest[i] != '\0' && jl < sizeof(json); i++)
+      json[jl++] = rest[i];
+    for (uint32_t i = 0; max_tokens[i] != '\0' && jl < sizeof(json); i++)
+      json[jl++] = max_tokens[i];
+    static const char messages[] = ",\"messages\":[";
+    for (uint32_t i = 0; messages[i] != '\0' && jl < sizeof(json); i++)
+      json[jl++] = messages[i];
+  }
   for (uint32_t e = 0; e < hist_count; e++) {
     static const char role_open[] = "{\"role\":\"";
     static const char content_open[] = "\",\"content\":\"";
