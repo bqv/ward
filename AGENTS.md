@@ -295,6 +295,15 @@ The gate proves it on the case that hung last round: two subagents are in flight
 is killed while parked on the provider, its `turn.end` comes back `aborted`, and the first
 still finishes inside 700 ms — 488 ms measured.
 
+Twenty-ninth: the schedule module, and how not to test a guest. The cron arithmetic belongs in
+a guest — core owns only the wheel — so a `schedule` module answering `{cron, from_ms}` with
+`{next_ms}` is the right shape, and it compiled. The test that drove it directly segfaulted
+before asserting anything: a guest instance needs `wd_engine_new` with a real state directory
+and an explicit `wd_limits`, not the NULLs that look reasonable in a small test. The slice was
+reverted rather than committed half-tested; the next attempt should model its test on
+`wasm_test`'s loader (`read_file`, `wd_module_load`, a named limits struct) and only then add
+the daemon's `schedule.set/list/delete` and the wheel on top.
+
 ## M3: started, with one finding worth keeping
 
 The first M3 attempt replaced the daemon's single `wd_turn` with a pool keyed by session, so
