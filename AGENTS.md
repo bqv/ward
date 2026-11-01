@@ -568,6 +568,20 @@ is a capability and has no emit path — and the guest is still rule-shaped. The
 and the fail-closed rule are core's and are tested; the audit event and the model-backed guest
 are the next two steps.
 
+Fifty-fourth: python, in the honest form. `/py <program>` runs `python3 -I -c <program>` in the
+session's cwd through the worker's child runner — 15 s, 64 KiB — and the gate proves the
+acceptance line: `/py print(6*7)` asks for approval, and once approved the turn carries `42`.
+
+It is **not** the embedded-CPython guest the design describes. There is no wasip1 CPython on
+this box and building one is a project of its own, so the row ships as the host interpreter in
+the worker, behind an approval, with the protocol note saying exactly that. The method, the
+capability and the policy row survive when the guest arrives; only the child changes.
+
+The gate also needed a longer endpoint delay: with three seconds per reply the two subagents are
+still in flight when the third is issued, so the queue assertion measures the cap rather than
+the machine's speed. That number had been drifting for several rounds and is no longer on the
+edge.
+
 ## M3: started, with one finding worth keeping
 
 The first M3 attempt replaced the daemon's single `wd_turn` with a pool keyed by session, so

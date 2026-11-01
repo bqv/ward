@@ -114,6 +114,11 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
       wd_w_textz(&w, "path");
       wd_w_textz(&w, path);
     }
+  } else if (text_is(tool, "python")) {
+    call = "python.run";
+    wd_w_map(&w, 1);
+    wd_w_textz(&w, "program");
+    wd_w_textz(&w, text);
   } else if (text_is(tool, "exec")) {
     call = "exec.run";
     wd_w_map(&w, 1);

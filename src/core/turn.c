@@ -469,6 +469,43 @@ static int web_search_run(wd_turn *turn, const uint8_t *in, size_t in_len,
   return tool_reply(reply, out, out_len);
 }
 
+static int python_run(wd_turn *turn, const uint8_t *in, size_t in_len,
+                      uint8_t **out, size_t *out_len) {
+  cbor_item_t *request = wd_decode(in, in_len);
+  if (request == NULL)
+    return tool_fail("python.run: parameters are not cbor", out, out_len);
+  char *program = wd_text_copy(wd_get(request, "program"));
+  wd_free(request);
+  if (program == NULL || program[0] == '\0' || strlen(program) > 4096) {
+    free(program);
+    return tool_fail("python.run: the program is missing or too long", out,
+                     out_len);
+  }
+  const char *argv[5];
+  size_t argc = 0;
+  argv[argc++] = "python3";
+  argv[argc++] = "-I";
+  argv[argc++] = "-c";
+  argv[argc++] = program;
+  argv[argc] = NULL;
+  wd_proc_result result;
+  char *err = NULL;
+  int rc = wd_proc_run(argv, turn->root, 15000, WD_TOOL_MAX, &result, &err);
+  free(program);
+  free(err);
+  if (rc != 0) return tool_fail("python.run: cannot start python", out, out_len);
+  int status = WIFEXITED(result.status) ? WEXITSTATUS(result.status) : 127;
+  cbor_item_t *reply = wd_map(3);
+  wd_put(reply, "ok", cbor_build_bool(status == 0));
+  wd_put(reply, "status", wd_uint((uint64_t)status));
+  if (result.len > 0)
+    wd_put(reply, "text", wd_text_len((const char *)result.out, result.len));
+  else
+    wd_put(reply, "text", wd_text(""));
+  wd_proc_result_free(&result);
+  return tool_reply(reply, out, out_len);
+}
+
 static int grep_run(wd_turn *turn, const uint8_t *in, size_t in_len,
                     uint8_t **out, size_t *out_len) {
   cbor_item_t *request = wd_decode(in, in_len);
@@ -895,6 +932,8 @@ static int turn_capability(void *ctx, const char *capability,
     *out_len = written;
     return 0;
   }
+  if (strcmp(capability, "python.run") == 0)
+    return python_run(turn, in, in_len, out, out_len);
   if (strcmp(capability, "web.search") == 0)
     return web_search_run(turn, in, in_len, out, out_len);
   if (strcmp(capability, "recall.search") == 0)

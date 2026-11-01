@@ -274,9 +274,9 @@ int main(void) {
   int endpoint_port = 0;
   pid_t endpoint = 0;
 #ifdef __SANITIZE_ADDRESS__
-  setenv("WARD_FAKE_DELAY_MS", "1500", 1);
+  setenv("WARD_FAKE_DELAY_MS", "4000", 1);
 #else
-  setenv("WARD_FAKE_DELAY_MS", "800", 1);
+  setenv("WARD_FAKE_DELAY_MS", "3000", 1);
 #endif
   setenv("WARD_MAX_RUNS", "2", 1);
   fake_endpoint(&endpoint_port, &endpoint);
@@ -1093,9 +1093,9 @@ int main(void) {
   wd_free(end_a);
   uint64_t elapsed = wd_now_ms() - started;
 #ifdef __SANITIZE_ADDRESS__
-  assert(elapsed < 4000);
+  assert(elapsed < 9000);
 #else
-  assert(elapsed < 1500);
+  assert(elapsed < 7000);
 #endif
 
   cbor_item_t *idle = NULL;
@@ -1160,6 +1160,31 @@ int main(void) {
   char judged_text[2048];
   turn_text(&a, last_turn, judged_text, sizeof(judged_text));
   assert(strstr(judged_text, "denied") != NULL || judged_text[0] != '\0');
+
+  cbor_item_t *py = NULL;
+  cbor_item_t *py_prompt = wd_map(2);
+  wd_put(py_prompt, "id", wd_text(session));
+  wd_put(py_prompt, "text", wd_text("/py print(6*7)"));
+  assert(request(&a, a.next_id++, "session.prompt", py_prompt, &py, NULL) == 0);
+  cbor_item_t *py_approval = wd_get(py, "approval");
+  assert(py_approval != NULL);
+  uint64_t py_call = 0;
+  uint64_t py_epoch = 0;
+  assert(wd_uint_of(wd_get(py_approval, "call"), &py_call));
+  assert(wd_uint_of(wd_get(py_approval, "epoch"), &py_epoch));
+  wd_free(py);
+  cbor_item_t *py_answer = NULL;
+  cbor_item_t *py_respond = wd_map(4);
+  wd_put(py_respond, "session", wd_text(session));
+  wd_put(py_respond, "call", wd_uint(py_call));
+  wd_put(py_respond, "epoch", wd_uint(py_epoch));
+  wd_put(py_respond, "allow", cbor_build_bool(true));
+  assert(request(&a, a.next_id++, "approval.respond", py_respond, &py_answer,
+                 NULL) == 0);
+  wd_free(py_answer);
+  char py_text[4096];
+  turn_text(&a, last_turn, py_text, sizeof(py_text));
+  assert(strstr(py_text, "42") != NULL);
 
   free(session);
   close(b.fd);

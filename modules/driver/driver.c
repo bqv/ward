@@ -375,6 +375,15 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
       invoke_tool(out, "plan", text + 6, text + 6, verdict == 2);
       return;
     }
+    if (text_prefix(text, "/py ")) {
+      int verdict = policy_check("python", text + 4);
+      if (verdict == 0) {
+        emit_text_delta(out, "the policy denied python");
+        return;
+      }
+      invoke_tool(out, "python", "", text + 4, verdict == 2);
+      return;
+    }
     if (text_prefix(text, "/run ")) {
       int verdict = policy_check("exec", text + 5);
       if (verdict == 0) {

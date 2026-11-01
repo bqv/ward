@@ -143,6 +143,12 @@ session: note.txt (13 bytes)` — so the model knows what is there.
 64 KiB) and answers `{ok, status, text}`. The index, its embedding endpoint and its ranking
 belong to `dsh-recall`; ward only runs it.
 
+**Python.** `/py <program>` runs `python3 -I -c <program>` in the session's cwd through the
+worker's child runner — 15 s, 64 KiB — and answers `{ok, status, text}`. The policy asks for
+approval, because the interpreter can read anything the worker can. This is the host
+interpreter in the worker, not the embedded-CPython guest the design describes; the method and
+its shape stay when that guest lands.
+
 **Judge-assisted policy.** `policy.check {tool, payload}` asks the policy guest for a rule
 decision; when that decision is `allow`, the `judge` guest may raise it to `ask` by classifying
 the payload. The merge is monotonic — a judge can never lower an `ask` or a `deny` — and if the
