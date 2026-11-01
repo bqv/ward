@@ -48,10 +48,11 @@ int main(void) {
   snprintf(path, sizeof(path), "%s/AGENTS.md", root);
   write_file(path, "project rules from AGENTS.md");
 
-  wd_prompt *prompt = wd_prompt_build(state, root, "attached: note.txt");
+  wd_prompt *prompt =
+      wd_prompt_build(state, root, "attached: note.txt", "be a pirate");
   assert(prompt != NULL);
   cbor_item_t *array = wd_prompt_to_cbor(prompt);
-  assert(cbor_array_size(array) == 5);
+  assert(cbor_array_size(array) == 6);
 
   char *name = text_at(array, 0, "name");
   assert(strcmp(name, "identity") == 0);
@@ -59,33 +60,40 @@ int main(void) {
 
   name = text_at(array, 1, "name");
   char *text = text_at(array, 1, "text");
+  assert(strcmp(name, "session") == 0);
+  assert(strcmp(text, "be a pirate") == 0);
+  free(name);
+  free(text);
+
+  name = text_at(array, 2, "name");
+  text = text_at(array, 2, "text");
   assert(strcmp(name, "persona") == 0);
   assert(strcmp(text, "a careful engineer") == 0);
   free(name);
   free(text);
 
-  name = text_at(array, 2, "name");
+  name = text_at(array, 3, "name");
   assert(strcmp(name, "style") == 0);
   free(name);
 
-  name = text_at(array, 3, "name");
-  text = text_at(array, 3, "text");
+  name = text_at(array, 4, "name");
+  text = text_at(array, 4, "text");
   assert(strcmp(name, "rules") == 0);
   assert(strcmp(text, "override the project rules") == 0);
   free(name);
   free(text);
 
-  name = text_at(array, 4, "name");
+  name = text_at(array, 5, "name");
   assert(strcmp(name, "attachments") == 0);
   free(name);
 
   cbor_item_t *history = wd_prompt_to_history(prompt, NULL);
-  assert(history != NULL && cbor_array_size(history) == 5);
+  assert(history != NULL && cbor_array_size(history) == 6);
   wd_free(history);
   wd_free(array);
   wd_prompt_free(prompt);
 
-  wd_prompt *bare = wd_prompt_build(NULL, NULL, NULL);
+  wd_prompt *bare = wd_prompt_build(NULL, NULL, NULL, NULL);
   assert(bare != NULL);
   assert(wd_prompt_len(bare) == 1);
   wd_prompt_free(bare);

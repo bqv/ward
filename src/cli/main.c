@@ -45,6 +45,7 @@ static void usage(FILE *out) {
           "  session search <query> [--json]\n"
           "  session fork   <id> [--from SEQ] [--json]\n"
           "  session set-model <id> <model>\n"
+          "  session set-system <id> <text>\n"
           "  model list     [--json]\n"
           "  model select   <id>\n"
           "  prompt <id>    [--json]  show the assembled system prompt\n"
@@ -540,6 +541,18 @@ static int command_session(int argc, char **argv) {
     if (client_request(&client, "session.set_model", params, &result) != 0)
       goto done;
     printf("model %s\n", text);
+    rc = 0;
+  } else if (strcmp(sub, "set-system") == 0) {
+    if (id == NULL || text == NULL) {
+      fprintf(stderr, "ward: session set-system needs an id and text\n");
+      goto done;
+    }
+    cbor_item_t *params = wd_map(2);
+    wd_put(params, "id", wd_text(id));
+    wd_put(params, "text", wd_text(text));
+    if (client_request(&client, "session.set_system", params, &result) != 0)
+      goto done;
+    printf("system prompt set\n");
     rc = 0;
   } else if (strcmp(sub, "prompt") == 0) {
     if (id == NULL || text == NULL) {

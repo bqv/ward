@@ -61,6 +61,7 @@ struct wd_turn {
   char model_name[128];
   bool remote_ok;
   char api_key[256];
+  char *session_system;
   wd_judge *judge_cache;
   cbor_item_t *judge_event;
   char *worker_root;
@@ -145,6 +146,12 @@ static wd_module *load_pinned(wd_engine *engine, const char *dir,
     break;
   }
   return load_module(engine, dir, file, spec, err);
+}
+
+void wd_turn_set_session_system(wd_turn *turn, const char *text) {
+  if (turn == NULL) return;
+  free(turn->session_system);
+  turn->session_system = text != NULL && text[0] != '\0' ? strdup(text) : NULL;
 }
 
 void wd_turn_set_api_key(wd_turn *turn, const char *key) {
@@ -1730,8 +1737,10 @@ void wd_turn_set_context(wd_turn *turn, const char *text) {
 static cbor_item_t *history_with_context(cbor_item_t *history,
                                         const char *root,
                                         const char *context,
-                                        const char *state_dir) {
-  wd_prompt *prompt = wd_prompt_build(state_dir, root, context);
+                                        const char *state_dir,
+                                        const char *session_system) {
+  wd_prompt *prompt =
+      wd_prompt_build(state_dir, root, context, session_system);
   cbor_item_t *combined = wd_prompt_to_history(prompt, history);
   wd_prompt_free(prompt);
   if (combined == NULL) return history;
@@ -1743,7 +1752,8 @@ int wd_turn_prompt(wd_turn *turn, const char *text, wd_turn_emit emit, void *ctx
                    char **err) {
   turn->id = next_turn_id();
   turn->history = history_with_context(turn->history, turn->root, turn->context,
-                                       wd_engine_state_dir(turn->engine));
+                                       wd_engine_state_dir(turn->engine),
+                                       turn->session_system);
   cbor_item_t *message = wd_map(2);
   if (message == NULL) {
     *err = strdup("out of memory");

@@ -11,7 +11,7 @@
 typedef struct wd_prompt wd_prompt;
 
 wd_prompt *wd_prompt_build(const char *state_dir, const char *root,
-                           const char *context);
+                           const char *context, const char *session_system);
 void wd_prompt_free(wd_prompt *prompt);
 size_t wd_prompt_len(const wd_prompt *prompt);
 cbor_item_t *wd_prompt_to_cbor(const wd_prompt *prompt);

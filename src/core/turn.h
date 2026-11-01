@@ -24,6 +24,7 @@ typedef int (*wd_turn_emit)(void *ctx, const char *event, cbor_item_t *payload,
 
 wd_turn *wd_turn_new(wd_engine *engine, const char *module_dir, const char *root,
                      char **err);
+void wd_turn_set_session_system(wd_turn *turn, const char *text);
 void wd_turn_set_api_key(wd_turn *turn, const char *key);
 void wd_turn_allow_remote(wd_turn *turn);
 void wd_turn_set_model_name(wd_turn *turn, const char *name);

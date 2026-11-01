@@ -119,10 +119,12 @@ static int compare(const void *left, const void *right) {
 }
 
 wd_prompt *wd_prompt_build(const char *state_dir, const char *root,
-                           const char *context) {
+                           const char *context, const char *session_system) {
   wd_prompt *prompt = calloc(1, sizeof(*prompt));
   if (prompt == NULL) return NULL;
   place(prompt, "identity", -100, "built-in", strdup(identity_text));
+  if (session_system != NULL && session_system[0] != '\0')
+    place(prompt, "session", 5, "session", strdup(session_system));
   if (root != NULL) {
     char path[1024];
     snprintf(path, sizeof(path), "%s/AGENTS.md", root);

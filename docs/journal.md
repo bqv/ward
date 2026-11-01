@@ -1188,3 +1188,16 @@ going missing — Qwen1.5-1.8B is not a reliable instruction-follower.
 `prompt.preview {id}` and `ward prompt <id>` expose the same assembly without running a turn: each section's
 name, order, source path and text, so an operator can see exactly what the model will be told and where each
 piece came from.
+
+Ninety-first: a session's own system prompt, set before it starts. `session.set_system {id, text}` appends a
+durable `session.system {text}`, replay restores it, and the turn inserts it as the section named `session`
+at order 5 — after the identity line, before any file section and before the project rules. A client can
+therefore shape one session without touching the deployment's files, and the choice survives a restart
+because it lives in the session log rather than in memory.
+
+`ward session set-system <id> <text>` sets it and `ward prompt <id>` shows it in place, which is the
+transparency the section design is for: the operator sees the identity line, the session's own text, the file
+sections and the project rules in the order the model will receive them.
+
+Verified: a session given "survive the restart" still shows that section after `rc-service --user ward restart`,
+and the preview lists it between identity and the rest.

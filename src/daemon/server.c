@@ -393,6 +393,41 @@ static void handle_session_fork(wd_server *srv, wd_conn *conn, uint64_t id,
   conn_arm(srv, conn);
 }
 
+static void handle_session_set_system(wd_server *srv, wd_conn *conn,
+                                      uint64_t id, cbor_item_t *params) {
+  char *session_id = wd_text_copy(wd_get(params, "id"));
+  char *text = wd_text_copy(wd_get(params, "text"));
+  wd_session *session =
+      session_id != NULL ? wd_session_find(&srv->store, session_id) : NULL;
+  if (session == NULL) {
+    free(session_id);
+    free(text);
+    conn_send_error(conn, id, WD_ERR_NOT_FOUND, "no such session");
+    conn_arm(srv, conn);
+    return;
+  }
+  if (text == NULL) {
+    free(session_id);
+    conn_send_error(conn, id, WD_ERR_INVALID_PARAMS, "text is needed");
+    conn_arm(srv, conn);
+    return;
+  }
+  uint64_t seq = 0;
+  int rc = wd_session_set_system(session, text, &seq);
+  free(session_id);
+  free(text);
+  if (rc != 0) {
+    conn_send_error(conn, id, WD_ERR_INTERNAL, "cannot set the system prompt");
+    conn_arm(srv, conn);
+    return;
+  }
+  cbor_item_t *result = wd_map(2);
+  wd_put(result, "session", wd_session_to_cbor(session));
+  wd_put(result, "seq", wd_uint(seq));
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
 static void handle_session_set_model(wd_server *srv, wd_conn *conn, uint64_t id,
                                      cbor_item_t *params) {
   char *session_id = wd_text_copy(wd_get(params, "id"));
@@ -1402,7 +1437,8 @@ static void handle_prompt_preview(wd_server *srv, wd_conn *conn, uint64_t id,
   char attachments[512];
   attachment_context(session, attachments, sizeof(attachments));
   wd_prompt *prompt = wd_prompt_build(srv->state_dir, session->cwd,
-                                      attachments[0] != '\0' ? attachments : NULL);
+                                      attachments[0] != '\0' ? attachments : NULL,
+                                      session->system);
   cbor_item_t *result = wd_map(2);
   wd_put(result, "session", wd_text(session->id));
   wd_put(result, "sections", wd_prompt_to_cbor(prompt));
@@ -1876,6 +1912,7 @@ static wd_run *run_new(wd_server *srv, wd_session *session, char **err) {
     free(run);
     return NULL;
   }
+  if (session->system != NULL) wd_turn_set_session_system(run->turn, session->system);
   const wd_model *chosen = wd_models_find(srv->models, session->model);
   if (chosen != NULL) {
     if (chosen->key != NULL)
@@ -1895,6 +1932,8 @@ static wd_run *run_new(wd_server *srv, wd_session *session, char **err) {
       free(run);
       return NULL;
     }
+    if (session->system != NULL)
+      wd_turn_set_session_system(run->turn, session->system);
     if (chosen != NULL) {
       if (chosen->key != NULL)
         wd_turn_set_api_key(run->turn,
@@ -2637,6 +2676,8 @@ static void handle_request(wd_server *srv, wd_conn *conn, uint64_t id,
     handle_session_fork(srv, conn, id, params);
   } else if (strcmp(method, "session.set_model") == 0) {
     handle_session_set_model(srv, conn, id, params);
+  } else if (strcmp(method, "session.set_system") == 0) {
+    handle_session_set_system(srv, conn, id, params);
   } else if (strcmp(method, "model.list") == 0) {
     handle_model_list(srv, conn, id);
   } else if (strcmp(method, "model.select") == 0) {
