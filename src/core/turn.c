@@ -56,6 +56,7 @@ struct wd_turn {
   wd_instance *code;
   wd_module *judge_module;
   wd_module *code_module;
+  char trapped[WD_MAX_MODULE_NAME];
   wd_judge *judge_cache;
   cbor_item_t *judge_event;
   char *worker_root;
@@ -140,6 +141,34 @@ static wd_module *load_pinned(wd_engine *engine, const char *dir,
     break;
   }
   return load_module(engine, dir, file, spec, err);
+}
+
+static const char *module_name_of(wd_turn *turn, wd_instance *instance) {
+  if (instance == turn->eng) return "engine";
+  if (instance == turn->driver) return "driver";
+  if (instance == turn->provider) return "provider";
+  if (instance == turn->tools) return "tools";
+  if (instance == turn->policy) return "policy";
+  if (instance == turn->skills) return "skills";
+  if (instance == turn->judge) return "judge";
+  if (instance == turn->code) return "code";
+  return NULL;
+}
+
+static void note_trap(wd_turn *turn, wd_instance *instance, const char *err) {
+  if (turn == NULL || err == NULL) return;
+  if (strstr(err, "trap") == NULL && strstr(err, "unreachable") == NULL &&
+      strstr(err, "exhaust") == NULL)
+    return;
+  const char *name = module_name_of(turn, instance);
+  if (name == NULL) return;
+  snprintf(turn->trapped, sizeof(turn->trapped), "%s", name);
+}
+
+bool wd_turn_trapped(wd_turn *turn, char *name, size_t cap) {
+  if (turn == NULL || turn->trapped[0] == '\0') return false;
+  if (name != NULL) snprintf(name, cap, "%s", turn->trapped);
+  return true;
 }
 
 static wd_instance *instance_named(wd_turn *turn, const char *name) {
@@ -1539,6 +1568,7 @@ static int process_action(wd_turn *turn, cbor_item_t *action, wd_turn_emit emit,
     } else if (instance == turn->tools) {
       cbor_item_t *request = NULL;
       rc = invoke(instance, payload, &request, err);
+      if (rc != 0) note_trap(turn, instance, *err);
       if (rc == 0) {
         char *capability = wd_text_copy(wd_get(request, "call"));
         cbor_item_t *args = wd_get(request, "payload");
@@ -1567,6 +1597,7 @@ static int process_action(wd_turn *turn, cbor_item_t *action, wd_turn_emit emit,
     } else {
       cbor_item_t *result = NULL;
       rc = invoke(instance, payload, &result, err);
+      if (rc != 0) note_trap(turn, instance, *err);
       if (rc == 0) {
         cbor_item_t *message = wd_map(2);
         wd_put(message, "kind", wd_text("result"));
@@ -1598,6 +1629,7 @@ static int drive(wd_turn *turn, cbor_item_t *message, wd_turn_emit emit,
     uint8_t *out = NULL;
     size_t out_len = 0;
     int rc = wd_instance_call(turn->driver, bytes, len, &out, &out_len, err);
+    if (rc != 0) note_trap(turn, turn->driver, *err);
     free(bytes);
     if (rc != 0) return -1;
     cbor_item_t *reply = wd_decode(out, out_len);

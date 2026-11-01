@@ -1037,3 +1037,18 @@ Also unmeasured, and said plainly: no shipped guest carries state across a turn,
 module mid-session with no data loss" is proven between two instances and across a stored blob, but not
 with a real stateful module in the pipeline. The mechanism is there and the fixture proves each half;
 what is missing is a guest that needs it.
+
+Eighty-second: trap reporting, so a bad version demotes itself in practice. A turn now records which
+module trapped: `note_trap` runs wherever a module call fails and its error names a trap, an
+unreachable instruction or exhausted fuel, and `wd_turn_trapped` answers the name. The daemon reads
+that when a run is freed and calls `wd_registry_trap` with the session's pinned version.
+
+The test uses a guest that does nothing but trap. It copies the module directory, puts the trap guest
+where `driver.wasm` belongs, runs a prompt, and asserts two things: the turn comes back failed and
+names `driver`, and after two recorded traps the registry no longer resolves `driver` at all — there
+is no second version to fall back to in that fixture, which is exactly what "demoted" must mean.
+
+That closes the last named row of the milestone at the level it can be closed without a stateful guest.
+What still is not measured end to end is an upgrade of a module that carries state: every mechanism
+exists and each half is tested, but no shipped guest keeps state across a turn, so the acceptance line
+rests on a fixture and the notes say so.

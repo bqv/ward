@@ -2006,6 +2006,17 @@ static void run_free(wd_server *srv, wd_run *run) {
       break;
     }
   }
+  char trapped[64];
+  if (run->turn != NULL &&
+      wd_turn_trapped(run->turn, trapped, sizeof(trapped))) {
+    wd_session *session = wd_session_find(&srv->store, run->session_id);
+    const char *version = "1";
+    if (session != NULL)
+      for (size_t p = 0; p < session->pins_len; p++)
+        if (strcmp(session->pins[p].name, trapped) == 0)
+          version = session->pins[p].version;
+    wd_registry_trap(&srv->registry, trapped, version);
+  }
   persist_state(srv, run);
   wd_turn_free(run->turn);
   free(run);

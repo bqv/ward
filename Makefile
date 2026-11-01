@@ -71,7 +71,7 @@ TEST_BINS := $(patsubst tests/%.c,$(BUILDDIR)/%,$(wildcard tests/*.c))
 MODULES := engine driver provider tools policy schedule skills judge code
 MODULE_WASM := $(addprefix $(BUILDDIR)/,$(addsuffix .wasm,$(MODULES)))
 
-GUESTS := echo wasi importer
+GUESTS := echo wasi importer trap
 GUEST_WASM := $(addprefix $(BUILDDIR)/,$(addsuffix .wasm,$(GUESTS)))
 
 .PHONY: all test guests modules clean install check-deps
@@ -142,6 +142,10 @@ $(BUILDDIR)/echo.wasm: tests/guest/echo.c
 	$(WASI_CC) $(WASI_FLAGS) $< -o $@
 
 $(BUILDDIR)/wasi.wasm: tests/guest/wasi.c
+	@mkdir -p $(@D)
+	$(WASI_CC) $(WASI_FLAGS) $< -o $@
+
+$(BUILDDIR)/trap.wasm: tests/guest/trap.c
 	@mkdir -p $(@D)
 	$(WASI_CC) $(WASI_FLAGS) $< -o $@
 
