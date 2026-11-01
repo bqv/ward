@@ -9,7 +9,7 @@
 #define HEAP_SIZE (1024u * 1024u)
 #define REPLY_SIZE 24576u
 #define TEXT_SIZE 2048u
-#define JSON_SIZE 16384u
+#define JSON_SIZE 65536u
 #define CALL_SIZE 8192u
 
 static uint8_t heap[HEAP_SIZE];
@@ -129,9 +129,9 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
   heap_at = 0;
   wd_r r = {(const uint8_t *)(uintptr_t)at, len, 0, 0};
   uint32_t n = 0;
-  uint8_t prompt[JSON_SIZE];
+  static uint8_t prompt[JSON_SIZE];
   uint32_t prompt_len = 0;
-  char body[JSON_SIZE];
+  static char body[JSON_SIZE];
   uint32_t body_len = 0;
   uint32_t status = 0;
   int have_prompt = 0;
@@ -226,7 +226,7 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
 
   static const char prefix[] =
       "{\"model\":\"";
-  char json[JSON_SIZE];
+  static char json[JSON_SIZE];
   uint32_t jl = 0;
   for (uint32_t i = 0; prefix[i] != '\0' && jl < sizeof(json); i++)
     json[jl++] = prefix[i];

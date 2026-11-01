@@ -1309,3 +1309,20 @@ request came back non-200 from the local router while the router's own log shows
 something in the compact request shape is off. That is a real bug, surfaced rather than hidden by the new error
 taxonomy, and it is the next thing to chase: the branch machinery and the summary call are separable, and the
 summary call is the part failing.
+
+Ninety-ninth: three bugs under one symptom, found by refusing to guess. `session.compact` returned
+`provider_rejected` and then `no summary`; each was a separate fault, and each hid the next.
+
+1. The compaction request never named the model — it goes through `provider_phase` directly rather than the
+   turn's merged payload — so llama answered `model 'local' not found` with a 400. That is why §6's taxonomy
+   was worth building: the body said so, once the code printed it under `WARD_DEBUG`.
+2. The provider's `body` buffer was 16 KiB and a real SSE completion is 50 KiB of chunked JSON. `wd_r_text`
+   refused it, the guest returned *without writing a reply*, and the host read the guest's previous reply
+   buffer — the phase-one request. That is why a decode seemed to succeed and produce a request instead of a
+   summary. The fix is a 64 KiB buffer *and* the lesson: a guest that cannot parse its input must write an
+   error reply, never return silently.
+3. Raising that buffer put three 64 KiB arrays on the guest's 64 KiB WASI stack, which trapped in `ward_call`.
+   They are static now — the same mistake the `code` guest made, which is why it is now written down twice.
+
+With those fixed, compaction branches and returns a summary, and `ward session compact` prints both session
+ids. The summary itself is a 1.8B model's invention, which is a model problem, not a plumbing one.

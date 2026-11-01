@@ -1873,6 +1873,9 @@ static wd_error classify_provider(int status, const char *body) {
 
 static int emit_provider_error(wd_turn *turn, wd_error code, const char *message,
                                wd_turn_emit emit, void *ctx, char **err) {
+  if (getenv("WARD_DEBUG") != NULL)
+    fprintf(stderr, "ward: provider %s: %.300s\n", wd_error_name(code),
+            message != NULL ? message : "");
   cbor_item_t *event = wd_map(4);
   wd_put(event, "code", wd_uint((uint64_t)code));
   wd_put(event, "name", wd_text(wd_error_name(code)));
@@ -1948,10 +1951,13 @@ int wd_turn_compact(wd_turn *turn, cbor_item_t *history, char **summary,
   static const char ask[] =
       "Summarise the conversation so far in at most two hundred words, keeping "
       "decisions, facts and open threads.";
-  cbor_item_t *payload = wd_map(2);
+  bool named = turn->model_name[0] != '\0';
+  cbor_item_t *payload = wd_map(3 + (named ? 1 : 0));
   wd_put(payload, "prompt", wd_text(ask));
   if (history != NULL && cbor_incref(history))
     wd_put(payload, "history", history);
+  wd_put(payload, "max_tokens", wd_text("200"));
+  if (named) wd_put(payload, "model", wd_text(turn->model_name));
   cbor_item_t *request = NULL;
   int rc = provider_phase(turn, payload, &request, err);
   wd_free(payload);
@@ -1969,11 +1975,16 @@ int wd_turn_compact(wd_turn *turn, cbor_item_t *history, char **summary,
   wd_http_job_free(turn->http_job);
   turn->http_job = NULL;
   if (response.status != 200) {
+    if (getenv("WARD_DEBUG") != NULL)
+      fprintf(stderr, "ward: compact rejected with %ld: %.300s\n",
+              response.status,
+              response.body != NULL ? (const char *)response.body : "");
     *err = strdup(wd_error_name(classify_provider((int)response.status,
                                                   (const char *)response.body)));
     wd_http_response_free(&response);
     return -1;
   }
+  size_t body_len = response.len;
   cbor_item_t *phase = wd_map(2);
   wd_put(phase, "status", wd_uint((uint64_t)response.status));
   wd_put(phase, "body", wd_text_len((const char *)response.body, response.len));
@@ -1983,6 +1994,15 @@ int wd_turn_compact(wd_turn *turn, cbor_item_t *history, char **summary,
   wd_http_response_free(&response);
   if (rc != 0) return -1;
   *summary = wd_text_copy(wd_get(reply, "text"));
+  if (getenv("WARD_DEBUG") != NULL) {
+    size_t dump_len = 0;
+    unsigned char *dump = NULL;
+    size_t written = cbor_serialize_alloc(reply, &dump, &dump_len);
+    (void)written;
+    fprintf(stderr, "ward: compact body=%zu reply=%.200s\n", body_len,
+            dump != NULL ? (const char *)dump : "(none)");
+    free(dump);
+  }
   wd_free(reply);
   if (*summary == NULL || (*summary)[0] == '\0') {
     free(*summary);
