@@ -869,3 +869,15 @@ thing the next attempt needs.
 M0's acceptance is 1,000 round-trips/s over UDS and a fuzz-clean decoder. A
 gate that is not measured is not met.
 
+Seventy-first: where a module's state is kept. `src/core/modstate.c` owns the layout the design
+fixed: `<state>/<session>/modules/<name>@<version>.bin`, with the version in the filename so a
+blob's existence dates it and no sidecar can disagree. It offers the path, write, read (where
+"absent" is a distinct answer from "failed"), find-the-version-that-has-a-blob, and forget every
+version except one.
+
+Names are refused if they contain `/` or `..`, which is the same discipline the attachment store
+uses; the state directory is not, because it is a path. The first version of the test failed on
+exactly that — it validated the root as if it were a name.
+
+`tests/modstate_test` measures all of it: write then read a blob back byte for byte, find the
+version, forget the others and find nothing, refuse a traversal name, and forget everything.
