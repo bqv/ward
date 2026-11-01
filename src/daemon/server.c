@@ -1181,19 +1181,22 @@ static void handle_job_list(wd_server *srv, wd_conn *conn, uint64_t id) {
   for (wd_queue *item = srv->queue; item != NULL; item = item->next) count++;
   cbor_item_t *list = wd_array(count);
   for (wd_run *run = srv->runs; run != NULL; run = run->next) {
-    cbor_item_t *job = wd_map(3);
+    cbor_item_t *job = wd_map(4);
     wd_put(job, "job", wd_text(run->session_id));
     wd_put(job, "session", wd_text(run->session_id));
     wd_put(job, "state", wd_text("running"));
+    wd_put(job, "ahead", wd_uint(0));
     bool pushed = cbor_array_push(list, job);
     cbor_decref(&job);
     if (!pushed) break;
   }
+  size_t ahead = 1;
   for (wd_queue *item = srv->queue; item != NULL; item = item->next) {
-    cbor_item_t *job = wd_map(3);
+    cbor_item_t *job = wd_map(4);
     wd_put(job, "job", wd_text(item->job));
     wd_put(job, "session", wd_text(item->session));
     wd_put(job, "state", wd_text("queued"));
+    wd_put(job, "ahead", wd_uint(ahead++));
     bool pushed = cbor_array_push(list, job);
     cbor_decref(&job);
     if (!pushed) break;
@@ -1308,8 +1311,14 @@ static bool enqueue_turn(wd_server *srv, wd_session *session, const char *text,
     free(item);
     return false;
   }
-  item->next = srv->queue;
-  srv->queue = item;
+  item->next = NULL;
+  if (srv->queue == NULL) {
+    srv->queue = item;
+  } else {
+    wd_queue *tail = srv->queue;
+    while (tail->next != NULL) tail = tail->next;
+    tail->next = item;
+  }
   return true;
 }
 

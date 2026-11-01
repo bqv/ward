@@ -1379,3 +1379,13 @@ UBSan.
 That is worth as much as a feature. Five stale daemons made a live turn look wedged for several minutes, and the
 wrong hypothesis (a stuck provider) was only abandoned because `ps` disagreed with it. A test that fails must
 leave the machine as it found it, or it costs the next person the same minutes.
+
+Hundred-and-fourth: the queue is FIFO and says where you are. `enqueue_turn` appended at the head, so a queued
+background turn ran last — the note flagged it and it was a two-line fix. `job.list` now also reports `ahead` per
+entry: zero for a running job, its position for a queued one, which is the number a client needs to explain why
+a subagent has not started.
+
+This is the honest half of §7. The device semaphore — a pool keyed by the model's `device` with `slots` from the
+catalog, acquired before the provider call and released on finish, so two subagents on one card serialise
+instead of thrashing — is still ahead, and it needs care with the run pool and the queue that this change just
+made orderable.
