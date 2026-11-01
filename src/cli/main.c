@@ -532,15 +532,16 @@ static int command_session(int argc, char **argv) {
     if (client_request(&client, "session.resume", focus, &result) != 0) goto done;
     wd_free(result);
     result = NULL;
+    uint64_t req = client.next_id++;
     cbor_item_t *params = wd_map(4);
     wd_put(params, "session", wd_text(id));
     wd_put(params, "call", wd_uint(call));
     wd_put(params, "epoch", wd_uint(epoch));
     wd_put(params, "allow", cbor_build_bool(allow == 1));
-    if (client_request(&client, "approval.respond", params, &result) != 0)
+    if (client_send_item(&client, wd_request(req, "approval.respond", params)) !=
+        0)
       goto done;
-    wd_free(result);
-    result = NULL;
+    rc = 0;
     for (;;) {
       wd_frame frame;
       uint8_t *body = client_read_frame(client.fd, &frame);
@@ -548,35 +549,47 @@ static int command_session(int argc, char **argv) {
       cbor_item_t *root = wd_decode(body, frame.len);
       free(body);
       if (root == NULL) break;
-      if (frame.type != WD_FRAME_EVENT) {
+      if (frame.type == WD_FRAME_EVENT) {
+        char *kind = NULL;
+        cbor_item_t *payload = NULL;
+        bool end = false;
+        if (wd_read_event(root, &kind, &payload)) {
+          if (json) {
+            print_json(root);
+          } else if (strcmp(kind, "text.delta") == 0) {
+            char *piece = wd_text_copy(wd_get(payload, "text"));
+            if (piece != NULL) {
+              fputs(piece, stdout);
+              fflush(stdout);
+              free(piece);
+            }
+          } else if (strcmp(kind, "turn.end") == 0) {
+            end = true;
+          }
+        }
+        free(kind);
         wd_free(root);
+        if (end) {
+          if (!json) putchar('\n');
+          break;
+        }
         continue;
       }
-      char *kind = NULL;
-      cbor_item_t *payload = NULL;
-      bool end = false;
-      if (wd_read_event(root, &kind, &payload)) {
-        if (json) {
-          print_json(root);
-        } else if (strcmp(kind, "text.delta") == 0) {
-          char *piece = wd_text_copy(wd_get(payload, "text"));
-          if (piece != NULL) {
-            fputs(piece, stdout);
-            fflush(stdout);
-            free(piece);
-          }
-        } else if (strcmp(kind, "turn.end") == 0) {
-          end = true;
-        }
+      uint64_t got = 0;
+      bool ok = false;
+      cbor_item_t *value = NULL;
+      if (wd_read_response(root, &got, &ok, &value) && got == req && !ok) {
+        char *name = wd_text_copy(wd_get(value, "name"));
+        char *message = wd_text_copy(wd_get(value, "message"));
+        fprintf(stderr, "ward: %s: %s\n", name != NULL ? name : "error",
+                message != NULL ? message : "");
+        free(name);
+        free(message);
+        rc = 1;
       }
-      free(kind);
       wd_free(root);
-      if (end) {
-        if (!json) putchar('\n');
-        break;
-      }
+      if (rc != 0) break;
     }
-    rc = 0;
   } else {
     fprintf(stderr, "ward: unknown session command %s\n", sub);
     rc = 2;

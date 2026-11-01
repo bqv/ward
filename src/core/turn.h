@@ -23,6 +23,7 @@ typedef int (*wd_turn_emit)(void *ctx, const char *event, cbor_item_t *payload,
 wd_turn *wd_turn_new(wd_engine *engine, const char *module_dir, const char *root,
                      char **err);
 void wd_turn_free(wd_turn *turn);
+void wd_turn_set_root(wd_turn *turn, const char *root);
 int wd_turn_prompt(wd_turn *turn, const char *text, wd_turn_emit emit,
                    void *ctx, char **err);
 int wd_turn_resume(wd_turn *turn, bool allow, wd_turn_emit emit, void *ctx,

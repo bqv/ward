@@ -375,6 +375,15 @@ fail:
   return NULL;
 }
 
+void wd_turn_set_root(wd_turn *turn, const char *root) {
+  if (turn == NULL || root == NULL) return;
+  char resolved[PATH_MAX];
+  char *next = realpath(root, resolved) != NULL ? strdup(resolved) : strdup(root);
+  if (next == NULL) return;
+  free(turn->root);
+  turn->root = next;
+}
+
 void wd_turn_free(wd_turn *turn) {
   if (turn == NULL) return;
   wd_instance_free(turn->driver);

@@ -494,6 +494,7 @@ static void handle_session_prompt(wd_server *srv, wd_conn *conn, uint64_t id,
     free(err);
     return;
   }
+  wd_turn_set_root(turn, session->cwd);
   wd_turn_ctx tc = {srv, session};
   int rc = wd_turn_prompt(turn, text, turn_emit, &tc, &err);
   free(session_id);
