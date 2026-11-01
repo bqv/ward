@@ -988,3 +988,17 @@ not every symbol expected, and the discrepancy is unexplained rather than fixed.
 
 The honest next step is to find that wall, not to raise a number and hope: bisect the guest's text
 size against a single large file and read the host's error string, which no test prints today.
+
+Seventy-ninth: the wall was mis-described, and the correction matters more than the size. §78 said a
+larger text buffer made `wd_instance_call` fail; re-running it with the host's error string printed
+shows the opposite — the call *succeeds* and the symbols come back empty, so the failure is
+downstream of the call, in the reply the index decodes rather than in the call itself.
+
+That distinction decides where to look next. A call error would point at the host's staging of input
+and output; an empty reply points at the guest's encoder writing past what it can encode, or at the
+JSON-free CBOR writer's bounds when `REPLY_SIZE` grows. The next attempt should print `reply_len` and
+the first bytes of the reply at the 64 KiB size, which no test does today, instead of guessing at
+buffer numbers.
+
+The working size stays at 16 KiB text, 4 KiB reply and 64 KiB heap, which is what is committed, and
+the harness acceptance line stays unclaimed.
