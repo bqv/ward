@@ -120,6 +120,25 @@ static wd_module *load_module(wd_engine *engine, const char *dir,
   return module;
 }
 
+static wd_module *load_pinned(wd_engine *engine, const char *dir,
+                              const wd_pin *pins, size_t pins_len,
+                              const char *name, const wd_module_spec *spec,
+                              char **err) {
+  char file[256];
+  snprintf(file, sizeof(file), "%s.wasm", name);
+  for (size_t i = 0; pins != NULL && i < pins_len; i++) {
+    if (strcmp(pins[i].name, name) != 0) continue;
+    char pinned[256];
+    snprintf(pinned, sizeof(pinned), "%s@%s.wasm", name, pins[i].version);
+    char path[1024];
+    snprintf(path, sizeof(path), "%s/%s", dir, pinned);
+    struct stat st;
+    if (stat(path, &st) == 0) snprintf(file, sizeof(file), "%s", pinned);
+    break;
+  }
+  return load_module(engine, dir, file, spec, err);
+}
+
 static int net_request(wd_turn *turn, const uint8_t *in, size_t in_len,
                        uint8_t **out, size_t *out_len, char **err) {
   if (turn->endpoint == NULL) {
@@ -958,8 +977,14 @@ static int turn_capability(void *ctx, const char *capability,
   return -1;
 }
 
-wd_turn *wd_turn_new(wd_engine *engine, const char *module_dir, const char *root,
-                     char **err) {
+wd_turn *wd_turn_new(wd_engine *engine, const char *module_dir,
+                     const char *root, char **err) {
+  return wd_turn_new_pinned(engine, module_dir, root, NULL, 0, err);
+}
+
+wd_turn *wd_turn_new_pinned(wd_engine *engine, const char *module_dir,
+                            const char *root, const wd_pin *pins,
+                            size_t pins_len, char **err) {
   wd_turn *turn = calloc(1, sizeof(*turn));
   if (turn == NULL) {
     *err = strdup("out of memory");
@@ -986,27 +1011,27 @@ wd_turn *wd_turn_new(wd_engine *engine, const char *module_dir, const char *root
   wd_module_spec provider_spec = {"provider", provider_caps, 1, false};
   wd_module_spec tools_spec = {"tools", no_caps, 0, true};
 
-  turn->engine_module = load_module(engine, module_dir, "engine.wasm",
+  turn->engine_module = load_pinned(engine, module_dir, pins, pins_len, "engine",
                                     &engine_spec, err);
   if (turn->engine_module == NULL) goto fail;
-  turn->driver_module = load_module(engine, module_dir, "driver.wasm",
+  turn->driver_module = load_pinned(engine, module_dir, pins, pins_len, "driver",
                                     &driver_spec, err);
   if (turn->driver_module == NULL) goto fail;
-  turn->provider_module = load_module(engine, module_dir, "provider.wasm",
+  turn->provider_module = load_pinned(engine, module_dir, pins, pins_len, "provider",
                                       &provider_spec, err);
   if (turn->provider_module == NULL) goto fail;
-  turn->tools_module = load_module(engine, module_dir, "tools.wasm",
+  turn->tools_module = load_pinned(engine, module_dir, pins, pins_len, "tools",
                                    &tools_spec, err);
   if (turn->tools_module == NULL) goto fail;
-  turn->policy_module = load_module(engine, module_dir, "policy.wasm",
+  turn->policy_module = load_pinned(engine, module_dir, pins, pins_len, "policy",
                                     &policy_spec, err);
   if (turn->policy_module == NULL) goto fail;
-  turn->skills_module = load_module(engine, module_dir, "skills.wasm",
+  turn->skills_module = load_pinned(engine, module_dir, pins, pins_len, "skills",
                                     &skills_spec, err);
   if (turn->skills_module == NULL) goto fail;
   static const char *const judge_caps[] = {NULL};
   wd_module_spec judge_spec = {"judge", judge_caps, 0, true};
-  turn->judge_module = load_module(engine, module_dir, "judge.wasm",
+  turn->judge_module = load_pinned(engine, module_dir, pins, pins_len, "judge",
                                    &judge_spec, err);
   if (turn->judge_module == NULL) goto fail;
 

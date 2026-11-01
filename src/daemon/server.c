@@ -1839,7 +1839,8 @@ static wd_run *run_new(wd_server *srv, wd_session *session, char **err) {
   run->worker_fd = -1;
   run->http_fd = -1;
   snprintf(run->session_id, sizeof(run->session_id), "%s", session->id);
-  run->turn = wd_turn_new(srv->engine, dir, session->cwd, err);
+  run->turn = wd_turn_new_pinned(srv->engine, dir, session->cwd, session->pins,
+                                session->pins_len, err);
   if (run->turn == NULL) {
     free(run);
     return NULL;

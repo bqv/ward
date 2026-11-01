@@ -779,6 +779,20 @@ named `driver`.
 This is a reporting change only. Nothing resolves through the pins yet; that is the join, and it
 is still the one thing between this milestone and its acceptance line.
 
+Sixty-eighth: a turn resolves through the pins. `wd_turn_new_pinned` takes the session's pins and
+loads `<name>@<version>.wasm` when that file exists, falling back to `<name>.wasm` otherwise; the
+daemon passes `session->pins` when it creates a run. `wd_turn_new` stays as the unpinned wrapper,
+so the handful of tests that do not care are unchanged.
+
+The test is the distinction that makes it a measurement rather than a shape: it copies the modules
+to a temporary directory and corrupts `driver.wasm`, so an unpinned turn cannot be created at all,
+then pins `driver@1` and asserts the turn is created from `driver@1.wasm`. That is resolution
+happening, not a filename being passed through.
+
+Still missing from the join: the state handover itself. The pins now choose the version; nothing
+yet carries a module's exported state from the old version's instance to the new one, and
+`migration_failed` has no path that writes it.
+
 ## Resuming M5
 
 Where the milestone stands, so the next session does not have to reconstruct it: master is at

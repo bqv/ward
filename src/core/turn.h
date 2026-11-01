@@ -10,6 +10,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "core/session.h"
+
 #include "wasm/host.h"
 
 typedef struct wd_turn wd_turn;
@@ -22,6 +24,9 @@ typedef int (*wd_turn_emit)(void *ctx, const char *event, cbor_item_t *payload,
 
 wd_turn *wd_turn_new(wd_engine *engine, const char *module_dir, const char *root,
                      char **err);
+wd_turn *wd_turn_new_pinned(wd_engine *engine, const char *module_dir,
+                            const char *root, const wd_pin *pins,
+                            size_t pins_len, char **err);
 void wd_turn_free(wd_turn *turn);
 void wd_turn_set_root(wd_turn *turn, const char *root);
 void wd_turn_set_history(wd_turn *turn, cbor_item_t *history);
