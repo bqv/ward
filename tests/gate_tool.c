@@ -441,6 +441,28 @@ int main(void) {
   assert(event != NULL);
   wd_free(event);
 
+  cbor_item_t *stats_one = NULL;
+  cbor_item_t *stats_params = wd_map(1);
+  wd_put(stats_params, "id", wd_text(session));
+  assert(request(&a, a.next_id++, "stats.session", stats_params, &stats_one,
+                 NULL) == 0);
+  uint64_t turns = 0;
+  uint64_t text_bytes = 0;
+  uint64_t events = 0;
+  assert(wd_uint_of(wd_get(stats_one, "turns"), &turns));
+  assert(wd_uint_of(wd_get(stats_one, "text_bytes"), &text_bytes));
+  assert(wd_uint_of(wd_get(stats_one, "events"), &events));
+  assert(turns >= 1 && text_bytes > 0 && events >= 4);
+  wd_free(stats_one);
+
+  cbor_item_t *stats_all = NULL;
+  assert(request(&a, a.next_id++, "stats.global", wd_map(0), &stats_all, NULL) ==
+         0);
+  uint64_t sessions_total = 0;
+  assert(wd_uint_of(wd_get(stats_all, "sessions"), &sessions_total));
+  assert(sessions_total >= 1);
+  wd_free(stats_all);
+
   char path[512];
   snprintf(path, sizeof(path), "%s/out.txt", root);
   FILE *file = fopen(path, "r");

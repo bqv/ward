@@ -46,6 +46,7 @@ static void usage(FILE *out) {
           "  session set-model <id> <model>\n"
           "  model list     [--json]\n"
           "  model select   <id>\n"
+          "  stats          [<id>] [--json]\n"
           "  device pair    [--scope S] [--json]\n"
           "  device list    [--json]\n"
           "  device revoke  <serial>\n"
@@ -705,6 +706,66 @@ done:
   return rc;
 }
 
+static int command_stats(int argc, char **argv) {
+  const char *id = NULL;
+  bool json = false;
+  for (int i = 0; i < argc; i++) {
+    if (strcmp(argv[i], "--json") == 0)
+      json = true;
+    else if (strcmp(argv[i], "--socket") == 0 && i + 1 < argc)
+      i++;
+    else if (argv[i][0] != '-')
+      id = argv[i];
+  }
+  char *path = socket_from_args(argc, argv);
+  if (path == NULL) return 1;
+  wd_client client;
+  if (client_connect(&client, path) != 0) {
+    free(path);
+    return 1;
+  }
+  free(path);
+  if (client_handshake(&client) != 0) {
+    close(client.fd);
+    return 1;
+  }
+  int rc = 1;
+  cbor_item_t *result = NULL;
+  if (id != NULL) {
+    cbor_item_t *params = wd_map(1);
+    wd_put(params, "id", wd_text(id));
+    if (client_request(&client, "stats.session", params, &result) != 0)
+      goto done;
+  } else {
+    if (client_request(&client, "stats.global", wd_map(0), &result) != 0)
+      goto done;
+  }
+  if (json) {
+    print_json(result);
+  } else {
+    char *session = wd_text_copy(wd_get(result, "session"));
+    char *model = wd_text_copy(wd_get(result, "model"));
+    uint64_t sessions = 0, turns = 0, text_bytes = 0, events = 0;
+    wd_uint_of(wd_get(result, "sessions"), &sessions);
+    wd_uint_of(wd_get(result, "turns"), &turns);
+    wd_uint_of(wd_get(result, "text_bytes"), &text_bytes);
+    wd_uint_of(wd_get(result, "events"), &events);
+    if (session != NULL) printf("session     %s\n", session);
+    if (model != NULL) printf("model       %s\n", model);
+    if (session == NULL) printf("sessions    %llu\n", (unsigned long long)sessions);
+    printf("events      %llu\nturns       %llu\ntext bytes  %llu\n",
+           (unsigned long long)events, (unsigned long long)turns,
+           (unsigned long long)text_bytes);
+    free(session);
+    free(model);
+  }
+  rc = 0;
+done:
+  if (result != NULL) wd_free(result);
+  close(client.fd);
+  return rc;
+}
+
 static int command_model(int argc, char **argv) {
   if (argc == 0) {
     usage(stderr);
@@ -978,6 +1039,7 @@ int main(int argc, char **argv) {
   if (strcmp(command, "session") == 0) return command_session(argc - 2, argv + 2);
   if (strcmp(command, "device") == 0) return command_device(argc - 2, argv + 2);
   if (strcmp(command, "model") == 0) return command_model(argc - 2, argv + 2);
+  if (strcmp(command, "stats") == 0) return command_stats(argc - 2, argv + 2);
   fprintf(stderr, "ward: unknown command %s\n", command);
   usage(stderr);
   return 2;

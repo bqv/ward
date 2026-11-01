@@ -399,6 +399,52 @@ static cbor_item_t *session_cbor(wd_server *srv, hs_session *session) {
   return item;
 }
 
+static void handle_stats_session(wd_server *srv, wd_conn *conn, uint64_t id,
+                                 cbor_item_t *params) {
+  char *session_id = wd_text_copy(wd_get(params, "id"));
+  hs_session *session =
+      session_id != NULL ? hs_find(&srv->store, session_id) : NULL;
+  free(session_id);
+  if (session == NULL) {
+    conn_send_error(conn, id, WD_ERR_NOT_FOUND, "no such session");
+    conn_arm(srv, conn);
+    return;
+  }
+  hs_stats stats;
+  if (hs_measure(session, &stats) != 0) {
+    respond_internal(srv, conn, id, "cannot read the session log");
+    return;
+  }
+  cbor_item_t *result = wd_map(5);
+  wd_put(result, "session", wd_text(session->id));
+  wd_put(result, "model", wd_text(session->model));
+  wd_put(result, "events", wd_uint(stats.events));
+  wd_put(result, "turns", wd_uint(stats.turns));
+  wd_put(result, "text_bytes", wd_uint(stats.text_bytes));
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
+static void handle_stats_global(wd_server *srv, wd_conn *conn, uint64_t id) {
+  hs_stats total;
+  memset(&total, 0, sizeof(total));
+  for (size_t i = 0; i < srv->store.len; i++) {
+    hs_stats one;
+    if (hs_measure(srv->store.items[i], &one) == 0) {
+      total.events += one.events;
+      total.turns += one.turns;
+      total.text_bytes += one.text_bytes;
+    }
+  }
+  cbor_item_t *result = wd_map(4);
+  wd_put(result, "sessions", wd_uint(srv->store.len));
+  wd_put(result, "events", wd_uint(total.events));
+  wd_put(result, "turns", wd_uint(total.turns));
+  wd_put(result, "text_bytes", wd_uint(total.text_bytes));
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
 static void handle_session_label(wd_server *srv, wd_conn *conn, uint64_t id,
                                  cbor_item_t *params, int kind) {
   char *session_id = wd_text_copy(wd_get(params, "id"));
@@ -1183,6 +1229,10 @@ static void handle_request(wd_server *srv, wd_conn *conn, uint64_t id,
     handle_session_get(srv, conn, id, params);
   } else if (strcmp(method, "session.resume") == 0) {
     handle_session_resume(srv, conn, id, params);
+  } else if (strcmp(method, "stats.session") == 0) {
+    handle_stats_session(srv, conn, id, params);
+  } else if (strcmp(method, "stats.global") == 0) {
+    handle_stats_global(srv, conn, id);
   } else if (strcmp(method, "session.rename") == 0) {
     handle_session_label(srv, conn, id, params, 0);
   } else if (strcmp(method, "session.archive") == 0) {

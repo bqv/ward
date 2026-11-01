@@ -188,6 +188,11 @@ rest — the label fields vanished from every response while the daemon log show
 read. `session_cbor` now builds the map at its exact size, and `session.list` counts first
 and then allocates the array, because the same bug bites `cbor_array_push` on a `wd_array(0)`.
 
+Sixteenth: usage stats. `hs_measure` replays a session's log and counts its events, its
+`turn.end`s and the bytes of its text deltas; `stats.session` and `stats.global` serve the
+counters and `ward stats [<id>]` prints them. No tokenizer yet, so this is the shape cost
+accounting will price rather than a price — the numbers are exact, the money is absent.
+
 What is still missing from M1 is therefore the provider half of the asynchronous split.
 
 M0's acceptance is 1,000 round-trips/s over UDS and a fuzz-clean decoder. A

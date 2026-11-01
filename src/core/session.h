@@ -45,4 +45,12 @@ typedef int (*hs_replay_cb)(void *ctx, uint64_t seq, cbor_item_t *event);
 
 int hs_replay(hs_session *s, uint64_t from, hs_replay_cb cb, void *ctx);
 
+typedef struct {
+  uint64_t events;
+  uint64_t turns;
+  uint64_t text_bytes;
+} hs_stats;
+
+int hs_measure(hs_session *s, hs_stats *out);
+
 #endif

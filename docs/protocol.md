@@ -116,6 +116,14 @@ to `"unset"`. The id is minted by the daemon, never supplied by the client.
 
 **`session.get`** — params `{id: text}`. Returns `{session: <session>}`, or `not_found`.
 
+**`stats.session`** — params `{id}`. Counts the session's log: `{session, model, events,
+turns, text_bytes}`, where `events` is `last_seq`, `turns` the number of `turn.end` events
+and `text_bytes` the total length of the text deltas. These are the counters cost accounting
+will price.
+
+**`stats.global`** — no params. The same counters summed over every session, plus
+`{sessions}`.
+
 **`session.rename`** — params `{id, name}`. Stores the label in the label database and
 appends `session.updated` so subscribers see it. Answers `{session}`.
 

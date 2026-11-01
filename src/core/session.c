@@ -316,6 +316,29 @@ int hs_fork(hs_store *st, hs_session *parent, uint64_t upto,
   return 0;
 }
 
+static int measure_record(void *ctx, uint64_t seq, cbor_item_t *event) {
+  hs_stats *stats = ctx;
+  (void)seq;
+  char *kind = wd_text_copy(wd_get(event, "kind"));
+  if (kind != NULL) {
+    if (strcmp(kind, "turn.end") == 0) stats->turns++;
+    if (strcmp(kind, "text.delta") == 0) {
+      char *text = wd_text_copy(wd_get(wd_get(event, "payload"), "text"));
+      if (text != NULL) stats->text_bytes += strlen(text);
+      free(text);
+    }
+  }
+  free(kind);
+  return 0;
+}
+
+int hs_measure(hs_session *s, hs_stats *out) {
+  memset(out, 0, sizeof(*out));
+  if (hs_replay(s, 0, measure_record, out) < 0) return -1;
+  out->events = s->last_seq;
+  return 0;
+}
+
 typedef struct {
   uint64_t from;
   hs_replay_cb cb;
