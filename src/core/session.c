@@ -367,6 +367,120 @@ int hs_measure(hs_session *s, hs_stats *out) {
 }
 
 typedef struct {
+  char *role;
+  char *text;
+} hist_turn;
+
+typedef struct {
+  hist_turn *turns;
+  size_t len;
+  size_t cap;
+  char *pending;
+  size_t pending_len;
+} hist_ctx;
+
+static int hist_push(hist_ctx *hc, const char *role, const char *text) {
+  if (hc->len == hc->cap) {
+    size_t grown = hc->cap == 0 ? 8 : hc->cap * 2;
+    hist_turn *next = realloc(hc->turns, grown * sizeof(*next));
+    if (next == NULL) return -1;
+    hc->turns = next;
+    hc->cap = grown;
+  }
+  hc->turns[hc->len].role = strdup(role);
+  hc->turns[hc->len].text = strdup(text != NULL ? text : "");
+  if (hc->turns[hc->len].role == NULL || hc->turns[hc->len].text == NULL)
+    return -1;
+  hc->len++;
+  return 0;
+}
+
+static int history_record(void *ctx, uint64_t seq, cbor_item_t *event) {
+  hist_ctx *hc = ctx;
+  (void)seq;
+  char *kind = wd_text_copy(wd_get(event, "kind"));
+  cbor_item_t *payload = wd_get(event, "payload");
+  if (kind == NULL) return 0;
+  if (strcmp(kind, "session.prompted") == 0) {
+    char *text = wd_text_copy(wd_get(payload, "text"));
+    if (text != NULL) {
+      if (hist_push(hc, "user", text) != 0) {
+        free(text);
+        free(kind);
+        return 1;
+      }
+      free(text);
+    }
+  } else if (strcmp(kind, "text.delta") == 0) {
+    char *piece = wd_text_copy(wd_get(payload, "text"));
+    if (piece != NULL) {
+      size_t add = strlen(piece);
+      char *grown = realloc(hc->pending, hc->pending_len + add + 1);
+      if (grown == NULL) {
+        free(piece);
+        free(kind);
+        return 1;
+      }
+      hc->pending = grown;
+      memcpy(hc->pending + hc->pending_len, piece, add);
+      hc->pending_len += add;
+      hc->pending[hc->pending_len] = '\0';
+      free(piece);
+    }
+  } else if (strcmp(kind, "turn.end") == 0) {
+    if (hc->pending != NULL) {
+      if (hist_push(hc, "assistant", hc->pending) != 0) {
+        free(kind);
+        return 1;
+      }
+      hc->pending[0] = '\0';
+      hc->pending_len = 0;
+    }
+  }
+  free(kind);
+  return 0;
+}
+
+int hs_history(hs_session *s, size_t budget, cbor_item_t **out) {
+  hist_ctx hc;
+  memset(&hc, 0, sizeof(hc));
+  int rc = hs_replay(s, 0, history_record, &hc);
+  free(hc.pending);
+  if (rc < 0) {
+    for (size_t i = 0; i < hc.len; i++) {
+      free(hc.turns[i].role);
+      free(hc.turns[i].text);
+    }
+    free(hc.turns);
+    return -1;
+  }
+  size_t first = 0;
+  size_t total = 0;
+  for (size_t i = hc.len; i > 0; i--) {
+    size_t add = strlen(hc.turns[i - 1].text);
+    if (budget != 0 && total + add > budget) break;
+    total += add;
+    first = i - 1;
+  }
+  cbor_item_t *array = wd_array(hc.len - first);
+  for (size_t i = first; i < hc.len; i++) {
+    cbor_item_t *entry = wd_map(2);
+    wd_put(entry, "role", wd_text(hc.turns[i].role));
+    wd_put(entry, "text", wd_text(hc.turns[i].text));
+    bool pushed = cbor_array_push(array, entry);
+    cbor_decref(&entry);
+    if (!pushed) break;
+  }
+  for (size_t i = 0; i < hc.len; i++) {
+    free(hc.turns[i].role);
+    free(hc.turns[i].text);
+  }
+  free(hc.turns);
+  *out = array;
+  return 0;
+}
+
+typedef struct {
   uint64_t from;
   hs_replay_cb cb;
   void *ctx;

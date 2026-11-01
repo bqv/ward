@@ -134,6 +134,11 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
   uint32_t status = 0;
   int have_prompt = 0;
   int have_body = 0;
+  const uint8_t *hist_text[32];
+  uint32_t hist_text_len[32];
+  const uint8_t *hist_role[32];
+  uint32_t hist_role_len[32];
+  uint32_t hist_count = 0;
   if (wd_r_map(&r, &n) != 0) return;
   for (uint32_t i = 0; i < n; i++) {
     const uint8_t *kp = 0;
@@ -145,6 +150,36 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
     } else if (wd_key_eq(kp, kn, "body")) {
       if (wd_r_text(&r, body, sizeof(body), &body_len) != 0) return;
       have_body = 1;
+    } else if (wd_key_eq(kp, kn, "history")) {
+      uint32_t hn = 0;
+      if (wd_r_array(&r, &hn) != 0) return;
+      for (uint32_t e = 0; e < hn && hist_count < 32; e++) {
+        uint32_t mn = 0;
+        if (wd_r_map(&r, &mn) != 0) return;
+        const uint8_t *tp = 0;
+        uint32_t tn = 0;
+        const uint8_t *rp = 0;
+        uint32_t rn = 0;
+        for (uint32_t k = 0; k < mn; k++) {
+          const uint8_t *hk = 0;
+          uint32_t hl = 0;
+          if (wd_r_text_ptr(&r, &hk, &hl) != 0) return;
+          if (wd_key_eq(hk, hl, "role")) {
+            if (wd_r_text_ptr(&r, &rp, &rn) != 0) return;
+          } else if (wd_key_eq(hk, hl, "text")) {
+            if (wd_r_text_ptr(&r, &tp, &tn) != 0) return;
+          } else if (wd_r_skip(&r) != 0) {
+            return;
+          }
+        }
+        if (tp != 0 && rp != 0) {
+          hist_text[hist_count] = tp;
+          hist_text_len[hist_count] = tn;
+          hist_role[hist_count] = rp;
+          hist_role_len[hist_count] = rn;
+          hist_count++;
+        }
+      }
     } else if (wd_key_eq(kp, kn, "status")) {
       uint32_t value = 0;
       if (wd_r_uint(&r, &value) != 0) return;
@@ -169,17 +204,37 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
   }
   if (!have_prompt) return;
 
-  char escaped[JSON_SIZE];
-  uint32_t escaped_len = json_escape(escaped, sizeof(escaped), prompt, prompt_len);
   static const char prefix[] =
-      "{\"model\":\"local\",\"stream\":true,\"messages\":[{\"role\":\"user\","
-      "\"content\":\"";
-  static const char suffix[] = "\"}]}";
+      "{\"model\":\"local\",\"stream\":true,\"messages\":[";
   char json[JSON_SIZE];
   uint32_t jl = 0;
-  for (uint32_t i = 0; prefix[i] != '\0' && jl < sizeof(json); i++) json[jl++] = prefix[i];
-  for (uint32_t i = 0; i < escaped_len && jl < sizeof(json); i++) json[jl++] = escaped[i];
-  for (uint32_t i = 0; suffix[i] != '\0' && jl < sizeof(json); i++) json[jl++] = suffix[i];
+  for (uint32_t i = 0; prefix[i] != '\0' && jl < sizeof(json); i++)
+    json[jl++] = prefix[i];
+  for (uint32_t e = 0; e < hist_count; e++) {
+    static const char role_open[] = "{\"role\":\"";
+    static const char content_open[] = "\",\"content\":\"";
+    for (uint32_t i = 0; role_open[i] != '\0' && jl < sizeof(json); i++)
+      json[jl++] = role_open[i];
+    for (uint32_t i = 0; i < hist_role_len[e] && jl < sizeof(json); i++)
+      json[jl++] = (char)hist_role[e][i];
+    for (uint32_t i = 0; content_open[i] != '\0' && jl < sizeof(json); i++)
+      json[jl++] = content_open[i];
+    jl += json_escape(json + jl, sizeof(json) - jl, hist_text[e], hist_text_len[e]);
+    if (jl + 2 < sizeof(json)) {
+      json[jl++] = '"';
+      json[jl++] = '}';
+      json[jl++] = ',';
+    }
+  }
+  {
+    static const char user_open[] = "{\"role\":\"user\",\"content\":\"";
+    static const char suffix[] = "\"}]}";
+    for (uint32_t i = 0; user_open[i] != '\0' && jl < sizeof(json); i++)
+      json[jl++] = user_open[i];
+    jl += json_escape(json + jl, sizeof(json) - jl, prompt, prompt_len);
+    for (uint32_t i = 0; suffix[i] != '\0' && jl < sizeof(json); i++)
+      json[jl++] = suffix[i];
+  }
 
   wd_w_init(&w, reply, REPLY_SIZE);
   wd_w_map(&w, 1);

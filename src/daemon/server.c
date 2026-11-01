@@ -882,6 +882,10 @@ static void handle_session_prompt(wd_server *srv, wd_conn *conn, uint64_t id,
     free(err);
     return;
   }
+  cbor_item_t *history = NULL;
+  if (hs_history(session, 8192, &history) == 0)
+    wd_turn_set_history(turn, history);
+
   cbor_item_t *asked = wd_map(1);
   wd_put(asked, "text", wd_text(text));
   uint64_t asked_seq = 0;

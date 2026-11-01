@@ -55,5 +55,6 @@ typedef struct {
 } hs_stats;
 
 int hs_measure(hs_session *s, hs_stats *out);
+int hs_history(hs_session *s, size_t budget, cbor_item_t **out);
 
 #endif

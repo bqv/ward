@@ -104,6 +104,45 @@ int main(void) {
   hs_session *cut = NULL;
   assert(hs_fork(&store, reloaded, 1, &cut) == 0);
   assert(cut->last_seq == 2);
+  hs_session *hist = NULL;
+  assert(hs_create(&store, "/tmp", NULL, &hist) == 0);
+  cbor_item_t *asked = wd_map(1);
+  wd_put(asked, "text", wd_text("first question"));
+  assert(hs_emit(hist, "session.prompted", asked, NULL) == 0);
+  cbor_item_t *delta = wd_map(1);
+  wd_put(delta, "text", wd_text("first answer"));
+  assert(hs_emit(hist, "text.delta", delta, NULL) == 0);
+  assert(hs_emit(hist, "turn.end", wd_map(0), NULL) == 0);
+  cbor_item_t *asked2 = wd_map(1);
+  wd_put(asked2, "text", wd_text("second question"));
+  assert(hs_emit(hist, "session.prompted", asked2, NULL) == 0);
+  cbor_item_t *delta2 = wd_map(1);
+  wd_put(delta2, "text", wd_text("second answer"));
+  assert(hs_emit(hist, "text.delta", delta2, NULL) == 0);
+  assert(hs_emit(hist, "turn.end", wd_map(0), NULL) == 0);
+
+  cbor_item_t *built = NULL;
+  assert(hs_history(hist, 0, &built) == 0);
+  assert(cbor_array_size(built) == 4);
+  cbor_item_t **turns = cbor_array_handle(built);
+  char *role = wd_text_copy(wd_get(turns[0], "role"));
+  char *text = wd_text_copy(wd_get(turns[0], "text"));
+  assert(role != NULL && strcmp(role, "user") == 0);
+  assert(text != NULL && strcmp(text, "first question") == 0);
+  free(role);
+  free(text);
+  role = wd_text_copy(wd_get(turns[3], "role"));
+  text = wd_text_copy(wd_get(turns[3], "text"));
+  assert(role != NULL && strcmp(role, "assistant") == 0);
+  assert(text != NULL && strcmp(text, "second answer") == 0);
+  free(role);
+  free(text);
+  wd_free(built);
+
+  assert(hs_history(hist, 30, &built) == 0);
+  assert(cbor_array_size(built) == 2);
+  wd_free(built);
+
   hs_close(&store);
 
   printf("session tests passed\n");

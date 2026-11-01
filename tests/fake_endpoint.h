@@ -33,6 +33,9 @@ static int find_int(const char *buf, const char *key) {
 static int extract_content(const char *buf, char *out, size_t cap) {
   const char *at = strstr(buf, "\"content\":\"");
   if (at == NULL) return -1;
+  for (const char *next = strstr(at + 1, "\"content\":\""); next != NULL;
+       next = strstr(next + 1, "\"content\":\""))
+    at = next;
   at += strlen("\"content\":\"");
   size_t n = 0;
   while (*at != '\0' && *at != '"' && n + 1 < cap) out[n++] = *at++;

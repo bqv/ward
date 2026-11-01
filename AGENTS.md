@@ -219,6 +219,14 @@ This is the foundation the two remaining M2 rows need: compaction summarises wha
 and a price needs both sides of it. Until this commit the user's own words were not durable
 anywhere, which would have made either row a guess.
 
+Twentieth: history. `hs_history` replays a log into `[{role, text}]` pairs — a
+`session.prompted` opens a user turn and the deltas up to `turn.end` close an assistant one —
+and trims from the front to a byte budget. The daemon sets it on the turn before each
+prompt, core merges it into the provider payload and `modules/provider` writes the messages
+in order, so a conversation is answered in context rather than one prompt at a time. The
+fake endpoint now echoes the *newest* content, so the gates still assert the current prompt
+while the history rides along.
+
 M0's acceptance is 1,000 round-trips/s over UDS and a fuzz-clean decoder. A
 gate that is not measured is not met.
 

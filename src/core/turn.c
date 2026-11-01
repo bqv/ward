@@ -40,6 +40,7 @@ struct wd_turn {
   wd_worker *worker;
   wd_worker *tool_worker;
   wd_http_job *http_job;
+  cbor_item_t *history;
   char *worker_root;
   wd_instance *policy;
   int pending_kind;
@@ -668,6 +669,12 @@ fail:
   return NULL;
 }
 
+void wd_turn_set_history(wd_turn *turn, cbor_item_t *history) {
+  if (turn == NULL) return;
+  if (turn->history != NULL) wd_free(turn->history);
+  turn->history = history;
+}
+
 void wd_turn_set_root(wd_turn *turn, const char *root) {
   if (turn == NULL || root == NULL) return;
   char resolved[PATH_MAX];
@@ -679,6 +686,7 @@ void wd_turn_set_root(wd_turn *turn, const char *root) {
 
 void wd_turn_free(wd_turn *turn) {
   if (turn == NULL) return;
+  if (turn->history != NULL) wd_free(turn->history);
   wd_http_job_free(turn->http_job);
   wd_worker_free(turn->worker);
   free(turn->worker_root);
@@ -706,6 +714,7 @@ static wd_worker *worker_for(wd_turn *turn) {
     return turn->worker;
   if (turn->worker != NULL && turn->tool_worker == turn->worker)
     return turn->worker;
+  if (turn->history != NULL) wd_free(turn->history);
   wd_http_job_free(turn->http_job);
   wd_worker_free(turn->worker);
   turn->worker = NULL;
@@ -787,6 +796,7 @@ static int net_submit(wd_turn *turn, cbor_item_t *reply, char **err) {
     *err = strdup("net.request: the endpoint is not loopback");
     return -1;
   }
+  if (turn->history != NULL) wd_free(turn->history);
   wd_http_job_free(turn->http_job);
   turn->http_job =
       wd_http_start(url, "POST", body != NULL ? body : "", 300000, 4u << 20, err);
@@ -909,7 +919,18 @@ static int process_action(wd_turn *turn, cbor_item_t *action, wd_turn_emit emit,
       rc = -1;
     } else if (instance == turn->provider) {
       cbor_item_t *request = NULL;
-      rc = provider_phase(turn, payload, &request, err);
+      if (turn->history != NULL) {
+        char *text = wd_text_copy(wd_get(payload, "prompt"));
+        cbor_item_t *merged = wd_map(2);
+        wd_put(merged, "prompt", wd_text(text != NULL ? text : ""));
+        free(text);
+        cbor_item_t *shared = turn->history;
+        if (cbor_incref(shared)) wd_put(merged, "history", shared);
+        rc = provider_phase(turn, merged, &request, err);
+        wd_free(merged);
+      } else {
+        rc = provider_phase(turn, payload, &request, err);
+      }
       if (rc == 0) {
         int parked = net_submit(turn, request, err);
         wd_free(request);
@@ -1105,6 +1126,7 @@ int wd_turn_resume_http(wd_turn *turn, wd_turn_emit emit, void *ctx,
   turn->pending_kind = 0;
   wd_http_response response;
   int rc = wd_http_job_finish(turn->http_job, &response, err);
+  if (turn->history != NULL) wd_free(turn->history);
   wd_http_job_free(turn->http_job);
   turn->http_job = NULL;
   cbor_item_t *message = wd_map(2);
