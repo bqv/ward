@@ -1294,3 +1294,18 @@ A wrong turn worth recording: the first attempt put the freeze in a spot that co
 gate failed on `[rules]` and the live session had no head at all. The test caught it in one run; the fix was
 to place the block in `run_new` beside the model and system wiring, and to re-apply the head in the rebuild
 branch too.
+
+Ninety-eighth: compaction branches. `session.compact` no longer rewrites the session it was asked about: it
+forks the log at the current sequence, records `session.compacted` on the **child**, and answers
+`{session, parent, branched, through, summary}`. The parent keeps its transcript and its llama.cpp cache, which
+is the point — compaction used to discard every turn in place and force a full re-prefill. `in_place: true`
+keeps the old shape for callers that want it.
+
+`session_test` asserts both halves: the branch's history is a single system message, and the parent still has
+all six entries afterwards.
+
+`ward session compact <id>` drives it, and the live attempt failed with `provider_rejected` — the compact
+request came back non-200 from the local router while the router's own log shows a 14-token completion, so
+something in the compact request shape is off. That is a real bug, surfaced rather than hidden by the new error
+taxonomy, and it is the next thing to chase: the branch machinery and the summary call are separable, and the
+summary call is the part failing.

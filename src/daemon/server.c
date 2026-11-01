@@ -749,11 +749,26 @@ static void handle_session_compact(wd_server *srv, wd_conn *conn, uint64_t id,
     return;
   }
   free(err);
+  bool in_place = false;
+  cbor_item_t *flag = wd_get(params, "in_place");
+  if (flag != NULL) in_place = cbor_get_bool(flag);
+  wd_session *target = session;
+  bool branched = false;
+  if (!in_place) {
+    wd_session *child = NULL;
+    if (wd_session_fork(&srv->store, session, session->last_seq, &child) != 0) {
+      free(summary);
+      respond_internal(srv, conn, id, "cannot branch the session");
+      return;
+    }
+    target = child;
+    branched = true;
+  }
   cbor_item_t *record = wd_map(2);
-  wd_put(record, "through", wd_uint(session->last_seq));
+  wd_put(record, "through", wd_uint(target->last_seq));
   wd_put(record, "summary", wd_text(summary));
   uint64_t seq = 0;
-  if (wd_session_emit(session, "session.compacted", record, &seq) != 0) {
+  if (wd_session_emit(target, "session.compacted", record, &seq) != 0) {
     free(summary);
     respond_internal(srv, conn, id, "cannot record the summary");
     return;
@@ -761,9 +776,11 @@ static void handle_session_compact(wd_server *srv, wd_conn *conn, uint64_t id,
   cbor_item_t *event = wd_map(2);
   wd_put(event, "through", wd_uint(seq - 1));
   wd_put(event, "summary", wd_text(summary));
-  conn_broadcast(srv, session, "session.compacted", seq, event);
-  cbor_item_t *result = wd_map(3);
-  wd_put(result, "session", wd_text(session->id));
+  conn_broadcast(srv, target, "session.compacted", seq, event);
+  cbor_item_t *result = wd_map(5);
+  wd_put(result, "session", wd_text(target->id));
+  wd_put(result, "parent", wd_text(branched ? session->id : target->id));
+  wd_put(result, "branched", cbor_build_bool(branched));
   wd_put(result, "through", wd_uint(seq - 1));
   wd_put(result, "summary", wd_text(summary));
   free(summary);

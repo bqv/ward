@@ -46,6 +46,7 @@ static void usage(FILE *out) {
           "  session fork   <id> [--from SEQ] [--json]\n"
           "  session set-model <id> <model>\n"
           "  session set-system <id> <text>\n"
+          "  session compact <id>\n"
           "  model list     [--json]\n"
           "  model probe    <id> [--json]\n"
           "  model select   <id>\n"
@@ -542,6 +543,24 @@ static int command_session(int argc, char **argv) {
     if (client_request(&client, "session.set_model", params, &result) != 0)
       goto done;
     printf("model %s\n", text);
+    rc = 0;
+  } else if (strcmp(sub, "compact") == 0) {
+    if (id == NULL) {
+      fprintf(stderr, "ward: session compact needs an id\n");
+      goto done;
+    }
+    cbor_item_t *params = wd_map(1);
+    wd_put(params, "id", wd_text(id));
+    if (client_request(&client, "session.compact", params, &result) != 0)
+      goto done;
+    char *branch = wd_text_copy(wd_get(result, "session"));
+    char *parent = wd_text_copy(wd_get(result, "parent"));
+    char *summary = wd_text_copy(wd_get(result, "summary"));
+    printf("compacted %s into %s\n%s\n", parent != NULL ? parent : "?",
+           branch != NULL ? branch : "?", summary != NULL ? summary : "");
+    free(branch);
+    free(parent);
+    free(summary);
     rc = 0;
   } else if (strcmp(sub, "set-system") == 0) {
     if (id == NULL || text == NULL) {

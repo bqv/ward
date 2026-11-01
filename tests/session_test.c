@@ -255,6 +255,27 @@ int main(void) {
     }
     wd_free(first);
     wd_free(second);
+
+    wd_session *branch = NULL;
+    assert(wd_session_fork(&store, stable, stable->last_seq, &branch) == 0);
+    assert(branch != NULL);
+    cbor_item_t *compacted = wd_map(2);
+    wd_put(compacted, "through", wd_uint(branch->last_seq));
+    wd_put(compacted, "summary", wd_text("two questions, two answers"));
+    assert(wd_session_emit(branch, "session.compacted", compacted, NULL) == 0);
+    cbor_item_t *branch_history = NULL;
+    assert(wd_session_history(branch, 0, &branch_history) == 0);
+    assert(cbor_array_size(branch_history) == 1);
+    cbor_item_t **branch_items = cbor_array_handle(branch_history);
+    char *branch_role = wd_text_copy(wd_get(branch_items[0], "role"));
+    assert(branch_role != NULL && strcmp(branch_role, "system") == 0);
+    free(branch_role);
+    wd_free(branch_history);
+
+    cbor_item_t *parent_history = NULL;
+    assert(wd_session_history(stable, 0, &parent_history) == 0);
+    assert(cbor_array_size(parent_history) == 6);
+    wd_free(parent_history);
   }
 
   wd_store_close(&store);
