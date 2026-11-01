@@ -42,7 +42,14 @@ host (`src/wasm/host.c`) with the module ABI frozen in `docs/modules.md` — eng
 store limits, fuel, the single `ward.cap` import, pure-module import enforcement and
 state export/import, proven by `wasm-test` against real guests.
 
-Next: the `engine`/`driver` pair and the dispatcher that routes their actions. A method is served only when
+Third: the `engine`/`driver` pair as real guests and `src/core/turn.c`, the generic
+dispatcher. The driver returns actions; core routes an `invoke` to the named module and
+feeds the result back, and turns `emit` into an event. `driver` reaches `engine` only
+through `ward.cap("engine.call")`, core-mediated. `turn-test` runs two prompts end to
+end through all three guests.
+
+Next: serve `session.prompt` and stream its events to a client, then the provider over a
+local endpoint. A method is served only when
 `docs/protocol.md` says it is served — the rest of the frozen list answers
 `not_supported`.
 
@@ -119,7 +126,9 @@ decode in core goes through `wd_decode`, which pre-scans with `scan_cbor`
 
 Its reference counting is also unusual: `cbor_map_add` and `cbor_array_push`
 **incref** what they take, so the caller must `cbor_decref` its own reference
-afterwards. Getting that backwards leaks every key and value; ASan only catches
+afterwards (which is what `wd_put` does for you). `wd_encode` **consumes** the item
+it is given — it frees it, including on failure — so encoding a borrowed subtree
+means a local `cbor_serialized_size`/`cbor_serialize` pair, never `wd_encode`. Getting that backwards leaks every key and value; ASan only catches
 it because the suite runs with leak detection.
 
 ## Traps already in the design

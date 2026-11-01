@@ -35,6 +35,7 @@ core = static_library('ward-core',
     'src/core/ids.c',
     'src/core/log.c',
     'src/core/session.c',
+    'src/core/turn.c',
     'src/wasm/host.c',
   ),
   include_directories: inc,
@@ -110,6 +111,34 @@ guest_importer = custom_target('guest-importer',
   command: [wasm_cc, guest_flags, '@INPUT@', '-o', '@OUTPUT@'],
 )
 alias_target('guests', guest_echo, guest_wasi, guest_importer)
+
+abi_inc = meson.current_source_dir() / 'modules/abi'
+module_engine = custom_target('engine.wasm',
+  input: 'modules/engine/engine.c',
+  output: 'engine.wasm',
+  command: [wasm_cc, guest_flags, '-I', abi_inc, '@INPUT@', '-o', '@OUTPUT@'],
+)
+module_driver = custom_target('driver.wasm',
+  input: 'modules/driver/driver.c',
+  output: 'driver.wasm',
+  command: [wasm_cc, guest_flags, '-I', abi_inc, '@INPUT@', '-o', '@OUTPUT@'],
+)
+module_provider = custom_target('provider.wasm',
+  input: 'modules/provider/provider.c',
+  output: 'provider.wasm',
+  command: [wasm_cc, guest_flags, '-I', abi_inc, '@INPUT@', '-o', '@OUTPUT@'],
+)
+alias_target('modules', module_engine, module_driver, module_provider)
+
+module_env = environment()
+module_env.set('WARD_MODULE_DIR', meson.current_build_dir())
+turn_test = executable('turn-test', 'tests/turn_test.c',
+  include_directories: inc,
+  link_with: core,
+  dependencies: deps,
+)
+test('turn', turn_test, env: module_env, timeout: 120,
+     depends: [module_engine, module_driver, module_provider])
 
 wasm_env = environment()
 wasm_env.set('WARD_GUEST_DIR', meson.current_build_dir())
