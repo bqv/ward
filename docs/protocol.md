@@ -130,6 +130,14 @@ fields stay the same when a real tokenizer replaces the estimate.
 **`stats.global`** — no params. The same counters summed over every session, plus
 `{sessions}`.
 
+**Terminals.** `terminal.open {id, command?, rows?, cols?}` starts a command under a
+pseudo-terminal in the session's cwd (default `sh -i`) and answers `{terminal, pid}`.
+`terminal.write {terminal, data}`, `terminal.resize {terminal, rows, cols}` and
+`terminal.close {terminal}` drive it, answering `{written}`, `{resized}` and `{closed}`.
+Output arrives as `terminal.output {terminal, data}` — a **non-durable** broadcast, not a logged
+event: a terminal can produce unbounded text and the session log is not its place. The stream
+ends with `terminal.output {terminal, eof: true}`; the handle is then invalid.
+
 **MCP.** `/mcp <json request>` sends one JSON-RPC line to the configured MCP server: core's
 `mcp.call` capability runs the server binary (`WARD_MCP_BIN`, else `~/bin/mcp`) as a child,
 writes the request to its stdin, closes it, and answers `{ok, status, text}` with the

@@ -26,8 +26,10 @@
 #include <unistd.h>
 
 #include "core/approval.h"
+#include "core/ids.h"
 #include "core/labels.h"
 #include "core/models.h"
+#include "core/pty.h"
 #include "core/schedule.h"
 #include "core/session.h"
 #include "core/util.h"
@@ -83,6 +85,22 @@ typedef struct {
   wd_run *run;
   int kind;
 } wd_run_token;
+
+#define WD_MAX_TERMS 8
+
+typedef struct {
+  char id[17];
+  wd_session *session;
+  wd_pty *pty;
+  bool used;
+} wd_term;
+
+typedef struct {
+  wd_term *term;
+} wd_term_token;
+
+static wd_term terminals[WD_MAX_TERMS];
+static wd_term_token term_tokens[WD_MAX_TERMS];
 
 #define WD_MAX_RUNS 16
 
@@ -1193,6 +1211,173 @@ static void handle_subagent_interrupt(wd_server *srv, wd_conn *conn,
   conn_arm(srv, conn);
 }
 
+static wd_term *term_find(const char *handle) {
+  if (handle == NULL) return NULL;
+  for (size_t i = 0; i < WD_MAX_TERMS; i++) {
+    if (terminals[i].used && strcmp(terminals[i].id, handle) == 0)
+      return &terminals[i];
+  }
+  return NULL;
+}
+
+static void term_drop(wd_server *srv, wd_term *term) {
+  if (term == NULL || !term->used) return;
+  struct epoll_event ev;
+  memset(&ev, 0, sizeof(ev));
+  (void)epoll_ctl(srv->epoll_fd, EPOLL_CTL_DEL, wd_pty_fd(term->pty), &ev);
+  wd_pty_close(term->pty);
+  memset(term, 0, sizeof(*term));
+}
+
+static void term_announce(wd_server *srv, wd_term *term, const char *field) {
+  cbor_item_t *payload = wd_map(2);
+  wd_put(payload, "terminal", wd_text(term->id));
+  wd_put(payload, field, cbor_build_bool(true));
+  conn_broadcast(srv, term->session, "terminal.output", 0, payload);
+}
+
+static void term_pump(wd_server *srv, wd_term *term) {
+  char buf[4096];
+  ssize_t n = wd_pty_read(term->pty, buf, sizeof(buf));
+  if (n > 0) {
+    cbor_item_t *payload = wd_map(2);
+    wd_put(payload, "terminal", wd_text(term->id));
+    wd_put(payload, "data", wd_text_len(buf, (size_t)n));
+    conn_broadcast(srv, term->session, "terminal.output", 0, payload);
+    return;
+  }
+  if (n == 0 || (n < 0 && errno != EAGAIN && errno != EINTR)) {
+    term_announce(srv, term, "eof");
+    term_drop(srv, term);
+    return;
+  }
+  if (n < 0 && !wd_pty_alive(term->pty)) {
+    term_announce(srv, term, "eof");
+    term_drop(srv, term);
+  }
+}
+
+static void handle_terminal_open(wd_server *srv, wd_conn *conn, uint64_t id,
+                                 cbor_item_t *params) {
+  char *session_id = wd_text_copy(wd_get(params, "id"));
+  char *command = wd_text_copy(wd_get(params, "command"));
+  uint64_t rows = 24;
+  uint64_t cols = 80;
+  wd_uint_of(wd_get(params, "rows"), &rows);
+  wd_uint_of(wd_get(params, "cols"), &cols);
+  wd_session *session =
+      session_id != NULL ? wd_session_find(&srv->store, session_id) : NULL;
+  if (session == NULL) {
+    free(session_id);
+    free(command);
+    conn_send_error(conn, id, WD_ERR_NOT_FOUND, "no such session");
+    return;
+  }
+  size_t slot = WD_MAX_TERMS;
+  for (size_t i = 0; i < WD_MAX_TERMS; i++) {
+    if (!terminals[i].used) {
+      slot = i;
+      break;
+    }
+  }
+  if (slot == WD_MAX_TERMS) {
+    free(session_id);
+    free(command);
+    conn_send_error(conn, id, WD_ERR_CONFLICT, "too many terminals");
+    return;
+  }
+  const char *argv[4];
+  size_t argc = 0;
+  const char *shell = command != NULL && command[0] != '\0' ? command : "sh";
+  argv[argc++] = shell;
+  argv[argc++] = "-i";
+  argv[argc] = NULL;
+  char *err = NULL;
+  wd_pty *pty = wd_pty_open(argv, session->cwd, (uint16_t)(rows == 0 ? 24 : rows),
+                            (uint16_t)(cols == 0 ? 80 : cols), &err);
+  free(command);
+  free(session_id);
+  if (pty == NULL) {
+    char message[160];
+    snprintf(message, sizeof(message), "%s",
+             err != NULL ? err : "cannot open a terminal");
+    free(err);
+    conn_send_error(conn, id, WD_ERR_INTERNAL, message);
+    return;
+  }
+  wd_term *term = &terminals[slot];
+  memset(term, 0, sizeof(*term));
+  (void)wd_new_id(term->id);
+  term->session = session;
+  term->pty = pty;
+  term->used = true;
+  term_tokens[slot].term = term;
+  struct epoll_event ev;
+  memset(&ev, 0, sizeof(ev));
+  ev.events = EPOLLIN;
+  ev.data.ptr = &term_tokens[slot];
+  if (epoll_ctl(srv->epoll_fd, EPOLL_CTL_ADD, wd_pty_fd(pty), &ev) != 0) {
+    term_drop(srv, term);
+    conn_send_error(conn, id, WD_ERR_INTERNAL, "cannot watch the terminal");
+    return;
+  }
+  cbor_item_t *result = wd_map(2);
+  wd_put(result, "terminal", wd_text(term->id));
+  wd_put(result, "pid", wd_uint((uint64_t)wd_pty_pid(pty)));
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
+static void handle_terminal_write(wd_server *srv, wd_conn *conn, uint64_t id,
+                                  cbor_item_t *params) {
+  char *handle = wd_text_copy(wd_get(params, "terminal"));
+  char *data = wd_text_copy(wd_get(params, "data"));
+  wd_term *term = term_find(handle);
+  bool written = false;
+  if (term != NULL && data != NULL) {
+    ssize_t n = wd_pty_write(term->pty, data, strlen(data));
+    written = n == (ssize_t)strlen(data);
+  }
+  free(handle);
+  free(data);
+  cbor_item_t *result = wd_map(1);
+  wd_put(result, "written", cbor_build_bool(written));
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
+static void handle_terminal_resize(wd_server *srv, wd_conn *conn, uint64_t id,
+                                   cbor_item_t *params) {
+  char *handle = wd_text_copy(wd_get(params, "terminal"));
+  uint64_t rows = 24;
+  uint64_t cols = 80;
+  wd_uint_of(wd_get(params, "rows"), &rows);
+  wd_uint_of(wd_get(params, "cols"), &cols);
+  wd_term *term = term_find(handle);
+  bool resized =
+      term != NULL &&
+      wd_pty_resize(term->pty, (uint16_t)(rows == 0 ? 24 : rows),
+                    (uint16_t)(cols == 0 ? 80 : cols)) == 0;
+  free(handle);
+  cbor_item_t *result = wd_map(1);
+  wd_put(result, "resized", cbor_build_bool(resized));
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
+static void handle_terminal_close(wd_server *srv, wd_conn *conn, uint64_t id,
+                                  cbor_item_t *params) {
+  char *handle = wd_text_copy(wd_get(params, "terminal"));
+  wd_term *term = term_find(handle);
+  bool closed = term != NULL;
+  term_drop(srv, term);
+  free(handle);
+  cbor_item_t *result = wd_map(1);
+  wd_put(result, "closed", cbor_build_bool(closed));
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
 static void handle_session_cancel(wd_server *srv, wd_conn *conn, uint64_t id,
                                   cbor_item_t *params) {
   char *session_id = wd_text_copy(wd_get(params, "id"));
@@ -1968,6 +2153,14 @@ static void handle_request(wd_server *srv, wd_conn *conn, uint64_t id,
     handle_subagent_interrupt(srv, conn, id, params);
   } else if (strcmp(method, "session.cancel") == 0) {
     handle_session_cancel(srv, conn, id, params);
+  } else if (strcmp(method, "terminal.open") == 0) {
+    handle_terminal_open(srv, conn, id, params);
+  } else if (strcmp(method, "terminal.write") == 0) {
+    handle_terminal_write(srv, conn, id, params);
+  } else if (strcmp(method, "terminal.resize") == 0) {
+    handle_terminal_resize(srv, conn, id, params);
+  } else if (strcmp(method, "terminal.close") == 0) {
+    handle_terminal_close(srv, conn, id, params);
   } else if (strcmp(method, "session.fork") == 0) {
     handle_session_fork(srv, conn, id, params);
   } else if (strcmp(method, "session.set_model") == 0) {
@@ -2588,6 +2781,12 @@ int wd_up_run(const wd_up_config *cfg) {
       void *ptr = events[i].data.ptr;
       if (ptr == &token_listen) {
         server_accept(&srv);
+        continue;
+      }
+      if ((uintptr_t)ptr >= (uintptr_t)&term_tokens[0] &&
+          (uintptr_t)ptr < (uintptr_t)&term_tokens[WD_MAX_TERMS]) {
+        wd_term_token *tok = ptr;
+        if (tok->term != NULL && tok->term->used) term_pump(&srv, tok->term);
         continue;
       }
       if ((uintptr_t)ptr >= (uintptr_t)&run_tokens[0] &&

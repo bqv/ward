@@ -868,6 +868,51 @@ int main(void) {
   assert(mcp_end != NULL);
   wd_free(mcp_end);
 
+  bool term_written = false;
+  bool term_resized = false;
+  bool term_closed = false;
+  cbor_item_t *term_resp = NULL;
+  cbor_item_t *term_params = wd_map(3);
+  wd_put(term_params, "id", wd_text(session));
+  wd_put(term_params, "command", wd_text("cat"));
+  wd_put(term_params, "rows", wd_uint(30));
+  assert(request(&a, a.next_id++, "terminal.open", term_params, &term_resp,
+                 NULL) == 0);
+  char *term_id = wd_text_copy(wd_get(term_resp, "terminal"));
+  assert(term_id != NULL);
+  wd_free(term_resp);
+  cbor_item_t *term_write = wd_map(2);
+  wd_put(term_write, "terminal", wd_text(term_id));
+  wd_put(term_write, "data", wd_text("hello terminal\n"));
+  cbor_item_t *term_write_resp = NULL;
+  assert(request(&a, a.next_id++, "terminal.write", term_write,
+                 &term_write_resp, NULL) == 0);
+  assert(wd_bool_of(wd_get(term_write_resp, "written"), &term_written));
+  wd_free(term_write_resp);
+  cbor_item_t *term_out = wait_event(&a, "terminal.output", NULL);
+  assert(term_out != NULL);
+  char *term_data = wd_text_copy(wd_get(term_out, "data"));
+  assert(term_data != NULL && strstr(term_data, "hello terminal") != NULL);
+  free(term_data);
+  wd_free(term_out);
+  cbor_item_t *term_resize = wd_map(3);
+  wd_put(term_resize, "terminal", wd_text(term_id));
+  wd_put(term_resize, "rows", wd_uint(40));
+  wd_put(term_resize, "cols", wd_uint(100));
+  cbor_item_t *term_resize_resp = NULL;
+  assert(request(&a, a.next_id++, "terminal.resize", term_resize,
+                 &term_resize_resp, NULL) == 0);
+  assert(wd_bool_of(wd_get(term_resize_resp, "resized"), &term_resized));
+  wd_free(term_resize_resp);
+  cbor_item_t *term_close = wd_map(1);
+  wd_put(term_close, "terminal", wd_text(term_id));
+  cbor_item_t *term_close_resp = NULL;
+  assert(request(&a, a.next_id++, "terminal.close", term_close,
+                 &term_close_resp, NULL) == 0);
+  assert(wd_bool_of(wd_get(term_close_resp, "closed"), &term_closed));
+  wd_free(term_close_resp);
+  free(term_id);
+
   cbor_item_t *sched = NULL;
   cbor_item_t *sched_params = wd_map(3);
   wd_put(sched_params, "session", wd_text(session));

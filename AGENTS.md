@@ -468,6 +468,17 @@ protocol already names, with its own epoll token and a `wd_term` table on the se
 next slice, and it is deliberately not bolted on in the same round as the primitive that it
 needs to be correct.
 
+Forty-sixth: terminals in the daemon. `terminal.open` forks the command under a pty in the
+session's cwd, registers the master fd in epoll against its own token range, and answers
+`{terminal, pid}`; write, resize and close complete the quartet the frozen protocol names. On
+readable the loop pumps up to 4 KiB into a `terminal.output {terminal, data}` broadcast, and on
+EOF it announces `{eof: true}` and drops the handle.
+
+That event is deliberately **not durable**: terminal bytes are unbounded — `yes` in a shell
+would grow a session log without limit — so `terminal.output` goes to subscribers only and the
+protocol note says so. The gate opens `cat`, writes a line, asserts the line comes back through
+the terminal, resizes, and closes.
+
 ## M3: started, with one finding worth keeping
 
 The first M3 attempt replaced the daemon's single `wd_turn` with a pool keyed by session, so
