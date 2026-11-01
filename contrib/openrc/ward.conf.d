@@ -15,11 +15,10 @@ export WARD_MODULE_DIR="/home/user/prj/ward/out"
 # service's paths visible in one place.
 export WARD_STATE="/home/user/.local/state/ward"
 
-# The socket clients connect to.  The binary defaults to
-# $XDG_RUNTIME_DIR/ward.sock and falls back to /tmp/ward-$UID.sock when the
-# variable is unset -- OpenRC does not set it, so name the fallback explicitly
-# rather than depending on which way the environment happened to come out.
-export WARD_SOCKET="/tmp/ward-$(id -u).sock"
+# The socket clients connect to.  Left to the init script: it uses
+# $XDG_RUNTIME_DIR/ward.sock when that directory exists and is writable, and
+# falls back to /tmp/ward-$UID.sock otherwise.  Uncomment to override.
+#export WARD_SOCKET="/tmp/ward-$(id -u).sock"
 
 # supervise-daemon writes ward.log / ward.err here; start_pre creates the
 # directory.  Neither file is rotated -- logrotate them if they grow.

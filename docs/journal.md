@@ -1067,3 +1067,13 @@ start`, and the daemon came up and served a client over its socket. Two things o
 The sandbox mounts `~/.local/state` read-only, so the verification run pointed the service at
 workspace paths; the installed configuration keeps the production paths, which is where the daemon
 belongs when it is started from a real session.
+
+Eighty-fourth: the runtime directory, when there is one. OpenRC sets no `XDG_RUNTIME_DIR`, so the init
+script now chooses: if the directory exists and is writable it exports it and puts both the socket and
+the pidfile there, giving `/run/user/<uid>/ward.sock`; otherwise it falls back to `/tmp/ward-<uid>.sock`
+and a pidfile in `/tmp`. The fallback keeps the uid in the name, because a bare `/tmp/ward.sock` is the
+one thing two users would fight over.
+
+Verified on this box, where `/run/user/1000` exists: the service started, the socket appeared there,
+`srw-------` as it should be, and a client listed sessions over it. The configuration no longer names
+a socket path at all — it is commented as an override — so the script's choice is the only one.

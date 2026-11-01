@@ -13,6 +13,22 @@
 # no socket the daemon has nothing to serve, so start_pre checks both paths
 # before supervise-daemon is allowed to try.
 
+# OpenRC sets no XDG_RUNTIME_DIR, and the binary's own default socket depends on
+# it.  Use the session's private runtime directory when it exists and is ours,
+# and fall back to a per-uid name in /tmp when it does not -- never a bare
+# /tmp/ward.sock, which a second user would collide with.
+uid=$(id -u)
+if [ -n "${XDG_RUNTIME_DIR}" ] && [ -d "${XDG_RUNTIME_DIR}" ] && [ -w "${XDG_RUNTIME_DIR}" ]; then
+	export XDG_RUNTIME_DIR
+	socket_default="${XDG_RUNTIME_DIR}/ward.sock"
+	pid_dir="${XDG_RUNTIME_DIR}"
+else
+	socket_default="/tmp/ward-${uid}.sock"
+	pid_dir="/tmp"
+fi
+: "${WARD_SOCKET:=${socket_default}}"
+export WARD_SOCKET
+
 description="ward daemon (coding agent harness)"
 
 supervisor="supervise-daemon"
@@ -22,7 +38,7 @@ command_args="up --state ${WARD_STATE} --socket ${WARD_SOCKET}"
 
 directory="${HOME}"
 
-pidfile="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/ward.pid"
+pidfile="${pid_dir}/ward.pid"
 
 output_log="${WARD_LOG_DIR}/ward.log"
 error_log="${WARD_LOG_DIR}/ward.err"

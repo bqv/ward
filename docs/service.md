@@ -12,10 +12,12 @@ and nothing in it needs root.
     rc-service --user ward status
     rc-update  --user add ward default
 
-Clients reach it through `$WARD_SOCKET`. The binary defaults to
-`$XDG_RUNTIME_DIR/ward.sock` and falls back to `/tmp/ward-$UID.sock`; OpenRC does
-not set `XDG_RUNTIME_DIR`, so the shipped configuration names the fallback
-explicitly rather than depending on how the environment came out.
+Clients reach it through `$WARD_SOCKET`. OpenRC does not set `XDG_RUNTIME_DIR`,
+so the init script decides: `$XDG_RUNTIME_DIR/ward.sock` when that directory
+exists and is writable — the private per-session runtime directory — and
+`/tmp/ward-$UID.sock` otherwise. The fallback carries the uid; a bare
+`/tmp/ward.sock` would collide between users. The pidfile follows the same
+choice.
 
 ## What the configuration must set
 
