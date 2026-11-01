@@ -63,6 +63,16 @@ int wd_http_request(const char *url, const char *method, const char *body,
   struct curl_slist *headers = NULL;
   headers = curl_slist_append(headers, "Content-Type: application/json");
   headers = curl_slist_append(headers, "Accept: text/event-stream");
+  const char *api_key = getenv("WARD_API_KEY");
+  if (api_key != NULL && api_key[0] != '\0') {
+    size_t need = strlen(api_key) + 32;
+    char *line = malloc(need);
+    if (line != NULL) {
+      snprintf(line, need, "Authorization: Bearer %s", api_key);
+      headers = curl_slist_append(headers, line);
+      free(line);
+    }
+  }
   curl_easy_setopt(handle, CURLOPT_URL, url);
   curl_easy_setopt(handle, CURLOPT_FOLLOWLOCATION, 0L);
   curl_easy_setopt(handle, CURLOPT_NOSIGNAL, 1L);

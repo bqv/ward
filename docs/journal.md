@@ -1077,3 +1077,17 @@ one thing two users would fight over.
 Verified on this box, where `/run/user/1000` exists: the service started, the socket appeared there,
 `srw-------` as it should be, and a client listed sessions over it. The configuration no longer names
 a socket path at all — it is commented as an override — so the script's choice is the only one.
+
+Eighty-fifth: a bearer token, and the budget measured. The provider request had no authentication at all,
+so `WARD_API_KEY` is now sent as `Authorization: Bearer ...` when set; the daemon also reads
+`<state>/api_key` at startup — one line, trimmed — so the secret lives in the state directory at 0700
+rather than in a world-readable conf. The test runs a real loopback server, captures the request, and
+asserts the header is present with a key and absent without one.
+
+The usage text was missing `session prompt`, which is the command that runs a turn; it is listed now.
+
+And the honest arithmetic: `src/core` alone is 5,761 lines, but the budget in the README is for the
+whole authority layer — core, proto, wasm, net and daemon — which is 13,749 once the CLI is excluded.
+That is well past eight thousand and has been for a while. `src/daemon/server.c` alone is 3,330. This
+is recorded rather than argued away: the next milestone's first work is either deletion or a stated
+case for authority.

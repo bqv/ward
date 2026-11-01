@@ -3067,6 +3067,26 @@ static int setup_quic(wd_server *srv) {
   return 0;
 }
 
+static void load_api_key(const char *state_dir) {
+  const char *existing = getenv("WARD_API_KEY");
+  if (existing != NULL && existing[0] != '\0') return;
+  char *path = wd_path_join(state_dir, "api_key");
+  if (path == NULL) return;
+  FILE *f = fopen(path, "r");
+  if (f != NULL) {
+    char line[512];
+    if (fgets(line, sizeof(line), f) != NULL) {
+      size_t len = strlen(line);
+      while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r' ||
+                         line[len - 1] == ' '))
+        line[--len] = '\0';
+      if (len > 0) setenv("WARD_API_KEY", line, 1);
+    }
+    fclose(f);
+  }
+  free(path);
+}
+
 int wd_up_run(const wd_up_config *cfg) {
   wd_server srv;
   memset(&srv, 0, sizeof(srv));
@@ -3081,6 +3101,7 @@ int wd_up_run(const wd_up_config *cfg) {
             strerror(errno));
     goto cleanup;
   }
+  load_api_key(srv.state_dir);
   srv.lock_path = wd_path_join(srv.state_dir, "ward.lock");
   if (srv.lock_path == NULL) goto cleanup;
   if (acquire_lock(srv.lock_path) != 0) {

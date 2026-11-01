@@ -36,6 +36,7 @@ static void usage(FILE *out) {
           "  session create [--cwd DIR] [--model NAME] [--json]\n"
           "  session list   [--limit N] [--json]\n"
           "  session get    <id> [--json]\n"
+          "  session prompt <id> <text>\n"
           "  session resume <id> [--from SEQ] [--follow] [--json]\n"
           "  session approve <id> --call N --epoch N (--allow|--deny)\n"
           "  session cancel <id>\n"
