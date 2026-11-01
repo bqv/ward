@@ -323,6 +323,17 @@ existed. It now uses the abort primitive: any parked turn can be cancelled, the 
 provider-parked subagent and checks the aborted end, which is the case the old method could
 not touch.
 
+Thirty-third: the schedule guest, second attempt. The test now runs — `wd_engine_new(NULL)` is
+fine, the mistake was passing NULL limits — and it found a real bug in the guest: a helper
+wrote its digits into the reply buffer that the CBOR writer was about to fill, so the answer
+came back as raw ASCII and `wd_decode` refused it. After that fix the guest answers a valid
+map but finds no match for `*/5 * * * *`, so the search or the field parse is still wrong; the
+slice was reverted again rather than committed failing.
+
+The lesson is the one worth keeping: a guest test needs the loader pattern from `wasm_test`
+(`read_file`, a named `wd_limits`, `wd_engine_new(NULL)` is fine) and the reply buffer is
+written by `wd_w_*` and nothing else — scratch text belongs in a local array.
+
 ## M3: started, with one finding worth keeping
 
 The first M3 attempt replaced the daemon's single `wd_turn` with a pool keyed by session, so
