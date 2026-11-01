@@ -225,6 +225,24 @@ int wd_http_job_finish(wd_http_job *job, wd_http_response *out, char **err) {
   return 0;
 }
 
+void wd_http_job_cancel(wd_http_job *job) {
+  if (job == NULL || job->pid <= 0) return;
+  kill(job->pid, SIGTERM);
+  for (int i = 0; i < 20; i++) {
+    pid_t done = waitpid(job->pid, NULL, WNOHANG);
+    if (done == job->pid) {
+      job->pid = -1;
+      return;
+    }
+    struct timespec pause = {0, 10 * 1000 * 1000};
+    nanosleep(&pause, NULL);
+  }
+  kill(job->pid, SIGKILL);
+  while (waitpid(job->pid, NULL, 0) < 0 && errno == EINTR) {
+  }
+  job->pid = -1;
+}
+
 void wd_http_job_free(wd_http_job *job) {
   if (job == NULL) return;
   if (job->fd >= 0) close(job->fd);

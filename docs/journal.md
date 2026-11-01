@@ -1326,3 +1326,17 @@ Ninety-ninth: three bugs under one symptom, found by refusing to guess. `session
 
 With those fixed, compaction branches and returns a summary, and `ward session compact` prints both session
 ids. The summary itself is a 1.8B model's invention, which is a model problem, not a plumbing one.
+
+Hundredth: cancelling stops the helper, and the router's timings are recorded. `wd_http_job_cancel` sends
+SIGTERM, waits up to 200 ms for the child, then SIGKILL and reaps; `wd_turn_abort` uses it before freeing the
+job, so `session.cancel` no longer sits in `waitpid` for the request timeout. `http_cancel_test` starts a job
+against a listener that never answers, cancels it, and asserts the whole thing finishes inside two seconds —
+measured 0.01 s against a 60 s timeout.
+
+The provider now reads llama.cpp's `timings` out of the completion body and core appends a durable
+`turn.timings {prompt_n, prompt_ms, predicted_n, predicted_ms, cache_n}`. Measured on a real turn:
+`{"prompt_n":257,"prompt_ms":10,"predicted_n":3,"predicted_ms":11,"cache_n":44}` — which is the evidence a
+prefix-cache is actually being reused (cache_n > 0) and the number that makes a 40 s prefill diagnosable.
+
+Still open in §5: the response is still read whole before a single `text.delta` is emitted. The buffer work in
+§6's fix made that safe (64 KiB body, static arrays), not streamed.

@@ -81,6 +81,29 @@ static int hex_value(uint8_t c) {
   return -1;
 }
 
+static int num_field(const char *body, uint32_t len, const char *key,
+                     uint32_t *out) {
+  uint32_t key_len = (uint32_t)wd_len(key);
+  for (uint32_t i = 0; i + key_len < len; i++) {
+    uint32_t k = 0;
+    while (k < key_len && body[i + k] == key[k]) k++;
+    if (k != key_len) continue;
+    uint32_t j = i + key_len;
+    while (j < len && (body[j] == ':' || body[j] == ' ')) j++;
+    uint32_t value = 0;
+    uint32_t digits = 0;
+    while (j < len && body[j] >= '0' && body[j] <= '9') {
+      value = value * 10 + (uint32_t)(body[j] - '0');
+      j++;
+      digits++;
+    }
+    if (digits == 0) continue;
+    *out = value;
+    return 1;
+  }
+  return 0;
+}
+
 static uint32_t scan_content(const uint8_t *body, uint32_t len) {
   static const char key[] = "\"content\":\"";
   uint32_t key_len = sizeof(key) - 1;
@@ -213,12 +236,32 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
     answer[0] = '\0';
     if (status == 200)
       text_at = scan_content((const uint8_t *)body, body_len);
+    uint32_t prompt_n = 0;
+    uint32_t prompt_ms = 0;
+    uint32_t predicted_n = 0;
+    uint32_t predicted_ms = 0;
+    uint32_t cache_n = 0;
+    num_field((const char *)body, body_len, "\"prompt_n\"", &prompt_n);
+    num_field((const char *)body, body_len, "\"prompt_ms\"", &prompt_ms);
+    num_field((const char *)body, body_len, "\"predicted_n\"", &predicted_n);
+    num_field((const char *)body, body_len, "\"predicted_ms\"", &predicted_ms);
+    num_field((const char *)body, body_len, "\"cache_n\"", &cache_n);
     wd_w_init(&w, reply, REPLY_SIZE);
-    wd_w_map(&w, 2);
+    wd_w_map(&w, 7);
     wd_w_textz(&w, "text");
     wd_w_text(&w, answer, text_at);
     wd_w_textz(&w, "status");
     wd_w_uint(&w, status);
+    wd_w_textz(&w, "prompt_n");
+    wd_w_uint(&w, prompt_n);
+    wd_w_textz(&w, "prompt_ms");
+    wd_w_uint(&w, prompt_ms);
+    wd_w_textz(&w, "predicted_n");
+    wd_w_uint(&w, predicted_n);
+    wd_w_textz(&w, "predicted_ms");
+    wd_w_uint(&w, predicted_ms);
+    wd_w_textz(&w, "cache_n");
+    wd_w_uint(&w, cache_n);
     if (!w.failed) pair(out, reply, w.at);
     return;
   }

@@ -59,6 +59,7 @@ static int emit(void *ctx, const char *event, cbor_item_t *payload, char **err) 
     seen->ended++;
     return 0;
   }
+  if (strcmp(event, "turn.timings") == 0) return 0;
   assert(0);
   return -1;
 }

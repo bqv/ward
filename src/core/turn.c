@@ -1831,6 +1831,24 @@ int wd_turn_resume_tool(wd_turn *turn, wd_turn_emit emit, void *ctx,
   }
   cbor_item_t *message = wd_map(2);
   wd_put(message, "kind", wd_text("result"));
+  {
+    uint64_t prompt_n = 0, prompt_ms = 0, predicted_n = 0, predicted_ms = 0,
+             cache_n = 0;
+    wd_uint_of(wd_get(reply, "prompt_n"), &prompt_n);
+    wd_uint_of(wd_get(reply, "prompt_ms"), &prompt_ms);
+    wd_uint_of(wd_get(reply, "predicted_n"), &predicted_n);
+    wd_uint_of(wd_get(reply, "predicted_ms"), &predicted_ms);
+    wd_uint_of(wd_get(reply, "cache_n"), &cache_n);
+    if (predicted_n > 0 || prompt_n > 0) {
+      cbor_item_t *timing = wd_map(5);
+      wd_put(timing, "prompt_n", wd_uint(prompt_n));
+      wd_put(timing, "prompt_ms", wd_uint(prompt_ms));
+      wd_put(timing, "predicted_n", wd_uint(predicted_n));
+      wd_put(timing, "predicted_ms", wd_uint(predicted_ms));
+      wd_put(timing, "cache_n", wd_uint(cache_n));
+      (void)emit(ctx, "turn.timings", timing, err);
+    }
+  }
   wd_put(message, "payload", reply);
   return drive(turn, message, emit, ctx, err);
 }
@@ -1843,6 +1861,7 @@ int wd_turn_abort(wd_turn *turn, const char *reason, wd_turn_emit emit,
   }
   if (turn->pending_kind == 2) (void)wd_turn_cancel_tool(turn);
   if (turn->http_job != NULL) {
+    wd_http_job_cancel(turn->http_job);
     wd_http_job_free(turn->http_job);
     turn->http_job = NULL;
   }
@@ -1941,6 +1960,24 @@ int wd_turn_resume_http(wd_turn *turn, wd_turn_emit emit, void *ctx,
   if (rc != 0) {
     wd_free(message);
     return -1;
+  }
+  {
+    uint64_t prompt_n = 0, prompt_ms = 0, predicted_n = 0, predicted_ms = 0,
+             cache_n = 0;
+    wd_uint_of(wd_get(reply, "prompt_n"), &prompt_n);
+    wd_uint_of(wd_get(reply, "prompt_ms"), &prompt_ms);
+    wd_uint_of(wd_get(reply, "predicted_n"), &predicted_n);
+    wd_uint_of(wd_get(reply, "predicted_ms"), &predicted_ms);
+    wd_uint_of(wd_get(reply, "cache_n"), &cache_n);
+    if (predicted_n > 0 || prompt_n > 0) {
+      cbor_item_t *timing = wd_map(5);
+      wd_put(timing, "prompt_n", wd_uint(prompt_n));
+      wd_put(timing, "prompt_ms", wd_uint(prompt_ms));
+      wd_put(timing, "predicted_n", wd_uint(predicted_n));
+      wd_put(timing, "predicted_ms", wd_uint(predicted_ms));
+      wd_put(timing, "cache_n", wd_uint(cache_n));
+      (void)emit(ctx, "turn.timings", timing, err);
+    }
   }
   wd_put(message, "payload", reply);
   return drive(turn, message, emit, ctx, err);
