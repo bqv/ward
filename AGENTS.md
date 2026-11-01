@@ -90,6 +90,11 @@ driver finishes with `turn.end`. A client that attaches later sees the request o
 second answer is `already_resolved`, an unknown one `not_found`. `tool-test` drives the turn
 directly and `gate-tool-test` drives the daemon, late attach included.
 
+`edit` and `grep` complete the M1 tool set: `fs.edit` replaces the first occurrence of a
+string in a file under the tool root, and `grep.run` shells out to `rg` from the root with
+no shell, capped at 200 matches and 64 KiB. The policy allows `grep` (it only reads) and
+asks for `edit`, exactly as it does for `write` and `exec`.
+
 `exec` is the third tool: `exec.run` in core spawns one short-lived child in the turn's
 tool root with a scrubbed environment, no shell, a ten-second default timeout and a 64 KiB
 output cap, and the policy module makes it `ask`, so an exec-shaped call parks exactly like

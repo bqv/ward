@@ -257,6 +257,176 @@ static int fs_read(wd_turn *turn, const uint8_t *in, size_t in_len,
   return rc;
 }
 
+static int grep_run(wd_turn *turn, const uint8_t *in, size_t in_len,
+                    uint8_t **out, size_t *out_len) {
+  cbor_item_t *request = wd_decode(in, in_len);
+  if (request == NULL) {
+    cbor_item_t *reply = wd_map(2);
+    wd_put(reply, "ok", cbor_build_bool(false));
+    wd_put(reply, "error", wd_text("grep.run: parameters are not cbor"));
+    return tool_reply(reply, out, out_len);
+  }
+  char *pattern = wd_text_copy(wd_get(request, "pattern"));
+  char *path = wd_text_copy(wd_get(request, "path"));
+  wd_free(request);
+  if (pattern == NULL || pattern[0] == '\0' || strlen(pattern) > 1024) {
+    free(pattern);
+    free(path);
+    return tool_fail("grep.run: the pattern is missing or too long", out,
+                     out_len);
+  }
+  if (path != NULL &&
+      (path[0] == '\0' || path[0] == '/' || strstr(path, "..") != NULL)) {
+    free(pattern);
+    free(path);
+    return tool_fail("grep.run: the path is outside the tool root", out,
+                     out_len);
+  }
+  const char *argv[9];
+  size_t argc = 0;
+  argv[argc++] = "rg";
+  argv[argc++] = "--line-number";
+  argv[argc++] = "--no-heading";
+  argv[argc++] = "--color=never";
+  argv[argc++] = "--max-count=200";
+  argv[argc++] = "-e";
+  argv[argc++] = pattern;
+  if (path != NULL) argv[argc++] = path;
+  argv[argc] = NULL;
+  wd_proc_result result;
+  char *err = NULL;
+  int rc = wd_proc_run(argv, turn->root, 10000, WD_TOOL_MAX, &result, &err);
+  free(pattern);
+  free(path);
+  if (rc != 0) {
+    char message[256];
+    snprintf(message, sizeof(message), "%s",
+             err != NULL ? err : "grep.run: cannot run rg");
+    free(err);
+    return tool_fail(message, out, out_len);
+  }
+  int status = WIFEXITED(result.status) ? WEXITSTATUS(result.status) : 127;
+  cbor_item_t *reply = wd_map(3);
+  wd_put(reply, "ok", cbor_build_bool(status == 0));
+  wd_put(reply, "status", wd_uint((uint64_t)status));
+  if (result.len > 0)
+    wd_put(reply, "text", wd_text_len((const char *)result.out, result.len));
+  else
+    wd_put(reply, "text", wd_text(status == 1 ? "no matches" : ""));
+  wd_proc_result_free(&result);
+  return tool_reply(reply, out, out_len);
+}
+
+static int edit_run(wd_turn *turn, const uint8_t *in, size_t in_len,
+                    uint8_t **out, size_t *out_len) {
+  cbor_item_t *request = wd_decode(in, in_len);
+  if (request == NULL) {
+    cbor_item_t *reply = wd_map(2);
+    wd_put(reply, "ok", cbor_build_bool(false));
+    wd_put(reply, "error", wd_text("fs.edit: parameters are not cbor"));
+    return tool_reply(reply, out, out_len);
+  }
+  char *rel = wd_text_copy(wd_get(request, "path"));
+  char *find = wd_text_copy(wd_get(request, "find"));
+  char *replace = wd_text_copy(wd_get(request, "replace"));
+  wd_free(request);
+  char path[PATH_MAX];
+  int rc = resolve_path(turn, rel, false, path, sizeof(path));
+  free(rel);
+  if (rc != 0) {
+    free(find);
+    free(replace);
+    return tool_fail("fs.edit: the path is outside the tool root", out,
+                     out_len);
+  }
+  if (find == NULL || find[0] == '\0' || replace == NULL) {
+    free(find);
+    free(replace);
+    return tool_fail("fs.edit: find and replace are required", out, out_len);
+  }
+  uint8_t *content = NULL;
+  size_t len = 0;
+  int fd = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+  if (fd < 0) {
+    free(find);
+    free(replace);
+    return tool_fail("fs.edit: cannot open the file", out, out_len);
+  }
+  struct stat st;
+  if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) ||
+      st.st_size > (off_t)WD_TOOL_MAX) {
+    close(fd);
+    free(find);
+    free(replace);
+    return tool_fail("fs.edit: not a regular file under the size limit", out,
+                     out_len);
+  }
+  len = (size_t)st.st_size;
+  content = malloc(len + 1);
+  if (content == NULL) {
+    close(fd);
+    free(find);
+    free(replace);
+    return tool_fail("fs.edit: out of memory", out, out_len);
+  }
+  size_t got = 0;
+  while (got < len) {
+    ssize_t n = read(fd, content + got, len - got);
+    if (n < 0) {
+      if (errno == EINTR) continue;
+      break;
+    }
+    if (n == 0) break;
+    got += (size_t)n;
+  }
+  close(fd);
+  content[got] = '\0';
+  char *at = got == len ? strstr((char *)content, find) : NULL;
+  if (at == NULL) {
+    free(content);
+    free(find);
+    free(replace);
+    return tool_fail("fs.edit: the text to find is not in the file", out,
+                     out_len);
+  }
+  size_t before = (size_t)(at - (char *)content);
+  size_t find_len = strlen(find);
+  size_t replace_len = strlen(replace);
+  size_t total = got - find_len + replace_len;
+  if (total > WD_TOOL_MAX) {
+    free(content);
+    free(find);
+    free(replace);
+    return tool_fail("fs.edit: the file would grow past the size limit", out,
+                     out_len);
+  }
+  uint8_t *next = malloc(total + 1);
+  if (next == NULL) {
+    free(content);
+    free(find);
+    free(replace);
+    return tool_fail("fs.edit: out of memory", out, out_len);
+  }
+  memcpy(next, content, before);
+  memcpy(next + before, replace, replace_len);
+  memcpy(next + before + replace_len, content + before + find_len,
+         got - before - find_len);
+  next[total] = '\0';
+  free(content);
+  free(find);
+  free(replace);
+  int wfd = open(path, O_WRONLY | O_TRUNC | O_CLOEXEC);
+  if (wfd < 0) {
+    free(next);
+    return tool_fail("fs.edit: cannot rewrite the file", out, out_len);
+  }
+  int written = wu_write_all(wfd, next, total);
+  close(wfd);
+  free(next);
+  if (written != 0) return tool_fail("fs.edit: cannot rewrite the file", out, out_len);
+  return tool_ok_count(total, out, out_len);
+}
+
 static int exec_run(wd_turn *turn, const uint8_t *in, size_t in_len,
                     uint8_t **out, size_t *out_len) {
   cbor_item_t *request = wd_decode(in, in_len);
@@ -369,6 +539,10 @@ static int turn_capability(void *ctx, const char *capability,
     return fs_read(turn, in, in_len, out, out_len);
   if (strcmp(capability, "fs.write") == 0)
     return fs_write(turn, in, in_len, out, out_len);
+  if (strcmp(capability, "grep.run") == 0)
+    return grep_run(turn, in, in_len, out, out_len);
+  if (strcmp(capability, "fs.edit") == 0)
+    return edit_run(turn, in, in_len, out, out_len);
   if (strcmp(capability, "exec.run") == 0)
     return exec_run(turn, in, in_len, out, out_len);
   if (strcmp(capability, "policy.check") == 0)
@@ -394,13 +568,14 @@ wd_turn *wd_turn_new(wd_engine *engine, const char *module_dir, const char *root
   }
   static const char *const driver_caps[] = {"engine.call", "policy.check"};
   static const char *const provider_caps[] = {"net.request"};
-  static const char *const tools_caps[] = {"fs.read", "fs.write", "exec.run"};
+  static const char *const tools_caps[] = {"fs.read", "fs.write",     "fs.edit",
+                                           "exec.run", "grep.run"};
   static const char *const no_caps[] = {NULL};
   wd_module_spec engine_spec = {"engine", no_caps, 0, true};
   wd_module_spec driver_spec = {"driver", driver_caps, 2, false};
   wd_module_spec policy_spec = {"policy", no_caps, 0, true};
   wd_module_spec provider_spec = {"provider", provider_caps, 1, false};
-  wd_module_spec tools_spec = {"tools", tools_caps, 3, false};
+  wd_module_spec tools_spec = {"tools", tools_caps, 5, false};
 
   turn->engine_module = load_module(engine, module_dir, "engine.wasm",
                                     &engine_spec, err);
@@ -427,7 +602,7 @@ wd_turn *wd_turn_new(wd_engine *engine, const char *module_dir, const char *root
   turn->driver = wd_instance_new(turn->driver_module, driver_caps, 2,
                                  &TURN_LIMITS, turn_capability, turn, err);
   if (turn->driver == NULL) goto fail;
-  turn->tools = wd_instance_new(turn->tools_module, tools_caps, 3,
+  turn->tools = wd_instance_new(turn->tools_module, tools_caps, 5,
                                 &TURN_LIMITS, turn_capability, turn, err);
   if (turn->tools == NULL) goto fail;
   turn->policy = wd_instance_new(turn->policy_module, no_caps, 0, &TURN_LIMITS,

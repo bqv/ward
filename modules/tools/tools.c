@@ -59,9 +59,13 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
   char tool[TEXT_SIZE];
   char path[TEXT_SIZE];
   char text[TEXT_SIZE];
+  char find[TEXT_SIZE];
+  char replace[TEXT_SIZE];
   tool[0] = '\0';
   path[0] = '\0';
   text[0] = '\0';
+  find[0] = '\0';
+  replace[0] = '\0';
   if (wd_r_map(&r, &n) != 0) return;
   for (uint32_t i = 0; i < n; i++) {
     const uint8_t *kp = 0;
@@ -80,6 +84,10 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
           if (wd_r_text(&r, path, sizeof(path), 0) != 0) return;
         } else if (wd_key_eq(ak, al, "text")) {
           if (wd_r_text(&r, text, sizeof(text), 0) != 0) return;
+        } else if (wd_key_eq(ak, al, "find")) {
+          if (wd_r_text(&r, find, sizeof(find), 0) != 0) return;
+        } else if (wd_key_eq(ak, al, "replace")) {
+          if (wd_r_text(&r, replace, sizeof(replace), 0) != 0) return;
         } else if (wd_r_skip(&r) != 0) {
           return;
         }
@@ -88,7 +96,7 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
       return;
     }
   }
-  if (tool[0] == '\0' || path[0] == '\0') return;
+  if (tool[0] == '\0') return;
 
   wd_w w;
   wd_w_init(&w, payload, PAYLOAD_SIZE);
@@ -98,6 +106,30 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
     wd_w_textz(&w, path);
     if (w.failed) return;
     forward(out, "fs.read", payload, w.at);
+    return;
+  }
+  if (wd_key_eq((const uint8_t *)tool, wd_len(tool), "grep")) {
+    wd_w_map(&w, path[0] != '\0' ? 2 : 1);
+    wd_w_textz(&w, "pattern");
+    wd_w_textz(&w, text);
+    if (path[0] != '\0') {
+      wd_w_textz(&w, "path");
+      wd_w_textz(&w, path);
+    }
+    if (w.failed) return;
+    forward(out, "grep.run", payload, w.at);
+    return;
+  }
+  if (wd_key_eq((const uint8_t *)tool, wd_len(tool), "edit")) {
+    wd_w_map(&w, 3);
+    wd_w_textz(&w, "path");
+    wd_w_textz(&w, path);
+    wd_w_textz(&w, "find");
+    wd_w_textz(&w, find);
+    wd_w_textz(&w, "replace");
+    wd_w_textz(&w, replace);
+    if (w.failed) return;
+    forward(out, "fs.edit", payload, w.at);
     return;
   }
   if (wd_key_eq((const uint8_t *)tool, wd_len(tool), "exec")) {

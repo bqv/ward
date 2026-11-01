@@ -134,6 +134,29 @@ int main(void) {
   snprintf(path, sizeof(path), "%s/blocked.txt", root);
   assert(access(path, F_OK) != 0);
 
+  seen grep_seen = {{0}, 0, 0, 0, 0, {0}};
+  assert(wd_turn_prompt(turn, "/grep file text", emit, &grep_seen, &err) ==
+         WD_TURN_OK);
+  assert(grep_seen.approvals == 0);
+  assert(strstr(grep_seen.text, "hello.txt") != NULL);
+  assert(strstr(grep_seen.text, "the file text") != NULL);
+
+  seen edit_seen = {{0}, 0, 0, 0, 0, {0}};
+  assert(wd_turn_prompt(turn, "/edit hello.txt file FILE", emit, &edit_seen,
+                        &err) == WD_TURN_PENDING);
+  assert(edit_seen.approvals == 1);
+  assert(wd_turn_resume(turn, true, emit, &edit_seen, &err) == WD_TURN_OK);
+  snprintf(path, sizeof(path), "%s/hello.txt", root);
+  char *edited = read_file(path);
+  assert(edited != NULL && strcmp(edited, "the FILE text") == 0);
+  free(edited);
+
+  seen edit_missing = {{0}, 0, 0, 0, 0, {0}};
+  assert(wd_turn_prompt(turn, "/edit hello.txt nothing here", emit,
+                        &edit_missing, &err) == WD_TURN_PENDING);
+  assert(wd_turn_resume(turn, true, emit, &edit_missing, &err) == WD_TURN_OK);
+  assert(strstr(edit_missing.text, "not in the file") != NULL);
+
   seen exec_seen = {{0}, 0, 0, 0, 0, {0}};
   assert(wd_turn_prompt(turn, "/run echo tool exec works", emit, &exec_seen,
                         &err) == WD_TURN_PENDING);

@@ -80,7 +80,16 @@ The tools module's only inputs are `{tool, args}`; it forwards to the capability
 the tool and returns the capability's reply unchanged. Core decides what a capability may
 do; the module decides which one to ask.
 
-## exec.run
+## fs.edit, grep.run and exec.run
+
+`fs.edit {path, find, replace}` replaces the first occurrence of `find` with `replace` in a
+file under the tool root, using the same path rules as `fs.read`, and answers
+`{ok, written}` or `{ok: false, error}`. An empty `find` or a `find` that is not in the
+file is an error rather than a silent no-op.
+
+`grep.run {pattern, path?}` runs `rg --line-number --no-heading` in the tool root, capped
+at 200 matches, and returns `{ok, status, text}`; `status` 1 means no match and the text
+says so. The path is optional and confined to the root exactly as `fs.read`'s is.
 
 `exec.run {command, timeout_ms?}` runs one command in the turn's tool root and returns
 `{ok, status, timed_out, text}`; `text` is the combined output, capped at 64 KiB, and a

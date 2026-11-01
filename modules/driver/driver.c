@@ -149,6 +149,53 @@ static int text_prefix(const char *text, const char *prefix) {
   return 1;
 }
 
+static void invoke_edit(uint32_t out, const char *path, const char *find,
+                        const char *replace, int approve) {
+  wd_w w;
+  wd_w_init(&w, reply, REPLY_SIZE);
+  wd_w_map(&w, 1);
+  wd_w_textz(&w, "actions");
+  wd_w_array(&w, 1);
+  wd_w_map(&w, approve ? 7 : 5);
+  wd_w_textz(&w, "kind");
+  wd_w_textz(&w, "invoke");
+  wd_w_textz(&w, "module");
+  wd_w_textz(&w, "tools");
+  wd_w_textz(&w, "name");
+  wd_w_textz(&w, "edit");
+  wd_w_textz(&w, "call");
+  wd_w_uint(&w, 1);
+  if (approve) {
+    wd_w_textz(&w, "approve");
+    wd_w_bool(&w, 1);
+    wd_w_textz(&w, "reason");
+    wd_w_textz(&w, "edit a file in the session directory");
+  }
+  wd_w_textz(&w, "payload");
+  wd_w_map(&w, 2);
+  wd_w_textz(&w, "tool");
+  wd_w_textz(&w, "edit");
+  wd_w_textz(&w, "args");
+  wd_w_map(&w, 3);
+  wd_w_textz(&w, "path");
+  wd_w_textz(&w, path);
+  wd_w_textz(&w, "find");
+  wd_w_textz(&w, find);
+  wd_w_textz(&w, "replace");
+  wd_w_textz(&w, replace);
+  if (!w.failed) pair(out, reply, w.at);
+}
+
+static uint32_t split_token(const char *text, uint32_t at, char *out,
+                            uint32_t cap) {
+  uint32_t i = 0;
+  while (text[at] == ' ') at++;
+  while (text[at] != '\0' && text[at] != ' ' && i + 1 < cap)
+    out[i++] = text[at++];
+  out[i] = '\0';
+  return at;
+}
+
 static void invoke_tool(uint32_t out, const char *tool, const char *path,
                         const char *text, int approve) {
   wd_w w;
@@ -263,6 +310,34 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
         invoke_tool(out, "write", path, body, verdict == 2);
         return;
       }
+    }
+    if (text_prefix(text, "/grep ")) {
+      int verdict = policy_check("grep");
+      if (verdict == 0) {
+        emit_text_delta(out, "the policy denied grep");
+        return;
+      }
+      invoke_tool(out, "grep", "", text + 6, verdict == 2);
+      return;
+    }
+    if (text_prefix(text, "/edit ")) {
+      char path[TEXT_SIZE];
+      char find[TEXT_SIZE];
+      char replace[TEXT_SIZE];
+      uint32_t at = split_token(text, 6, path, sizeof(path));
+      at = split_token(text, at, find, sizeof(find));
+      split_token(text, at, replace, sizeof(replace));
+      if (path[0] == '\0' || find[0] == '\0' || replace[0] == '\0') {
+        emit_text_delta(out, "edit needs a path, a find and a replace");
+        return;
+      }
+      int verdict = policy_check("edit");
+      if (verdict == 0) {
+        emit_text_delta(out, "the policy denied edit");
+        return;
+      }
+      invoke_edit(out, path, find, replace, verdict == 2);
+      return;
     }
     if (text_prefix(text, "/run ")) {
       int verdict = policy_check("exec");
