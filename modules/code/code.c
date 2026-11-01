@@ -125,7 +125,18 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
     wd_w_textz(&w, "kind");
     wd_w_textz(&w, "function");
     wd_w_textz(&w, "line");
-    wd_w_uint(&w, lines[i]);
+    static char digits[16];
+    uint32_t v = lines[i], k = 0;
+    char tmp[16];
+    if (v == 0) tmp[k++] = '0';
+    while (v > 0 && k < sizeof(tmp)) {
+      tmp[k++] = (char)('0' + (v % 10));
+      v /= 10;
+    }
+    uint32_t d = 0;
+    while (k > 0) digits[d++] = tmp[--k];
+    digits[d] = '\0';
+    wd_w_textz(&w, digits);
   }
   if (w.failed) return;
   uint8_t *o = (uint8_t *)(uintptr_t)out;

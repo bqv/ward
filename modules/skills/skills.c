@@ -163,6 +163,44 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
       text = search_text;
     }
   }
+  if (wd_key_eq((const uint8_t *)command, wd_len(command), "outline")) {
+    handled = 1;
+    if (args[0] == '\0') {
+      text = "usage: /outline <path>";
+    } else {
+      static uint8_t callbuf[1024];
+      wd_put32(callbuf, 13);
+      static const char cap_name[] = "code.outline";
+      for (uint32_t i = 0; i < 13; i++) callbuf[4 + i] = (uint8_t)cap_name[i];
+      wd_w cw;
+      wd_w_init(&cw, callbuf + 17, sizeof(callbuf) - 17);
+      wd_w_map(&cw, 1);
+      wd_w_textz(&cw, "path");
+      wd_w_textz(&cw, args);
+      uint32_t desc[2];
+      search_text[0] = '\0';
+      if (!cw.failed) {
+        ward_cap((uint32_t)(uintptr_t)callbuf, 17 + cw.at,
+                 (uint32_t)(uintptr_t)desc);
+        const uint8_t *res = (const uint8_t *)(uintptr_t)desc[0];
+        wd_r rr = {res, desc[1], 0, 0};
+        uint32_t rn = 0;
+        if (wd_r_map(&rr, &rn) == 0) {
+          for (uint32_t i = 0; i < rn; i++) {
+            const uint8_t *kp2 = 0;
+            uint32_t kn2 = 0;
+            if (wd_r_text_ptr(&rr, &kp2, &kn2) != 0) break;
+            if (wd_key_eq(kp2, kn2, "text")) {
+              wd_r_text(&rr, search_text, sizeof(search_text), 0);
+            } else if (wd_r_skip(&rr) != 0) {
+              break;
+            }
+          }
+        }
+      }
+      text = search_text;
+    }
+  }
   if (wd_key_eq((const uint8_t *)command, wd_len(command), "search")) {
     handled = 1;
     if (args[0] == '\0') {

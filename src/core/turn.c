@@ -52,7 +52,9 @@ struct wd_turn {
   cbor_item_t *history;
   char *context;
   wd_instance *judge;
+  wd_instance *code;
   wd_module *judge_module;
+  wd_module *code_module;
   wd_judge *judge_cache;
   cbor_item_t *judge_event;
   char *worker_root;
@@ -147,6 +149,7 @@ static wd_instance *instance_named(wd_turn *turn, const char *name) {
   if (strcmp(name, "policy") == 0) return turn->policy;
   if (strcmp(name, "skills") == 0) return turn->skills;
   if (strcmp(name, "judge") == 0) return turn->judge;
+  if (strcmp(name, "code") == 0) return turn->code;
   return NULL;
 }
 
@@ -280,6 +283,75 @@ static int resolve_path(wd_turn *turn, const char *rel, bool parent, char *out,
   if (strlen(resolved) >= cap) return -1;
   snprintf(out, cap, "%s", resolved);
   return 0;
+}
+
+static int code_outline(wd_turn *turn, const uint8_t *in, size_t in_len,
+                        uint8_t **out, size_t *out_len) {
+  cbor_item_t *request = wd_decode(in, in_len);
+  if (request == NULL) return tool_fail("code.outline: bad parameters", out, out_len);
+  char *rel = wd_text_copy(wd_get(request, "path"));
+  wd_free(request);
+  char path[PATH_MAX];
+  int rc = resolve_path(turn, rel, false, path, sizeof(path));
+  free(rel);
+  if (rc != 0)
+    return tool_fail("code.outline: the path is outside the tool root", out,
+                     out_len);
+  int fd = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+  if (fd < 0) return tool_fail("code.outline: cannot open the file", out, out_len);
+  static uint8_t text[262144];
+  ssize_t got = read(fd, text, sizeof(text) - 1);
+  close(fd);
+  if (got < 0) return tool_fail("code.outline: cannot read the file", out, out_len);
+  text[got] = '\0';
+  cbor_item_t *payload = wd_map(1);
+  wd_put(payload, "text", wd_text((const char *)text));
+  size_t payload_len = 0;
+  uint8_t *payload_bytes = wd_encode(payload, &payload_len);
+  if (payload_bytes == NULL)
+    return tool_fail("code.outline: cannot encode the request", out, out_len);
+  uint8_t *reply_bytes = NULL;
+  size_t reply_len = 0;
+  char *err = NULL;
+  int called = wd_instance_call(turn->code, payload_bytes, payload_len,
+                                &reply_bytes, &reply_len, &err);
+  free(payload_bytes);
+  if (called != 0) {
+    free(err);
+    return tool_fail("code.outline: the module failed", out, out_len);
+  }
+  cbor_item_t *reply = wd_decode(reply_bytes, reply_len);
+  free(reply_bytes);
+  if (reply == NULL)
+    return tool_fail("code.outline: the module answered badly", out, out_len);
+  cbor_item_t *symbols = wd_get(reply, "symbols");
+  char summary[4096];
+  size_t used = 0;
+  summary[0] = '\0';
+  if (symbols != NULL && cbor_array_size(symbols) > 0) {
+    for (size_t i = 0; i < cbor_array_size(symbols) && used + 128 < sizeof(summary);
+         i++) {
+      cbor_item_t *entry = cbor_array_get(symbols, i);
+      char *name = wd_text_copy(wd_get(entry, "name"));
+      char *kind = wd_text_copy(wd_get(entry, "kind"));
+      char *line = wd_text_copy(wd_get(entry, "line"));
+      int n = snprintf(summary + used, sizeof(summary) - used, "%s:%s (%s)\n",
+                       name != NULL ? name : "?", line != NULL ? line : "?",
+                       kind != NULL ? kind : "function");
+      if (n > 0) used += (size_t)n;
+      free(name);
+      free(kind);
+      free(line);
+      cbor_decref(&entry);
+    }
+  } else {
+    snprintf(summary, sizeof(summary), "no symbols");
+  }
+  wd_free(reply);
+  cbor_item_t *result = wd_map(2);
+  wd_put(result, "ok", cbor_build_bool(true));
+  wd_put(result, "text", wd_text(summary));
+  return tool_reply(result, out, out_len);
 }
 
 static int fs_read(wd_turn *turn, const uint8_t *in, size_t in_len,
@@ -960,6 +1032,8 @@ static int turn_capability(void *ctx, const char *capability,
     return wd_instance_call(turn->eng, in, in_len, out, out_len, err);
   if (strcmp(capability, "net.request") == 0)
     return net_request(turn, in, in_len, out, out_len, err);
+  if (strcmp(capability, "code.outline") == 0)
+    return code_outline(turn, in, in_len, out, out_len);
   if (strcmp(capability, "fs.read") == 0)
     return fs_read(turn, in, in_len, out, out_len);
   if (strcmp(capability, "fs.write") == 0)
@@ -1035,11 +1109,11 @@ wd_turn *wd_turn_new_pinned(wd_engine *engine, const char *module_dir,
   static const char *const provider_caps[] = {"net.request"};
   static const char *const no_caps[] = {NULL};
   static const char *const skills_caps[] = {"web.search", "mcp.call",
-                                            "recall.search"};
+                                            "recall.search", "code.outline"};
   wd_module_spec engine_spec = {"engine", no_caps, 0, true};
   wd_module_spec driver_spec = {"driver", driver_caps, 3, false};
   wd_module_spec policy_spec = {"policy", no_caps, 0, true};
-  wd_module_spec skills_spec = {"skills", skills_caps, 3, false};
+  wd_module_spec skills_spec = {"skills", skills_caps, 4, false};
   wd_module_spec provider_spec = {"provider", provider_caps, 1, false};
   wd_module_spec tools_spec = {"tools", no_caps, 0, true};
 
@@ -1063,9 +1137,13 @@ wd_turn *wd_turn_new_pinned(wd_engine *engine, const char *module_dir,
   if (turn->skills_module == NULL) goto fail;
   static const char *const judge_caps[] = {NULL};
   wd_module_spec judge_spec = {"judge", judge_caps, 0, true};
+  wd_module_spec code_spec = {"code", judge_caps, 0, true};
   turn->judge_module = load_pinned(engine, module_dir, pins, pins_len, "judge",
                                    &judge_spec, err);
   if (turn->judge_module == NULL) goto fail;
+  turn->code_module = load_pinned(engine, module_dir, pins, pins_len, "code",
+                                  &code_spec, err);
+  if (turn->code_module == NULL) goto fail;
 
   turn->eng = wd_instance_new(turn->engine_module, no_caps, 0, &TURN_LIMITS,
                               NULL, NULL, err);
@@ -1082,12 +1160,15 @@ wd_turn *wd_turn_new_pinned(wd_engine *engine, const char *module_dir,
   turn->policy = wd_instance_new(turn->policy_module, no_caps, 0, &TURN_LIMITS,
                                  turn_capability, turn, err);
   if (turn->policy == NULL) goto fail;
-  turn->skills = wd_instance_new(turn->skills_module, skills_caps, 3,
+  turn->skills = wd_instance_new(turn->skills_module, skills_caps, 4,
                                  &TURN_LIMITS, turn_capability, turn, err);
   if (turn->skills == NULL) goto fail;
   turn->judge = wd_instance_new(turn->judge_module, no_caps, 0, &TURN_LIMITS,
                                 NULL, NULL, err);
   if (turn->judge == NULL) goto fail;
+  turn->code = wd_instance_new(turn->code_module, no_caps, 0, &TURN_LIMITS,
+                               NULL, NULL, err);
+  if (turn->code == NULL) goto fail;
   turn->judge_cache = wd_judge_new(64);
   if (turn->judge_cache == NULL) goto fail;
   return turn;
@@ -1127,6 +1208,8 @@ void wd_turn_free(wd_turn *turn) {
   wd_module_free(turn->skills_module);
   wd_instance_free(turn->judge);
   wd_module_free(turn->judge_module);
+  wd_instance_free(turn->code);
+  wd_module_free(turn->code_module);
   wd_judge_free(turn->judge_cache);
   if (turn->judge_event != NULL) wd_free(turn->judge_event);
   wd_instance_free(turn->eng);

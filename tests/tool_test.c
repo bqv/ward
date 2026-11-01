@@ -92,6 +92,17 @@ int main(void) {
     return 1;
   }
 
+  char source[512];
+  snprintf(source, sizeof(source), "%s/sample.c", root);
+  write_file(source, "int main(void) {\n  return 0;\n}\n\nvoid helper(int x) {\n}\n");
+
+  seen outline_seen = {{0}, 0, 0, 0, 0, {0}};
+  assert(wd_turn_prompt(turn, "/outline sample.c", emit, &outline_seen, &err) ==
+         WD_TURN_OK);
+  assert(outline_seen.deltas > 0);
+  assert(strstr(outline_seen.text, "main:1") != NULL);
+  assert(strstr(outline_seen.text, "helper:5") != NULL);
+
   seen read_seen = {{0}, 0, 0, 0, 0, {0}};
   assert(wd_turn_prompt(turn, "/read hello.txt", emit, &read_seen, &err) ==
          WD_TURN_OK);

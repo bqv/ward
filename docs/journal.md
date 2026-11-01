@@ -927,3 +927,18 @@ follows it, which is both simpler and right.
 
 `tests/code_guest_test` measures two functions with an `if` inside them and a struct that must
 produce nothing — the case that would pass if the scanner merely looked for braces.
+
+Seventy-fifth: `/outline` reaches the scanner. Core grew the `code.outline` capability — it resolves
+the path under the tool root with the same discipline as `fs.read`, reads at most 256 KiB, hands
+the text to the `code` guest and formats its symbols as `name:line (kind)`. The skills guest asks
+for it with `/outline <path>`, so the capability is granted to `skills` and the path is chosen by
+the module while core only reads the file.
+
+One bug, and it was mine in two places: the guest emitted `line` as a CBOR integer and core read it
+with `wd_uint_of`, and the printed value was garbage — 2053 for a five-line file. Rather than chase
+the decoder, the guest now emits the line as text and core copies it. That is the smaller surface:
+a number that only ever travels to a formatter does not need to be a number.
+
+`tool_test` writes a two-function C file, prompts `/outline sample.c`, and asserts both names with
+their lines, so the whole path — skill, grant, capability, file read, guest, formatting — is
+measured in one assertion pair.
