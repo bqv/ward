@@ -430,6 +430,18 @@ That is the whole of the next attempt: read `invoke()` and how it encodes a *bor
 with `wd_encode`'s consume-on-encode rule in mind. The diagnostics are reverted again; the
 finding is the deliverable.
 
+Forty-third: the provider test. `tests/provider_test` loads the provider guest directly and feeds
+it `{prompt, history: [{role: "system", text: "..."}]}`, then asserts the JSON body it builds
+carries both the rules and the prompt. It passes — so the guest handles a history array
+correctly, and the rules failure in the daemon is *not* the provider's parsing or its JSON
+writer.
+
+That leaves the daemon's own call path: core builds and merges the payload with the rules
+(the debug line showed `keys=2 hist=1`), the guest is proven good, and the request that arrives
+at the endpoint still carries only the prompt. The next probe belongs one layer down — print
+the encoded bytes handed to `wd_instance_call` for the *first* turn, not a later one, because
+the debug line only ever appeared once in a run.
+
 ## M3: started, with one finding worth keeping
 
 The first M3 attempt replaced the daemon's single `wd_turn` with a pool keyed by session, so
