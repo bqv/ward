@@ -40,6 +40,7 @@ struct wd_turn {
   wd_worker *worker;
   wd_worker *tool_worker;
   wd_http_job *http_job;
+  uint64_t id;
   cbor_item_t *history;
   char *worker_root;
   wd_instance *policy;
@@ -868,7 +869,27 @@ static int process_action(wd_turn *turn, cbor_item_t *action, wd_turn_emit emit,
       *err = strdup("emit action has no event");
       rc = -1;
     } else {
-      rc = emit(ctx, event, wd_get(action, "payload"), err);
+      cbor_item_t *payload = wd_get(action, "payload");
+      if (strcmp(event, "turn.start") == 0 ||
+          strcmp(event, "turn.end") == 0) {
+        size_t extra = cbor_isa_map(payload) ? cbor_map_size(payload) : 0;
+        cbor_item_t *stamped = wd_map(extra + 1);
+        wd_put(stamped, "turn", wd_uint(turn->id));
+        if (cbor_isa_map(payload)) {
+          struct cbor_pair *pairs = cbor_map_handle(payload);
+          for (size_t i = 0; i < extra; i++) {
+            char *key = wd_text_copy(pairs[i].key);
+            if (key == NULL) continue;
+            cbor_item_t *value = pairs[i].value;
+            if (cbor_incref(value)) wd_put(stamped, key, value);
+            free(key);
+          }
+        }
+        rc = emit(ctx, event, stamped, err);
+        wd_free(stamped);
+      } else {
+        rc = emit(ctx, event, payload, err);
+      }
       free(event);
     }
   } else if (strcmp(kind, "invoke") == 0) {
@@ -1043,8 +1064,21 @@ static int drive(wd_turn *turn, cbor_item_t *message, wd_turn_emit emit,
   return -1;
 }
 
+static uint64_t next_turn_id(void) {
+  static uint64_t counter;
+  if (counter == 0) {
+    uint64_t seed = 0;
+    if (wd_random_bytes(&seed, sizeof(seed)) != 0) seed = wd_now_ms();
+    counter = seed | 1;
+  }
+  return ++counter;
+}
+
+uint64_t wd_turn_id(wd_turn *turn) { return turn != NULL ? turn->id : 0; }
+
 int wd_turn_prompt(wd_turn *turn, const char *text, wd_turn_emit emit, void *ctx,
                    char **err) {
+  turn->id = next_turn_id();
   cbor_item_t *message = wd_map(2);
   if (message == NULL) {
     *err = strdup("out of memory");

@@ -197,6 +197,26 @@ static cbor_item_t *next_event(client *c, char **kind, uint64_t *seq) {
   }
 }
 
+static uint64_t last_turn;
+
+static cbor_item_t *wait_turn_end(client *c, uint64_t turn) {
+  for (;;) {
+    char *kind = NULL;
+    cbor_item_t *payload = next_event(c, &kind, NULL);
+    if (payload == NULL) return NULL;
+    if (kind != NULL && strcmp(kind, "turn.end") == 0) {
+      uint64_t got = 0;
+      wd_uint_of(wd_get(payload, "turn"), &got);
+      if (turn == 0 || got == turn) {
+        free(kind);
+        return payload;
+      }
+    }
+    free(kind);
+    wd_free(payload);
+  }
+}
+
 static cbor_item_t *wait_event(client *c, const char *want, uint64_t *seq) {
   for (;;) {
     char *kind = NULL;
@@ -395,7 +415,7 @@ int main(void) {
   assert(request(&a, a.next_id++, "session.prompt", plain_prompt, &plain,
                  NULL) == 0);
   wd_free(plain);
-  cbor_item_t *plain_end = wait_event(&a, "turn.end", NULL);
+  cbor_item_t *plain_end = wait_turn_end(&a, last_turn);
   assert(plain_end != NULL);
   wd_free(plain_end);
 
@@ -455,7 +475,7 @@ int main(void) {
   assert(text != NULL && strstr(text, "wrote") != NULL);
   free(text);
   wd_free(event);
-  event = wait_event(&a, "turn.end", NULL);
+  event = wait_turn_end(&a, last_turn);
   assert(event != NULL);
   wd_free(event);
 
@@ -598,7 +618,7 @@ int main(void) {
                  NULL) == 0);
   wd_free(meanwhile);
 
-  cbor_item_t *exec_end = wait_event(&a, "turn.end", NULL);
+  cbor_item_t *exec_end = wait_turn_end(&a, last_turn);
   assert(exec_end != NULL);
   wd_free(exec_end);
 
@@ -635,7 +655,7 @@ int main(void) {
   assert(cancelled);
   wd_free(cancel);
   uint64_t stopped_at = wd_now_ms();
-  cbor_item_t *after_cancel = wait_event(&a, "turn.end", NULL);
+  cbor_item_t *after_cancel = wait_turn_end(&a, last_turn);
   assert(after_cancel != NULL);
   assert(wd_now_ms() - stopped_at < 3000);
   wd_free(after_cancel);
@@ -671,7 +691,7 @@ int main(void) {
   assert(text != NULL && strstr(text, "denied") != NULL);
   free(text);
   wd_free(event);
-  event = wait_event(&a, "turn.end", NULL);
+  event = wait_turn_end(&a, last_turn);
   assert(event != NULL);
   wd_free(event);
   snprintf(path, sizeof(path), "%s/blocked.txt", root);

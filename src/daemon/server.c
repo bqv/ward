@@ -982,8 +982,9 @@ static void handle_session_prompt(wd_server *srv, wd_conn *conn, uint64_t id,
   }
   int pending_kind =
       rc == WD_TURN_PENDING ? wd_turn_pending_kind(turn) : 0;
-  cbor_item_t *result = wd_map(pending_kind == 1 ? 2 : 1);
+  cbor_item_t *result = wd_map(pending_kind == 1 ? 3 : 2);
   wd_put(result, "session", wd_text(session->id));
+  wd_put(result, "turn", wd_uint(wd_turn_id(turn)));
   if (pending_kind == 2) {
     snprintf(srv->turn_session, sizeof(srv->turn_session), "%s", session->id);
     watch_worker(srv);

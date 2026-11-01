@@ -178,7 +178,9 @@ A session object is `{id, cwd, model, created: <unix ms>, last_seq: <uint>}`.
 
 ### session.prompt
 
-`session.prompt {id, text}` first appends `session.prompted {text}` — the log records what
+`session.prompt {id, text}` answers `{session, turn}`, where `turn` is the id that
+`turn.start` and `turn.end` for this turn carry in their payload. A client waits for its own
+turn's end rather than for the next event of that kind. It first appends `session.prompted {text}` — the log records what
 was asked, not only what was answered — and then runs one turn in the session and answers
 `{session}`. The
 turn's events are appended to the session log before they are broadcast, so they reach

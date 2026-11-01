@@ -252,6 +252,12 @@ naming the owner: `wd_store_open`, `wd_session_emit`, `wd_session_history`, `wd_
 prefix at all. It is a rename with no behaviour change, which is why the same 21 tests pass
 before and after.
 
+Twenty-fourth: turn ids. A turn is numbered when it starts, and core stamps `turn.start` and
+`turn.end` with that number in the payload; `session.prompt` answers `{session, turn}`. The
+tool gate now waits for the end of the turn it started, which is what its old `wait_event`
+should always have meant — before this it could consume a previous turn's end, and that is
+exactly how the M1/M2 daemon's habit of clobbering a parked turn stayed invisible.
+
 ## M3: started, with one finding worth keeping
 
 The first M3 attempt replaced the daemon's single `wd_turn` with a pool keyed by session, so
