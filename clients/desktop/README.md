@@ -108,7 +108,7 @@ The client speaks ward's method names and event kinds, not an adapter vocabulary
 | trajectory | `turn.*`, `session.prompted`, `text.delta`, `tool.call/result` |
 | workspaces | synthetic groups by session cwd |
 | presets | `policy.list` / `policy.select`; chip normalises `id` to `value`; full-access requires the warning confirmation and marks the chip |
-| queue | `session.prompt` -> `{queued, ahead}` while a turn runs; one queued prompt per session |
+| queue | `session.prompt` -> `{queued, ahead}`; `session.queue` refreshes the authoritative rows |
 | steer | `session.prompt` with `steer: true` appends to the running turn |
 | images | `tool.result.path` / `session.attachment.path` -> `attachment.read_blob` |
 | any other method | `wardCall(method, params)` is the generic door; `protocolMethods()` lists the frozen table |

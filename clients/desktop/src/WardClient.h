@@ -229,6 +229,7 @@ public:
     Q_INVOKABLE void closeTerminal();
     Q_INVOKABLE void readBlob(const QString &path, qint64 offset, qint64 len);
     Q_INVOKABLE void refreshApprovals();
+    Q_INVOKABLE void refreshQueue();
 
     Q_INVOKABLE void wardCall(const QString &method, const QVariantMap &params);
     Q_INVOKABLE QStringList protocolMethods() const;

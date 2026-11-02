@@ -428,6 +428,7 @@ void WardClient::connectToDaemon()
     sendRequest(QStringLiteral("session.list"), {{QStringLiteral("limit"), 1000}});
     refreshConfigOptions();
     refreshApprovals();
+    refreshQueue();
     refreshPermissionPresets();
 }
 
@@ -768,6 +769,7 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
             m_queuedPrompt.clear();
             doPrompt(text);
         }
+        refreshQueue();
     } else if (method == QLatin1String("session.prompt")) {
         if (result.value(QStringLiteral("steered")).toBool()) {
             m_steerAttempt = false;
@@ -790,6 +792,7 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
                 {QStringLiteral("steering"), false}}};
             m_sentPrompt.clear();
             emit queueChanged();
+            refreshQueue();
             if (!m_pendingAttachments.isEmpty()) {
                 m_pendingAttachments.clear();
                 m_stagingName.clear();
@@ -808,6 +811,21 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
         } else if (!m_turnOpen) {
             m_busy = false;
             emit busyChanged();
+        }
+    } else if (method == QLatin1String("session.queue")) {
+        const QVariantList items = result.value(QStringLiteral("items")).toList();
+        QVariantList rows;
+        for (const QVariant &value : items) {
+            const QVariantMap item = value.toMap();
+            rows.append(QVariantMap{
+                {QStringLiteral("id"), QStringLiteral("queue-%1").arg(rows.size())},
+                {QStringLiteral("text"), item.value(QStringLiteral("text"))},
+                {QStringLiteral("ahead"), item.value(QStringLiteral("ahead"))},
+                {QStringLiteral("steering"), false}});
+        }
+        if (rows != m_queue) {
+            m_queue = rows;
+            emit queueChanged();
         }
     } else if (method == QLatin1String("policy.list")) {
         const QVariantList presets = result.value(QStringLiteral("presets")).toList();
@@ -1023,6 +1041,7 @@ void WardClient::handleEvent(uint64_t sub, uint64_t seq, const QString &kind,
             m_queue.clear();
             emit queueChanged();
         }
+        refreshQueue();
         m_transcript->noteTurn(m_turn, true, QDateTime::currentMSecsSinceEpoch());
         addTrajectory(QVariantMap{
             {QStringLiteral("id"), QStringLiteral("turn-%1").arg(m_turn)},
@@ -1042,6 +1061,7 @@ void WardClient::handleEvent(uint64_t sub, uint64_t seq, const QString &kind,
         m_transcript->noteTurn(m_turn, false);
         m_steerCount = 0;
         m_steerAttempt = false;
+        refreshQueue();
         m_turnOpen = false;
         m_busy = false;
         emit turnOpenChanged();
@@ -1484,6 +1504,12 @@ void WardClient::loadEarlierHistory()
     emit hasEarlierChanged();
 }
 
+
+void WardClient::refreshQueue()
+{
+    if (m_fd >= 0 && !m_sessionId.isEmpty())
+        sendRequest(QStringLiteral("session.queue"), {{QStringLiteral("id"), m_sessionId}});
+}
 
 void WardClient::refreshApprovals()
 {
