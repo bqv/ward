@@ -1423,6 +1423,8 @@ QString StatusStrip::accessLevelName() const
                        : name;
         }
     }
+    if (level == QLatin1String("full-access"))
+        return QStringLiteral("\u26a0 Full access");
     // The key is still the truth: "read-only", "auto" and "custom" all read as
     // themselves, with the hyphen opened to a space so a key reads as a phrase.
     QString derived = level;
@@ -1450,6 +1452,8 @@ QString StatusStrip::accessDescription() const
 bool StatusStrip::accessDangerous() const
 {
     const QString level = m_facade->permissionPreset();
+    if (level == QLatin1String("full-access"))
+        return true;
     for (const QVariant &entry : m_facade->permissionPresets()) {
         const QVariantMap preset = entry.toMap();
         if (preset.value(QStringLiteral("value")).toString() == level)

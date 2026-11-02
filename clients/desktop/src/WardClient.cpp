@@ -825,9 +825,24 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
             row.insert(QStringLiteral("warning"), preset.value(QStringLiteral("warning")));
             mapped.append(row);
         }
-        m_permissionPresets = mapped;
-        m_permissionPreset = result.value(QStringLiteral("current")).toString();
+        const QString current = result.value(QStringLiteral("current")).toString();
+        const bool exposeDangerous = qgetenv("WARD_FULL_ACCESS") == QByteArrayLiteral("1");
+        QVariantList visible;
+        bool hiddenCurrent = false;
+        for (const QVariant &value : mapped) {
+            const QVariantMap row = value.toMap();
+            if (row.value(QStringLiteral("dangerous")).toBool() && !exposeDangerous) {
+                if (row.value(QStringLiteral("value")).toString() == current)
+                    hiddenCurrent = true;
+                continue;
+            }
+            visible.append(row);
+        }
+        m_permissionPresets = visible;
+        m_permissionPreset = current;
         m_accessNotice.clear();
+        if (hiddenCurrent)
+            m_accessNotice = QStringLiteral("Full access is selected but not enforced by the daemon; writes still ask.");
         emit permissionPresetsChanged();
         emit permissionPresetChanged();
         emit accessNoticeChanged();
@@ -1563,6 +1578,18 @@ void WardClient::setPermissionPreset(const QString &value)
     if (m_permissionPresets.isEmpty()) {
         m_pendingPresetSelection = value;
         refreshPermissionPresets();
+        return;
+    }
+    bool known = false;
+    for (const QVariant &entry : m_permissionPresets) {
+        if (entry.toMap().value(QStringLiteral("value")).toString() == value) {
+            known = true;
+            break;
+        }
+    }
+    if (!known) {
+        m_accessNotice = QStringLiteral("That preset is not available on this daemon yet.");
+        emit accessNoticeChanged();
         return;
     }
     for (const QVariant &entry : m_permissionPresets) {
