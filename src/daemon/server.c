@@ -37,6 +37,7 @@
 #include "core/prompt.h"
 #include "core/devlock.h"
 #include "core/files.h"
+#include "core/jobring.h"
 #include "core/presets.h"
 #include "core/probe.h"
 #include "net/http.h"
@@ -96,6 +97,7 @@ struct wd_run {
   uint8_t *http_body;
   size_t http_len;
   size_t http_cap;
+  wd_jobring *ring;
   wd_sse *sse;
   void *sse_ctx;
   int http_status_seen;
@@ -1139,6 +1141,17 @@ static int turn_emit(void *ctx, const char *event, cbor_item_t *payload,
   if (strcmp(event, "text.delta") == 0 && tc->session != NULL) {
     wd_run *streaming_run = run_find(tc->srv, tc->session->id);
     if (streaming_run != NULL && streaming_run->streamed > 0) return 0;
+  }
+  if (tc->session != NULL &&
+      (strcmp(event, "text.delta") == 0 || strcmp(event, "text.final") == 0)) {
+    wd_run *ringed = run_find(tc->srv, tc->session->id);
+    if (ringed != NULL && ringed->ring != NULL) {
+      char *said = wd_text_copy(wd_get(payload, "text"));
+      if (said != NULL) {
+        wd_jobring_append(ringed->ring, said, strlen(said));
+        free(said);
+      }
+    }
   }
   cbor_item_t *logged = payload != NULL ? dup_item(payload) : wd_map(0);
   uint64_t seq = 0;
@@ -2224,6 +2237,43 @@ static void handle_session_queue(wd_server *srv, wd_conn *conn, uint64_t id,
   conn_arm(srv, conn);
 }
 
+static void handle_job_follow(wd_server *srv, wd_conn *conn, uint64_t id,
+                              cbor_item_t *params) {
+  char *job = wd_text_copy(wd_get(params, "id"));
+  uint64_t from = 0;
+  wd_uint_of(wd_get(params, "from"), &from);
+  wd_run *run = job != NULL ? run_find(srv, job) : NULL;
+  if (run == NULL || run->ring == NULL) {
+    conn_send_error(conn, id, WD_ERR_NOT_FOUND,
+                    "no running job with that id; the transcript has the rest");
+    free(job);
+    conn_arm(srv, conn);
+    return;
+  }
+  uint64_t start = wd_jobring_start(run->ring);
+  uint64_t next = wd_jobring_next(run->ring);
+  size_t have = wd_jobring_len(run->ring);
+  uint64_t begin = from > start ? from : start;
+  size_t skip = (size_t)(begin - start);
+  if (skip > have) skip = have;
+  size_t take = have - skip;
+  cbor_item_t *chunk = wd_map(2);
+  wd_put(chunk, "from", wd_uint(begin));
+  wd_put(chunk, "text", wd_text_len(wd_jobring_data(run->ring) + skip, take));
+  cbor_item_t *chunks = wd_array(1);
+  bool pushed = cbor_array_push(chunks, chunk);
+  cbor_decref(&chunk);
+  if (!pushed) wd_free(chunks);
+  cbor_item_t *result = wd_map(3 + (pushed ? 0 : 1));
+  wd_put(result, "job", wd_text(job));
+  if (pushed) wd_put(result, "chunks", chunks);
+  wd_put(result, "next", wd_uint(next));
+  wd_put(result, "dropped", wd_uint(wd_jobring_dropped(run->ring)));
+  free(job);
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
 static void handle_approval_list(wd_server *srv, wd_conn *conn, uint64_t id) {
   wd_approval_info pending[WD_MAX_APPROVALS];
   size_t count = wd_approval_list(srv->approvals, wd_now_ms(), pending,
@@ -2524,6 +2574,7 @@ static wd_run *run_new(wd_server *srv, wd_session *session, char **err) {
   run->http_body = NULL;
   run->http_len = 0;
   run->http_cap = 0;
+  run->ring = wd_jobring_new(64u * 1024u);
   run->sse = NULL;
   run->sse_ctx = NULL;
   run->http_status_seen = 0;
@@ -2784,6 +2835,7 @@ static void run_free(wd_server *srv, wd_run *run) {
   persist_state(srv, run);
   wd_turn_free(run->turn);
   free(run->http_body);
+  wd_jobring_free(run->ring);
   if (run->sse != NULL) wd_sse_destroy(run->sse);
   free(run->sse_ctx);
   free(run);
@@ -3615,6 +3667,8 @@ static void handle_request(wd_server *srv, wd_conn *conn, uint64_t id,
     handle_policy_list(srv, conn, id);
   } else if (strcmp(method, "policy.select") == 0) {
     handle_policy_select(srv, conn, id, params);
+  } else if (strcmp(method, "job.follow") == 0) {
+    handle_job_follow(srv, conn, id, params);
   } else if (strcmp(method, "session.queue") == 0) {
     handle_session_queue(srv, conn, id, params);
   } else if (strcmp(method, "approval.list") == 0) {

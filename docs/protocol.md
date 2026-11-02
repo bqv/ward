@@ -33,6 +33,12 @@ counts the prompts before it (0 means next). The prompt is appended to the
 transcript immediately as `session.prompted`; its own `turn.start` arrives when
 it runs. A queue deeper than eight answers a busy error rather than a queued one.
 
+`job.follow {id, from}` answers `{job, chunks: [{from, text}], next, dropped}`
+while the job runs: a 64 KiB ring per run, appended from its text events, `next`
+being the offset to ask from again and `dropped` the bytes lost off the front.
+Once the run is freed the method answers a not-found error rather than an empty
+stream; the transcript is the durable source then.
+
 `session.queue {id}` answers `{session, items: [{text, ahead}]}` — the prompts the
 daemon itself holds for that session, in order, so one client can see another
 client's queued prompts rather than each mirroring its own.

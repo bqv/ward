@@ -347,6 +347,56 @@ int main(void) {
   free(deny_id);
   close(writer.fd);
 
+  wd_client follower;
+  assert(wd_client_connect(&follower, sock) == 0);
+  assert(wd_client_handshake(&follower) == 0);
+  cbor_item_t *reset_back = wd_map(1);
+  wd_put(reset_back, "id", wd_text("default"));
+  cbor_item_t *reset_done = NULL;
+  assert(wd_client_call(&follower, "policy.select", reset_back, &reset_done) ==
+         0);
+  wd_free(reset_done);
+  cbor_item_t *live_create = wd_map(1);
+  wd_put(live_create, "cwd", wd_text(root));
+  cbor_item_t *live_session = NULL;
+  assert(wd_client_call(&follower, "session.create", live_create,
+                        &live_session) == 0);
+  char *live_id = wd_text_copy(wd_get(wd_get(live_session, "session"), "id"));
+  assert(live_id != NULL);
+  wd_free(live_session);
+  cbor_item_t *live_prompt = wd_map(2);
+  wd_put(live_prompt, "id", wd_text(live_id));
+  wd_put(live_prompt, "text", wd_text("/write live.txt body"));
+  cbor_item_t *live_answered = NULL;
+  assert(wd_client_call(&follower, "session.prompt", live_prompt,
+                        &live_answered) == 0);
+  assert(wd_get(live_answered, "approval") != NULL);
+  wd_free(live_answered);
+  cbor_item_t *follow_params = wd_map(2);
+  wd_put(follow_params, "id", wd_text(live_id));
+  wd_put(follow_params, "from", wd_uint(0));
+  cbor_item_t *follow_answer = NULL;
+  assert(wd_client_call(&follower, "job.follow", follow_params,
+                        &follow_answer) == 0);
+  cbor_item_t *chunks = wd_get(follow_answer, "chunks");
+  assert(chunks != NULL && cbor_array_size(chunks) == 1);
+  uint64_t next_at = 0;
+  assert(wd_uint_of(wd_get(follow_answer, "next"), &next_at));
+  assert(next_at == 0);
+  wd_free(follow_answer);
+  cbor_item_t *cancel_params = wd_map(1);
+  wd_put(cancel_params, "id", wd_text(live_id));
+  cbor_item_t *cancel_result = NULL;
+  assert(wd_client_call(&follower, "session.cancel", cancel_params,
+                        &cancel_result) == 0);
+  wd_free(cancel_result);
+  cbor_item_t *gone_params = wd_map(1);
+  wd_put(gone_params, "id", wd_text(live_id));
+  cbor_item_t *gone = NULL;
+  assert(wd_client_call(&follower, "job.follow", gone_params, &gone) != 0);
+  free(live_id);
+  close(follower.fd);
+
   kill(pid, SIGTERM);
   int status = 0;
   waitpid(pid, &status, 0);

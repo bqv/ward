@@ -2163,3 +2163,16 @@ Carry-over still does not deliver, and the fix changed its symptom without curin
 blocks, and the second `session.prompted` still does not arrive. So the remaining fault is downstream of the queue — either the
 carried turn starts and dies before emitting, or the started turn is not the one the subscriber hears. That is where the next
 session should look, with the trace re-added around `start_session_turn` for the carried item.
+
+Hundred-and-sixty-fifth: `job.follow`. A run carries a 64 KiB ring (`src/core/jobring.c`), appended from its `text.delta` and
+`text.final` events. `job.follow {id, from}` answers `{job, chunks: [{from, text}], next, dropped}`: `next` is the offset to
+ask from again, `dropped` counts the bytes lost off the front, and a freed run answers not-found with a sentence saying the
+transcript has the rest.
+
+`jobring_test` covers wrapping, the exact `start`/`next`/`dropped` accounting and a single append larger than the ring.
+`gate_native` covers the live method: a parked job answers its ring, and after `session.cancel` the same call answers an error
+rather than an empty stream.
+
+Honest limit: no gate drives the ring past its cap through the daemon. The accounting is unit-tested and the daemon path is
+method-tested, but the two are not yet joined by a job that overflows — that needs a provider that streams more than 64 KiB,
+which the fixture does not do.
