@@ -14,7 +14,12 @@ wait; the queue is FIFO with `ahead`; a model's device has a slot pool and one q
 provider reads a native `tool_calls` reply, and a reply asking for more than one call is refused rather than
 half-run.
 
-Still open: true streaming (deltas as they arrive), tool dispatch and the grammar-only fallback, and the
+Streaming is in the tree and working — the helper pipes chunks, the daemon parses them with the existing SSE
+parser and appends a durable `text.delta` per fragment, and the driver's own delta is suppressed so nothing is
+repeated — but its *timing gate* is still missing, and the fake endpoint is what blocks it: the fixture emits a
+single non-empty content fragment per reply, so a test cannot yet assert that a delta arrives before `turn.end`.
+
+Still open: the streaming timing gate (fixture first), the one repair for a failed tool-call parse, and the
 per-daemon limits of the device pool.
 
 ## 1. Model capabilities, not just context length
