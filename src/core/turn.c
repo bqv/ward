@@ -1928,51 +1928,33 @@ static int emit_provider_error(wd_turn *turn, wd_error code, const char *message
   return rc == 0 ? 0 : -1;
 }
 
-int wd_turn_resume_http(wd_turn *turn, wd_turn_emit emit, void *ctx,
-                        char **err) {
-  if (turn->pending_kind != 3 || turn->http_job == NULL) {
+int wd_turn_resume_http_body(wd_turn *turn, long status, const char *body,
+                             size_t len, wd_turn_emit emit, void *ctx,
+                             char **err) {
+  if (turn->pending_kind != 3) {
     *err = strdup("no provider request is pending");
     return -1;
   }
   turn->pending_kind = 0;
-  wd_http_response response;
-  int rc = wd_http_job_finish(turn->http_job, &response, err);
-  wd_http_job_free(turn->http_job);
-  turn->http_job = NULL;
   cbor_item_t *message = wd_map(2);
   wd_put(message, "kind", wd_text("result"));
-  if (rc != 0) {
-    char *reason = err != NULL && *err != NULL ? strdup(*err) : NULL;
-    free(err != NULL ? *err : NULL);
-    if (err != NULL) *err = NULL;
-    wd_free(message);
-    return emit_provider_error(turn, WD_ERR_PROVIDER_UNAVAILABLE,
-                               reason != NULL && reason[0] != '\0'
-                                   ? reason
-                                   : "the provider is unreachable",
-                               emit, ctx, err) == 0 ? 0 : -1;
-  }
-  if (response.status != 200) {
-    wd_error code = classify_provider((int)response.status,
-                                      (const char *)response.body);
+  if (status != 200) {
+    wd_error code = classify_provider((int)status, body);
     char excerpt[256];
-    size_t take = response.len < sizeof(excerpt) - 1 ? response.len
-                                                    : sizeof(excerpt) - 1;
-    if (take > 0) memcpy(excerpt, response.body, take);
+    size_t take = len < sizeof(excerpt) - 1 ? len : sizeof(excerpt) - 1;
+    if (take > 0) memcpy(excerpt, body, take);
     excerpt[take] = '\0';
-    wd_http_response_free(&response);
     wd_free(message);
     return emit_provider_error(turn, code,
                                take > 0 ? excerpt : "the provider refused",
                                emit, ctx, err) == 0 ? 0 : -1;
   }
   cbor_item_t *phase = wd_map(2);
-  wd_put(phase, "status", wd_uint((uint64_t)response.status));
-  wd_put(phase, "body", wd_text_len((const char *)response.body, response.len));
+  wd_put(phase, "status", wd_uint((uint64_t)status));
+  wd_put(phase, "body", wd_text_len(body != NULL ? body : "", len));
   cbor_item_t *reply = NULL;
-  rc = provider_phase(turn, phase, &reply, err);
+  int rc = provider_phase(turn, phase, &reply, err);
   wd_free(phase);
-  wd_http_response_free(&response);
   if (rc != 0) {
     wd_free(message);
     return -1;
@@ -1995,8 +1977,51 @@ int wd_turn_resume_http(wd_turn *turn, wd_turn_emit emit, void *ctx,
       (void)emit(ctx, "turn.timings", timing, err);
     }
   }
+  char *tool = wd_text_copy(wd_get(reply, "tool"));
+  if (tool != NULL && tool[0] != '\0') {
+    char *arguments = wd_text_copy(wd_get(reply, "arguments"));
+    wd_free(message);
+    message = wd_map(2);
+    wd_put(message, "kind", wd_text("tool"));
+    cbor_item_t *call = wd_map(2);
+    wd_put(call, "tool", wd_text(tool));
+    wd_put(call, "arguments", wd_text(arguments != NULL ? arguments : ""));
+    wd_put(message, "payload", call);
+    free(arguments);
+    free(tool);
+    wd_free(reply);
+    return drive(turn, message, emit, ctx, err);
+  }
+  free(tool);
   wd_put(message, "payload", reply);
   return drive(turn, message, emit, ctx, err);
+}
+
+int wd_turn_resume_http(wd_turn *turn, wd_turn_emit emit, void *ctx,
+                        char **err) {
+  if (turn->pending_kind != 3 || turn->http_job == NULL) {
+    *err = strdup("no provider request is pending");
+    return -1;
+  }
+  wd_http_response response;
+  int rc = wd_http_job_finish(turn->http_job, &response, err);
+  wd_http_job_free(turn->http_job);
+  turn->http_job = NULL;
+  if (rc != 0) {
+    char *reason = err != NULL && *err != NULL ? strdup(*err) : NULL;
+    free(err != NULL ? *err : NULL);
+    if (err != NULL) *err = NULL;
+    return emit_provider_error(turn, WD_ERR_PROVIDER_UNAVAILABLE,
+                               reason != NULL && reason[0] != '\0'
+                                   ? reason
+                                   : "the provider is unreachable",
+                               emit, ctx, err) == 0 ? 0 : -1;
+  }
+  int out = wd_turn_resume_http_body(turn, response.status,
+                                     (const char *)response.body,
+                                     response.len, emit, ctx, err);
+  wd_http_response_free(&response);
+  return out;
 }
 
 int wd_turn_compact(wd_turn *turn, cbor_item_t *history, char **summary,

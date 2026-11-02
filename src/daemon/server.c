@@ -85,6 +85,9 @@ struct wd_run {
   wd_turn *turn;
   int worker_fd;
   int http_fd;
+  uint8_t *http_body;
+  size_t http_len;
+  size_t http_cap;
 };
 
 
@@ -2109,6 +2112,9 @@ static wd_run *run_new(wd_server *srv, wd_session *session, char **err) {
   }
   run->worker_fd = -1;
   run->http_fd = -1;
+  run->http_body = NULL;
+  run->http_len = 0;
+  run->http_cap = 0;
   snprintf(run->session_id, sizeof(run->session_id), "%s", session->id);
   run->turn = wd_turn_new_pinned(srv->engine, dir, session->cwd, session->pins,
                                 session->pins_len, err);
@@ -2340,6 +2346,7 @@ static void run_free(wd_server *srv, wd_run *run) {
   }
   persist_state(srv, run);
   wd_turn_free(run->turn);
+  free(run->http_body);
   free(run);
 }
 
@@ -2607,16 +2614,59 @@ static void tool_done(wd_server *srv, wd_run *run) {
   run_after(srv, run, rc, err);
 }
 
+static int read_stream(wd_server *srv, wd_run *run, bool *eof) {
+  (void)srv;
+  *eof = false;
+  for (;;) {
+    if (run->http_len + 65536 > run->http_cap) {
+      size_t grown = run->http_cap == 0 ? 131072 : run->http_cap * 2;
+      uint8_t *next = realloc(run->http_body, grown);
+      if (next == NULL) return -1;
+      run->http_body = next;
+      run->http_cap = grown;
+    }
+    ssize_t got = read(run->http_fd, run->http_body + run->http_len,
+                       run->http_cap - run->http_len);
+    if (got < 0) {
+      if (errno == EINTR) continue;
+      if (errno == EAGAIN || errno == EWOULDBLOCK) return 0;
+      return -1;
+    }
+    if (got == 0) {
+      *eof = true;
+      return 0;
+    }
+    run->http_len += (size_t)got;
+    return 0;
+  }
+}
+
 static void http_done(wd_server *srv, wd_run *run) {
   wd_session *session = wd_session_find(&srv->store, run->session_id);
   if (session == NULL) {
     run_free(srv, run);
     return;
   }
+  bool eof = false;
+  if (read_stream(srv, run, &eof) != 0) {
+    run_free(srv, run);
+    return;
+  }
+  if (!eof) return;
   wd_turn_ctx tc = {srv, session};
   char *err = NULL;
   emit_state(srv, run, "answering");
-  int rc = wd_turn_resume_http(run->turn, turn_emit, &tc, &err);
+  long status = 0;
+  if (run->http_len >= 4) {
+    status = (long)((uint32_t)run->http_body[0] |
+                    ((uint32_t)run->http_body[1] << 8) |
+                    ((uint32_t)run->http_body[2] << 16) |
+                    ((uint32_t)run->http_body[3] << 24));
+  }
+  int rc = wd_turn_resume_http_body(
+      run->turn, status,
+      run->http_len > 4 ? (const char *)run->http_body + 4 : "", 
+      run->http_len > 4 ? run->http_len - 4 : 0, turn_emit, &tc, &err);
   if (rc != WD_TURN_PENDING) emit_state(srv, run, "idle");
   run_after(srv, run, rc, err);
 }

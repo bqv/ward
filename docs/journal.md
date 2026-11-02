@@ -1572,3 +1572,16 @@ beyond what the provider already sent.
 A reminder worth keeping: check what the tree already has before writing the abstraction it needs. `src/proto/sse.h`
 has been there since M1 and the plan I wrote two entries ago did not mention it — I had read `http.c` and not the
 neighbouring protocol directory.
+
+Hundred-and-eighteenth: the daemon reads the provider stream as it arrives. `http_done` no longer waits for the
+whole answer: it appends what the pipe offers to a per-run buffer, returns when the read would block, and only on
+EOF parses the four status bytes and hands the body to `wd_turn_resume_http_body`. The job path still works through
+`wd_turn_resume_http`, which now finishes the job and delegates, so there is one resume implementation instead of
+two.
+
+The buffer grows by doubling from 128 KiB, is freed in `run_free`, and the suites pass in all three builds — the
+provider path is covered by the subagent and tool gates, so a mistake here would have been loud.
+
+What this buys immediately is bounded memory per read rather than per answer, and what it enables is step four: the
+same buffer is where the SSE parser will look for content as it fills. The deltas are still not emitted; that is the
+next edit, and it is the one a gate can finally measure.
