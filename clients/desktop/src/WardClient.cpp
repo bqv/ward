@@ -498,6 +498,12 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
         }
         if (method == QLatin1String("session.file_read_blob"))
             emit blobRead(m_blobPath, m_blobOffset, QByteArray(), text);
+        if (method == QLatin1String("session.file_list")) {
+            m_fileError = text;
+            m_fileEntries.clear();
+            emit fileEntriesChanged();
+            emit fileErrorChanged();
+        }
         return;
     }
 
@@ -585,6 +591,34 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
     } else if (method == QLatin1String("goal.set")) {
         m_goal = result.value(QStringLiteral("goal")).toMap();
         emit goalChanged();
+    } else if (method == QLatin1String("session.file_list")) {
+        const QVariantList entries = result.value(QStringLiteral("entries")).toList();
+        QVariantList rows;
+        for (const QVariant &entry : entries) {
+            const QVariantMap item = entry.toMap();
+            const QString name = item.value(QStringLiteral("name")).toString();
+            if (name.isEmpty())
+                continue;
+            const QString kind = item.value(QStringLiteral("kind")).toString();
+            const QString path = m_filePath.isEmpty()
+                                     ? name
+                                     : m_filePath + QLatin1Char('/') + name;
+            rows.append(QVariantMap{
+                {QStringLiteral("name"), name},
+                {QStringLiteral("path"), path},
+                {QStringLiteral("type"), kind == QLatin1String("dir")
+                                              ? QStringLiteral("directory")
+                                              : QStringLiteral("file")},
+                {QStringLiteral("depth"), 0},
+                {QStringLiteral("expanded"), false},
+                {QStringLiteral("size"), item.value(QStringLiteral("size"))}});
+        }
+        m_fileEntries = rows;
+        m_fileTruncated = result.value(QStringLiteral("truncated")).toBool();
+        m_fileError.clear();
+        emit fileEntriesChanged();
+        emit fileTruncatedChanged();
+        emit fileErrorChanged();
     } else if (method == QLatin1String("session.file_read_blob")) {
         emit blobRead(result.value(QStringLiteral("path")).toString(),
                       qint64(result.value(QStringLiteral("offset")).toULongLong()),
@@ -1124,13 +1158,27 @@ void WardClient::listFileReferences(const QString &prefix)
 
 void WardClient::listDirectory(const QString &path)
 {
-    Q_UNUSED(path);
-    emit railNotice(QStringLiteral("ward has no file surface"), true);
+    if (m_sessionId.isEmpty()) {
+        m_fileError = QStringLiteral("no session to list files in");
+        emit fileErrorChanged();
+        return;
+    }
+    m_filePath = path;
+    m_fileError.clear();
+    m_fileEntries.clear();
+    m_fileSelectedPath.clear();
+    emit filePathChanged();
+    emit fileEntriesChanged();
+    emit fileSelectedPathChanged();
+    emit fileErrorChanged();
+    sendRequest(QStringLiteral("session.file_list"),
+                {{QStringLiteral("id"), m_sessionId},
+                 {QStringLiteral("path"), path}});
 }
 
 void WardClient::toggleDirectory(const QString &path)
 {
-    Q_UNUSED(path);
+    listDirectory(path);
 }
 
 void WardClient::readBlob(const QString &path, qint64 offset, qint64 len)
@@ -1178,6 +1226,10 @@ void WardClient::readFile(const QString &path)
 
 void WardClient::goUpDirectory()
 {
+    if (m_filePath.isEmpty())
+        return;
+    const int slash = m_filePath.lastIndexOf(QLatin1Char('/'));
+    listDirectory(slash < 0 ? QString() : m_filePath.left(slash));
 }
 
 void WardClient::clearChangedFiles()
@@ -1307,6 +1359,7 @@ QStringList WardClient::protocolMethods() const
     return {QStringLiteral("session.create"), QStringLiteral("session.list"),
             QStringLiteral("session.get"), QStringLiteral("session.resume"),
             QStringLiteral("session.file_read"), QStringLiteral("session.file_read_blob"),
+            QStringLiteral("session.file_list"),
             QStringLiteral("session.fork"),
             QStringLiteral("session.rename"),
             QStringLiteral("session.archive"), QStringLiteral("session.pin"),

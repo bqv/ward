@@ -58,6 +58,7 @@ The probe is the display-free path and the client's gate:
 ./build/ward-gui-probe --socket /run/user/1000/ward.sock --terminal
 ./build/ward-gui-probe --socket /run/user/1000/ward.sock --read note.txt
 ./build/ward-gui-probe --socket /run/user/1000/ward.sock --blob note.bin --blob-len 64
+./build/ward-gui-probe --socket /run/user/1000/ward.sock --list .
 ```
 
 It prints the assistant text on stdout and every event kind on stderr; `--approve`
@@ -82,7 +83,7 @@ The client speaks ward's method names and event kinds, not an adapter vocabulary
 | goal | `goal.set`, `goal.clear` |
 | models | `model.list`, `session.set_model` |
 | terminal | `terminal.open/write/resize/close`, `terminal.output`, eof |
-| files | `session.file_read` (text, 64 KiB) and `session.file_read_blob` (CBOR bytes, 1 MiB per call) |
+| files | `session.file_read` (text), `session.file_read_blob` (CBOR bytes), `session.file_list` |
 | jobs, schedules | `job.list`, `job.kill`, `schedule.list`, `schedule.delete` |
 | any other method | `wardCall(method, params)` is the generic door; `protocolMethods()` lists the frozen table |
 
@@ -96,11 +97,10 @@ and are never silently dropped by the wire layer.
   transport, device certificates and pairing are not in this client yet; the
   daemon's own QUIC client (`src/net/quic.c`) is the code to reuse.
 - **Files, attachments, workspaces, plugin inventory, permission presets.**
-  Text files read through `session.file_read` and binary ranges through
-  `session.file_read_blob`; the directory tree still needs a ward method, and
-  the image lightbox needs an image reference in ward's events before it can
-  resolve one. The other properties exist and answer empty so the widgets
-  degrade honestly.
+  Text files read through `session.file_read`, binary ranges through
+  `session.file_read_blob`, and the tree through `session.file_list`. The image
+  lightbox needs an image reference in ward's events before it can resolve one.
+  The other properties exist and answer empty so the widgets degrade honestly.
 - **Deferred new-session seats.** A new session is created immediately rather
   than on the first send.
 

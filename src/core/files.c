@@ -4,6 +4,7 @@
 
 #include "core/files.h"
 
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -176,6 +177,105 @@ int wd_file_read(const char *root, const char *path, size_t max, char **out,
   close(fd);
   buffer[used] = '\0';
   *out = buffer;
+  *len = used;
+  return 0;
+}
+
+void wd_file_entries_free(wd_file_entry *entries, size_t len) {
+  if (entries == NULL) return;
+  for (size_t i = 0; i < len; i++) free(entries[i].name);
+  free(entries);
+}
+
+int wd_file_list(const char *root, const char *path, size_t max,
+                 wd_file_entry **out, size_t *len, bool *truncated, char **err) {
+  if (out == NULL || len == NULL) return -1;
+  *out = NULL;
+  *len = 0;
+  if (truncated != NULL) *truncated = false;
+  if (max == 0) return 0;
+  char full[PATH_MAX];
+  if (path == NULL || path[0] == '\0') {
+    snprintf(full, sizeof(full), "%s", root != NULL ? root : ".");
+  } else if (path[0] == '/') {
+    snprintf(full, sizeof(full), "%s", path);
+  } else {
+    snprintf(full, sizeof(full), "%s/%s", root != NULL ? root : ".", path);
+  }
+  if (!inside_root(root != NULL ? root : ".", full)) {
+    if (err != NULL) *err = strdup("file.list: the path is outside the session directory");
+    return -1;
+  }
+  DIR *dir = opendir(full);
+  if (dir == NULL) {
+    if (err != NULL) {
+      char buf[256];
+      snprintf(buf, sizeof(buf), "file.list: %s", strerror(errno));
+      *err = strdup(buf);
+    }
+    return -1;
+  }
+  size_t cap = max < 64 ? max : 64;
+  wd_file_entry *entries = calloc(cap, sizeof(*entries));
+  if (entries == NULL) {
+    closedir(dir);
+    if (err != NULL) *err = strdup("file.list: out of memory");
+    return -1;
+  }
+  size_t used = 0;
+  for (;;) {
+    errno = 0;
+    struct dirent *entry = readdir(dir);
+    if (entry == NULL) break;
+    if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+      continue;
+    if (used == max) {
+      if (truncated != NULL) *truncated = true;
+      break;
+    }
+    if (used == cap) {
+      size_t grown = cap * 2 < max ? cap * 2 : max;
+      wd_file_entry *next = realloc(entries, grown * sizeof(*entries));
+      if (next == NULL) {
+        wd_file_entries_free(entries, used);
+        closedir(dir);
+        if (err != NULL) *err = strdup("file.list: out of memory");
+        return -1;
+      }
+      memset(next + cap, 0, (grown - cap) * sizeof(*next));
+      entries = next;
+      cap = grown;
+    }
+    char child[PATH_MAX];
+    int n = snprintf(child, sizeof(child), "%s/%s", full, entry->d_name);
+    if (n <= 0 || (size_t)n >= sizeof(child)) continue;
+    struct stat st;
+    if (lstat(child, &st) != 0) continue;
+    char *name = strdup(entry->d_name);
+    if (name == NULL) {
+      wd_file_entries_free(entries, used);
+      closedir(dir);
+      if (err != NULL) *err = strdup("file.list: out of memory");
+      return -1;
+    }
+    entries[used].name = name;
+    entries[used].kind = S_ISDIR(st.st_mode) ? WD_FILE_DIR
+                        : S_ISREG(st.st_mode) ? WD_FILE_REGULAR
+                                              : WD_FILE_OTHER;
+    entries[used].size = S_ISREG(st.st_mode) ? (uint64_t)st.st_size : 0;
+    used++;
+  }
+  closedir(dir);
+  if (errno != 0 && used == 0) {
+    wd_file_entries_free(entries, used);
+    if (err != NULL) {
+      char buf[256];
+      snprintf(buf, sizeof(buf), "file.list: %s", strerror(errno));
+      *err = strdup(buf);
+    }
+    return -1;
+  }
+  *out = entries;
   *len = used;
   return 0;
 }

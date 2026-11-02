@@ -32,6 +32,11 @@ with `data` as a CBOR byte string — the same cwd-rooted and regular-file rules
 most 1 MiB per call and 4 MiB of offset in total, so a binary file is read in
 bounded chunks rather than one unbounded response.
 
+`session.file_list {id, path}` answers `{path, entries, truncated}` where each entry
+is `{name, kind, size}` with `kind` one of `file`, `dir`, `other`; `name` is relative
+to the requested directory, and `truncated` says the 1000-entry cap was reached.
+The same cwd-rooted refusal applies.
+
 `model.probe {id}` answers `{id, n_ctx, n_slots, context_source}` — the window and slot count the
 provider reports, or the catalog's `context`, or a default, and which of the three it was.
 `module.list`, `module.reload`, `session.upgrade`, `stats.session`, `stats.global`,

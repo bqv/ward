@@ -158,6 +158,9 @@ int main(void) {
   assert(note_file != NULL);
   assert(fputs("ward file read\n", note_file) >= 0);
   fclose(note_file);
+  char subdir[512];
+  snprintf(subdir, sizeof(subdir), "%s/subdir", root);
+  assert(mkdir(subdir, 0755) == 0);
   assert(chdir(root) == 0);
 
   char read_out[8192];
@@ -190,12 +193,24 @@ int main(void) {
                      sizeof(blob_escape_out)) == 0);
   assert(strstr(blob_escape_out, "outside the session directory") != NULL);
 
+  char list_out[8192];
+  char *list_argv[] = {(char *)probe, (char *)"--list", (char *)".", NULL};
+  assert(run_capture(sock, probe, list_argv, list_out, sizeof(list_out)) == 0);
+  assert(strstr(list_out, "note.txt") != NULL);
+  assert(strstr(list_out, "subdir") != NULL);
+
+  char list_escape_out[8192];
+  char *list_escape_argv[] = {(char *)probe, (char *)"--list", (char *)"..", NULL};
+  assert(run_capture(sock, probe, list_escape_argv, list_escape_out,
+                     sizeof(list_escape_out)) == 0);
+  assert(strstr(list_escape_out, "outside the session directory") != NULL);
+
   kill(pid, SIGTERM);
   int status = 0;
   waitpid(pid, &status, 0);
   stop_server(endpoint);
   if (strcmp(cgroup_base, "off") != 0) drop_test_cgroup(cgroup_base);
 
-  printf("desktop gate passed: ward-gui drove a session over UDS, TCP, a terminal, text reads and blob reads\n");
+  printf("desktop gate passed: ward-gui drove a session over UDS, TCP, a terminal, reads and a directory list\n");
   return 0;
 }

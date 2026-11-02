@@ -40,6 +40,7 @@ and `WardClient.cpp` includes the same headers the daemon does.
 ./build/ward-gui-probe --socket <path> --terminal
 ./build/ward-gui-probe --socket <path> --read note.txt
 ./build/ward-gui-probe --socket <path> --blob note.bin --blob-len 64
+./build/ward-gui-probe --socket <path> --list .
 ```
 
 The first covers handshake, `session.create`, `session.resume`, `session.prompt`
@@ -52,8 +53,8 @@ turn without duplicating a row.
 
 `tests/gate_desktop.c` runs the probe against a fixture daemon and asserts the
 prompt text appears exactly once, first over the Unix socket and then over
-loopback TCP, then drives a terminal, a text read and a blob read (success and
-an escape refusal for each). It fork/execs the probe with `PR_SET_PDEATHSIG` and `alarm(20)`
+loopback TCP, then drives a terminal, a text read, a blob read and a directory
+list (success and an escape refusal for each). It fork/execs the probe with `PR_SET_PDEATHSIG` and `alarm(20)`
 rather than using `popen`, so a stalled probe fails the gate and a killed gate
 does not leave a server behind. `make test` builds the probe and runs the gate.
 In a sandbox that cannot write `/sys/fs/cgroup`, run the gate directly with
@@ -79,7 +80,7 @@ daemon.
 | terminal | `terminal.open/write/resize/close`, `terminal.output`, eof and exit state |
 | session lifecycle | create, list, resume, prompt, cancel, rename, pin, archive, compact, set_model |
 | catalog | `model.list`, `session.set_model` |
-| file read | `session.file_read` (text, 64 KiB) and `session.file_read_blob` (CBOR bytes, 1 MiB per call, 4 MiB total); both cwd-rooted |
+| files | `session.file_read` (text, 64 KiB), `session.file_read_blob` (CBOR bytes, 1 MiB per call, 4 MiB total) and `session.file_list`; all cwd-rooted |
 | goals, jobs, schedules | `goal.set/clear`, `job.list/kill`, `schedule.list/delete` |
 | everything else | `wardCall(method, params)` plus `protocolMethods()` |
 
@@ -94,13 +95,12 @@ proven yet. They are reported to the ward session as well.
 1. **QUIC.** The client uses Unix sockets and loopback TCP. ward's QUIC
    transport, device certificates, pairing and `device.*` are not in the client;
    `src/net/quic.h` is the code to reuse.
-2. **Files and attachments.** Text reads go through `session.file_read` and
-   blob reads through `session.file_read_blob` (CBOR bytes, chunked by offset).
-   The image lightbox is still not wired because ward's events do not carry an
-   image reference for `attachmentUrl`/`loadAttachment` to resolve. Directory
-   listing has no ward method, so the tree still starts empty.
-   `attachment.add/list` exists in ward, but the composer's staging surface is
-   not wired to it.
+2. **Files and attachments.** Text reads go through `session.file_read`, blob
+   reads through `session.file_read_blob`, and the dock browses with
+   `session.file_list`. The image lightbox is still not wired because ward's
+   events do not carry an image reference for `attachmentUrl`/`loadAttachment`
+   to resolve. `attachment.add/list` exists in ward, but the composer's staging
+   surface is not wired to it.
 3. **Workspaces.** ward has no workspace registry; the rail groups by nothing
    and the facade reports `hasWorkspaces = false`.
 4. **Permission presets.** ward's policy is a server-side rule table, not a

@@ -43,6 +43,9 @@ int main(int argc, char **argv)
     QCommandLineOption blobLenOption(QStringList{QStringLiteral("blob-len")},
                                      QStringLiteral("byte count for --blob"),
                                      QStringLiteral("n"), QStringLiteral("4096"));
+    QCommandLineOption listOption(QStringList{QStringLiteral("list")},
+                                  QStringLiteral("list one directory through session.file_list"),
+                                  QStringLiteral("path"));
     parser.addOption(socketOption);
     parser.addOption(cwdOption);
     parser.addOption(promptOption);
@@ -53,6 +56,7 @@ int main(int argc, char **argv)
     parser.addOption(blobOption);
     parser.addOption(blobOffsetOption);
     parser.addOption(blobLenOption);
+    parser.addOption(listOption);
     parser.process(app);
 
     WardClient client(parser.value(socketOption));
@@ -63,16 +67,19 @@ int main(int argc, char **argv)
     bool terminalWritten = false;
     bool readStarted = false;
     bool blobStarted = false;
+    bool listStarted = false;
     QString readResult;
     QByteArray blobResult;
+    QStringList listResult;
     QByteArray terminalText;
     const bool approve = parser.isSet(approveOption);
     const bool terminal = parser.isSet(terminalOption);
     const bool read = parser.isSet(readOption);
     const bool blob = parser.isSet(blobOption);
+    const bool list = parser.isSet(listOption);
 
     QObject::connect(&client, &WardClient::lastErrorChanged, &app, [&]() {
-        if (read || blob)
+        if (read || blob || list)
             return;
         if (!client.lastError().isEmpty()) {
             QTextStream(stderr) << "probe: " << client.lastError() << "\n";
@@ -87,8 +94,26 @@ int main(int argc, char **argv)
         if (kind == QLatin1String("turn.end"))
             app.quit();
         if (kind == QLatin1String("replay.end") && !parser.isSet(promptOption)
-                && !terminal && !read && !blob && !parser.isSet(sessionOption))
+                && !terminal && !read && !blob && !list
+                && !parser.isSet(sessionOption))
             app.quit();
+    });
+    QObject::connect(&client, &WardClient::fileEntriesChanged, &app, [&]() {
+        if (!list || client.fileEntries().isEmpty())
+            return;
+        for (const QVariant &entry : client.fileEntries()) {
+            const QVariantMap row = entry.toMap();
+            listResult.append(row.value(QStringLiteral("type")).toString()
+                              + QLatin1Char(' ')
+                              + row.value(QStringLiteral("name")).toString());
+        }
+        app.quit();
+    });
+    QObject::connect(&client, &WardClient::fileErrorChanged, &app, [&]() {
+        if (!list || client.fileError().isEmpty())
+            return;
+        listResult.append(QStringLiteral("error: ") + client.fileError());
+        app.quit();
     });
     QObject::connect(&client, &WardClient::blobRead, &app,
                      [&](const QString &path, qint64 offset, const QByteArray &data,
@@ -142,7 +167,7 @@ int main(int argc, char **argv)
         }
         if (client.state() != WardClient::Ready || prompted)
             return;
-        if (terminal || read || blob) {
+        if (terminal || read || blob || list) {
             prompted = true;
             client.createSession();
             return;
@@ -161,8 +186,8 @@ int main(int argc, char **argv)
     });
     QObject::connect(&client, &WardClient::sessionsLoadingChanged, &app, [&]() {
         if (client.state() == WardClient::Ready && !parser.isSet(promptOption)
-                && !terminal && !read && !blob && !parser.isSet(sessionOption)
-                && !client.sessionsLoading())
+                && !terminal && !read && !blob && !list
+                && !parser.isSet(sessionOption) && !client.sessionsLoading())
             app.quit();
     });
     QObject::connect(&client, &WardClient::sessionChanged, &app, [&]() {
@@ -186,6 +211,12 @@ int main(int argc, char **argv)
             client.readBlob(parser.value(blobOption),
                             parser.value(blobOffsetOption).toLongLong(),
                             parser.value(blobLenOption).toLongLong());
+            return;
+        }
+        if (list && !listStarted) {
+            listStarted = true;
+            QTextStream(stderr) << "session " << client.sessionId() << "\n";
+            client.listDirectory(parser.value(listOption));
             return;
         }
         if (prompted || !parser.isSet(promptOption))
@@ -213,6 +244,10 @@ int main(int argc, char **argv)
     } else if (blob) {
         fwrite(blobResult.constData(), 1, size_t(blobResult.size()), stdout);
         fflush(stdout);
+    } else if (list) {
+        out << listResult.join(QLatin1Char('\n'));
+        if (!listResult.isEmpty())
+            out << '\n';
     } else {
         out << text;
         if (!text.isEmpty() && !text.endsWith(QLatin1Char('\n')))

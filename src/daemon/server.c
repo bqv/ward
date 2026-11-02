@@ -2088,6 +2088,59 @@ static void handle_session_file_read_blob(wd_server *srv, wd_conn *conn,
   conn_arm(srv, conn);
 }
 
+
+static void handle_session_file_list(wd_server *srv, wd_conn *conn, uint64_t id,
+                                     cbor_item_t *params) {
+  char *session_id = wd_text_copy(wd_get(params, "id"));
+  char *path = wd_text_copy(wd_get(params, "path"));
+  wd_session *session =
+      session_id != NULL ? wd_session_find(&srv->store, session_id) : NULL;
+  if (session == NULL) {
+    free(session_id);
+    free(path);
+    conn_send_error(conn, id, WD_ERR_NOT_FOUND, "no such session");
+    conn_arm(srv, conn);
+    return;
+  }
+  wd_file_entry *entries = NULL;
+  size_t len = 0;
+  bool truncated = false;
+  char *err = NULL;
+  int rc = wd_file_list(session->cwd, path, 1000, &entries, &len, &truncated,
+                        &err);
+  free(session_id);
+  if (rc != 0) {
+    conn_send_error(conn, id, WD_ERR_INVALID_PARAMS,
+                    err != NULL ? err : "cannot list the directory");
+    free(err);
+    free(path);
+    conn_arm(srv, conn);
+    return;
+  }
+  free(err);
+  cbor_item_t *list = wd_array((uint64_t)len);
+  for (size_t i = 0; i < len; i++) {
+    cbor_item_t *item = wd_map(3);
+    wd_put(item, "name", wd_text(entries[i].name));
+    const char *kind = entries[i].kind == WD_FILE_DIR ? "dir"
+                       : entries[i].kind == WD_FILE_REGULAR ? "file"
+                                                           : "other";
+    wd_put(item, "kind", wd_text(kind));
+    wd_put(item, "size", wd_uint(entries[i].size));
+    bool pushed = cbor_array_push(list, item);
+    (void)pushed;
+    cbor_decref(&item);
+  }
+  wd_file_entries_free(entries, len);
+  cbor_item_t *result = wd_map(3);
+  wd_put(result, "path", wd_text(path != NULL ? path : ""));
+  wd_put(result, "entries", list);
+  wd_put(result, "truncated", cbor_build_bool(truncated));
+  free(path);
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
 static void handle_session_cancel(wd_server *srv, wd_conn *conn, uint64_t id,
                                   cbor_item_t *params) {
   char *session_id = wd_text_copy(wd_get(params, "id"));
@@ -3271,6 +3324,8 @@ static void handle_request(wd_server *srv, wd_conn *conn, uint64_t id,
     handle_model_select(srv, conn, id, params);
   } else if (strcmp(method, "session.file_read_blob") == 0) {
     handle_session_file_read_blob(srv, conn, id, params);
+  } else if (strcmp(method, "session.file_list") == 0) {
+    handle_session_file_list(srv, conn, id, params);
   } else if (strcmp(method, "session.file_read") == 0) {
     handle_session_file_read(srv, conn, id, params);
   } else if (strcmp(method, "session.prompt") == 0) {
