@@ -4,10 +4,14 @@ A coding agent harness: a small C core that owns I/O and enforcement, and a
 reloadable WebAssembly layer that owns every decision. Binary protocol over a
 Unix socket; no web UI.
 
-**Status: M1.** The daemon, the `AF_UNIX` transport, the handshake, sessions,
-durable events, replay and a client exist and pass their gate, and the M1 layer sits on
-top of them: the Wasmtime host, the provider, the engine/driver dispatcher and QUIC with
-device pairing. `docs/protocol.md` is a frozen contract: the frame layout, the method names
+**Status: M5 complete, M6 open.** M0 to M5 are built and gated: the daemon, the
+`AF_UNIX` transport, the handshake, sessions, durable events and replay; the Wasmtime
+host, the provider, the engine/driver dispatcher, QUIC with device pairing; the store,
+compaction, queue, checkpoints; subagents, jobs, schedules and goals; module versions,
+drain and migration, reload and the code index. The daemon runs inside its own cgroup
+(`docs/cgroup.md`), local-model compatibility is documented in `docs/local-compat.md`,
+and M6 — a native client, then Android, then the parity audit — is scoped in
+`docs/m6.md`. `docs/protocol.md` is a frozen contract: the frame layout, the method names
 and the error names are a compatibility surface, so changing one is a version
 bump, not an edit. `README.md` remains the design, its parity table is the scope contract, and the
 design outranks this file; when they disagree, the README wins and this file gets
