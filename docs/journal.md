@@ -1609,3 +1609,16 @@ more likely. The evidence does not separate those.
 Left out of the tree, because a gate that hangs is worse than a gate that is merely missing, and because I cannot yet say
 which of the two causes it is. Next attempt should instrument the gate: print each consumed event kind with a sequence
 number so a hang shows the last event it saw, then add the delta assertion behind that.
+
+Hundred-and-twenty-first: the hang was an artifact and the real result is a number. Running the gate with its output
+redirected to a file rather than a pipe made it fail in seconds instead of appearing to hang — the assertion aborted,
+an orphaned fixture child kept the pipe open, and `tail` waited for an EOF that never came. So the earlier "hang" was
+my own command's plumbing, and the gate itself was fine.
+
+The measurement: `deltas=1` for a completion the fixture sends as two `data:` chunks. So the streamed path produced one
+delta where two were expected — either the parser merged them into a single event, one line was dropped, or the fixture's
+first chunk was empty for that prompt and emitted nothing. Which of those it is needs one more line of instrumentation:
+count the events the SSE callback sees, not just the deltas it emits.
+
+Recorded, reverted, and left green. The streaming behaviour itself is unchanged and the suites pass; what is missing is
+still the assertion, and now it is missing for a known reason rather than an unknown one.
