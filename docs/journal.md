@@ -2067,3 +2067,17 @@ asserted the absence without first proving the selection had taken effect, which
 What both need is one helper: resume (which subscribes), then read frames until a named event arrives, with the socket
 timeout as the only wait. That is the same helper the late-steer assertion needs for two `turn.start` events, so it is worth
 building once. Reverted rather than shipped: the tree is green at 7648146 and nothing flaky is in the suite.
+
+Hundred-and-fifty-seventh: the event-wait helper exists but it disproved my assumption rather than confirming it. A subscriber
+on the steer session received `session.updated`, `replay.end`, `session.head`, `session.time` and `session.prompted` — five
+kinds, in order — and then no `turn.start` at all. `turn.start` is emitted by the driver module through `turn_emit`, not by
+core, so it is not guaranteed to arrive before the prompt's response; a gate that waits for it before steering can wait
+forever.
+
+That also explains the earlier full-access failure: the write turn parks for an approval before any `turn.start`, so "assert
+no approval appeared" was asking a question the turn had not reached yet.
+
+What the gate needs instead is a trigger core owns: `session.prompted` arrives at accept, but the turn may not be running
+yet. The reliable shape is to queue a second prompt (which guarantees the first turn is running, since the queue only
+answers `ahead` while a turn is active) and steer once that second turn starts — or to poll `job.list` for the running turn.
+Both are more honest than a delay, and neither is built yet.
