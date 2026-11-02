@@ -1412,7 +1412,11 @@ static int invoke(wd_instance *instance, cbor_item_t *payload,
   cbor_item_t *reply = wd_decode(out, out_len);
   free(out);
   if (reply == NULL) {
-    *err = strdup("module returned invalid CBOR");
+    char detail[128];
+    snprintf(detail, sizeof(detail),
+             "module returned invalid CBOR (%zu bytes for a %zu byte call)",
+             out_len, len);
+    *err = strdup(detail);
     return -1;
   }
   *result = reply;
