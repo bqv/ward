@@ -37,4 +37,14 @@ wd_approval_state wd_approval_lookup(const wd_approvals *table,
                                      uint64_t epoch, uint64_t now_ms);
 size_t wd_approval_pending(const wd_approvals *table, uint64_t now_ms);
 
+typedef struct {
+  char session[WD_APPROVAL_SESSION_MAX];
+  uint64_t call;
+  uint64_t epoch;
+  uint64_t expires_ms;
+} wd_approval_info;
+
+size_t wd_approval_list(const wd_approvals *table, uint64_t now_ms,
+                        wd_approval_info *out, size_t cap);
+
 #endif

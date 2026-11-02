@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include <assert.h>
+#include <string.h>
 #include <stdio.h>
 
 #include "core/approval.h"
@@ -40,6 +41,17 @@ int main(void) {
   wd_approvals_clear(table);
   assert(wd_approval_lookup(table, "s1", 7, 1, 1200) == WD_APPROVAL_UNKNOWN);
   wd_approvals_free(table);
+  wd_approvals_clear(table);
+  assert(wd_approval_request(table, "s2", 42, 1, 5000, 1000) ==
+         WD_APPROVAL_PENDING);
+  wd_approval_info listed[WD_MAX_APPROVALS];
+  size_t listed_count = wd_approval_list(table, 5100, listed, WD_MAX_APPROVALS);
+  assert(listed_count == 1);
+  assert(strcmp(listed[0].session, "s2") == 0);
+  assert(listed[0].call == 42);
+  assert(listed[0].expires_ms == 6000);
+  assert(wd_approval_list(table, 6000, listed, WD_MAX_APPROVALS) == 0);
+
   printf("approval tests passed\n");
   return 0;
 }

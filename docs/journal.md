@@ -2000,3 +2000,14 @@ same cwd-rooted and regular-file refusals as the text method, and `data` as a CB
 
 `files_test` covers a mid-file range, an escape by `../`, and the total cap; the JSON/byte-string helper is `wd_bytes_len`
 in the codec. All three builds green.
+
+Hundred-and-fifty-first: `approval.list`. The approval table already held the state — session, call, epoch, expiry — and
+only exposed a count, so a client could not mark a session it was not following. `wd_approval_list` returns the pending
+entries and the method serves them globally: `{approvals: [{session, call, epoch, expires_ms}]}`, absolute expiry in epoch
+milliseconds to match the protocol's other time fields.
+
+Two things deliberately left out and said so: the tool name and the reason are not in the table, because they are emitted on
+`approval.requested` and storing them would change a signature used in three places for a field the client already receives.
+If a reconnect needs them, that is the follow-up, and it is additive.
+
+`approval_test` now asserts a pending entry appears with its expiry and disappears exactly at it. Suite green.

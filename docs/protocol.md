@@ -27,6 +27,11 @@ Later milestones add methods without a version bump, because adding a method is 
 the session's working directory, refused rather than truncated when it exceeds
 64 KiB, and refused when the path resolves outside that directory.
 
+`approval.list {}` answers `{approvals: [{session, call, epoch, expires_ms}]}` —
+every pending approval across all sessions, with an absolute expiry in epoch
+milliseconds. The tool name and reason are not in the table; they travel on
+`approval.requested`.
+
 `session.file_read_blob {id, path, offset, len}` answers `{path, offset, size, data}`
 with `data` as a CBOR byte string — the same cwd-rooted and regular-file rules, at
 most 1 MiB per call and 4 MiB of offset in total, so a binary file is read in

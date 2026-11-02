@@ -2030,6 +2030,27 @@ static void handle_session_file_read(wd_server *srv, wd_conn *conn, uint64_t id,
   conn_arm(srv, conn);
 }
 
+static void handle_approval_list(wd_server *srv, wd_conn *conn, uint64_t id) {
+  wd_approval_info pending[WD_MAX_APPROVALS];
+  size_t count = wd_approval_list(srv->approvals, wd_now_ms(), pending,
+                                  WD_MAX_APPROVALS);
+  cbor_item_t *list = wd_array(count);
+  for (size_t i = 0; i < count; i++) {
+    cbor_item_t *item = wd_map(4);
+    wd_put(item, "session", wd_text(pending[i].session));
+    wd_put(item, "call", wd_uint(pending[i].call));
+    wd_put(item, "epoch", wd_uint(pending[i].epoch));
+    wd_put(item, "expires_ms", wd_uint(pending[i].expires_ms));
+    bool pushed = cbor_array_push(list, item);
+    cbor_decref(&item);
+    if (!pushed) break;
+  }
+  cbor_item_t *result = wd_map(1);
+  wd_put(result, "approvals", list);
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
 static void handle_session_file_read_blob(wd_server *srv, wd_conn *conn,
                                           uint64_t id, cbor_item_t *params) {
   char *session_id = wd_text_copy(wd_get(params, "id"));
@@ -3322,6 +3343,8 @@ static void handle_request(wd_server *srv, wd_conn *conn, uint64_t id,
     handle_model_list(srv, conn, id);
   } else if (strcmp(method, "model.select") == 0) {
     handle_model_select(srv, conn, id, params);
+  } else if (strcmp(method, "approval.list") == 0) {
+    handle_approval_list(srv, conn, id);
   } else if (strcmp(method, "session.file_read_blob") == 0) {
     handle_session_file_read_blob(srv, conn, id, params);
   } else if (strcmp(method, "session.file_list") == 0) {

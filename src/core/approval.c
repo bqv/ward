@@ -119,6 +119,22 @@ wd_approval_state wd_approval_lookup(const wd_approvals *table,
   return WD_APPROVAL_UNKNOWN;
 }
 
+size_t wd_approval_list(const wd_approvals *table, uint64_t now_ms,
+                        wd_approval_info *out, size_t cap) {
+  if (table == NULL || out == NULL) return 0;
+  size_t count = 0;
+  for (size_t i = 0; i < WD_MAX_APPROVALS && count < cap; i++) {
+    const entry *e = &table->entries[i];
+    if (expired(e, now_ms)) continue;
+    snprintf(out[count].session, sizeof(out[count].session), "%s", e->session);
+    out[count].call = e->call;
+    out[count].epoch = e->epoch;
+    out[count].expires_ms = e->expires_ms;
+    count++;
+  }
+  return count;
+}
+
 size_t wd_approval_pending(const wd_approvals *table, uint64_t now_ms) {
   size_t n = 0;
   for (size_t i = 0; i < WD_MAX_APPROVALS; i++) {
