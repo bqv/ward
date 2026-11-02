@@ -170,12 +170,32 @@ int main(void) {
   assert(run_capture(sock, probe, escape_argv, escape_out, sizeof(escape_out)) == 0);
   assert(strstr(escape_out, "outside the session directory") != NULL);
 
+  char blob_path[512];
+  snprintf(blob_path, sizeof(blob_path), "%s/note.bin", root);
+  FILE *blob_file = fopen(blob_path, "wb");
+  assert(blob_file != NULL);
+  assert(fwrite("ward-blob-ok\n", 1, 13, blob_file) == 13);
+  fclose(blob_file);
+
+  char blob_out[8192];
+  char *blob_argv[] = {(char *)probe, (char *)"--blob", (char *)"note.bin",
+                       (char *)"--blob-len", (char *)"64", NULL};
+  assert(run_capture(sock, probe, blob_argv, blob_out, sizeof(blob_out)) == 0);
+  assert(strstr(blob_out, "ward-blob-ok") != NULL);
+
+  char blob_escape_out[8192];
+  char *blob_escape_argv[] = {(char *)probe, (char *)"--blob", (char *)"../escape.bin",
+                              (char *)"--blob-len", (char *)"64", NULL};
+  assert(run_capture(sock, probe, blob_escape_argv, blob_escape_out,
+                     sizeof(blob_escape_out)) == 0);
+  assert(strstr(blob_escape_out, "outside the session directory") != NULL);
+
   kill(pid, SIGTERM);
   int status = 0;
   waitpid(pid, &status, 0);
   stop_server(endpoint);
   if (strcmp(cgroup_base, "off") != 0) drop_test_cgroup(cgroup_base);
 
-  printf("desktop gate passed: ward-gui drove a session over UDS, TCP, a terminal and file reads\n");
+  printf("desktop gate passed: ward-gui drove a session over UDS, TCP, a terminal, text reads and blob reads\n");
   return 0;
 }

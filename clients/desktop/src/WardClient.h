@@ -219,6 +219,7 @@ public:
     Q_INVOKABLE void writeTerminal(const QByteArray &data);
     Q_INVOKABLE void resizeTerminal(int cols, int rows);
     Q_INVOKABLE void closeTerminal();
+    Q_INVOKABLE void readBlob(const QString &path, qint64 offset, qint64 len);
 
     Q_INVOKABLE void wardCall(const QString &method, const QVariantMap &params);
     Q_INVOKABLE QStringList protocolMethods() const;
@@ -273,6 +274,8 @@ signals:
     void terminalState(const QString &state, int exitCode);
     void terminalChanged();
     void terminalSizeChanged();
+    void blobRead(const QString &path, qint64 offset, const QByteArray &data,
+                  const QString &error);
 
 private slots:
     void onReadable();
@@ -375,6 +378,9 @@ private:
     QStringList m_railExpanded;
     QStringList m_railCollapsed;
 
+    QString m_blobPath;
+    qint64 m_blobOffset = 0;
+    qint64 m_blobLen = 0;
     bool m_terminalOpen = false;
     QString m_terminalId;
     int m_terminalCols = 0;

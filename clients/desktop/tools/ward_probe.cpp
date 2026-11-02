@@ -34,6 +34,15 @@ int main(int argc, char **argv)
     QCommandLineOption readOption(QStringList{QStringLiteral("read")},
                                   QStringLiteral("read one file through session.file_read"),
                                   QStringLiteral("path"));
+    QCommandLineOption blobOption(QStringList{QStringLiteral("blob")},
+                                  QStringLiteral("read a byte range through session.file_read_blob"),
+                                  QStringLiteral("path"));
+    QCommandLineOption blobOffsetOption(QStringList{QStringLiteral("blob-offset")},
+                                        QStringLiteral("byte offset for --blob"),
+                                        QStringLiteral("n"), QStringLiteral("0"));
+    QCommandLineOption blobLenOption(QStringList{QStringLiteral("blob-len")},
+                                     QStringLiteral("byte count for --blob"),
+                                     QStringLiteral("n"), QStringLiteral("4096"));
     parser.addOption(socketOption);
     parser.addOption(cwdOption);
     parser.addOption(promptOption);
@@ -41,6 +50,9 @@ int main(int argc, char **argv)
     parser.addOption(approveOption);
     parser.addOption(terminalOption);
     parser.addOption(readOption);
+    parser.addOption(blobOption);
+    parser.addOption(blobOffsetOption);
+    parser.addOption(blobLenOption);
     parser.process(app);
 
     WardClient client(parser.value(socketOption));
@@ -50,14 +62,17 @@ int main(int argc, char **argv)
     bool terminalOpened = false;
     bool terminalWritten = false;
     bool readStarted = false;
+    bool blobStarted = false;
     QString readResult;
+    QByteArray blobResult;
     QByteArray terminalText;
     const bool approve = parser.isSet(approveOption);
     const bool terminal = parser.isSet(terminalOption);
     const bool read = parser.isSet(readOption);
+    const bool blob = parser.isSet(blobOption);
 
     QObject::connect(&client, &WardClient::lastErrorChanged, &app, [&]() {
-        if (read)
+        if (read || blob)
             return;
         if (!client.lastError().isEmpty()) {
             QTextStream(stderr) << "probe: " << client.lastError() << "\n";
@@ -72,8 +87,18 @@ int main(int argc, char **argv)
         if (kind == QLatin1String("turn.end"))
             app.quit();
         if (kind == QLatin1String("replay.end") && !parser.isSet(promptOption)
-                && !terminal && !read && !parser.isSet(sessionOption))
+                && !terminal && !read && !blob && !parser.isSet(sessionOption))
             app.quit();
+    });
+    QObject::connect(&client, &WardClient::blobRead, &app,
+                     [&](const QString &path, qint64 offset, const QByteArray &data,
+                         const QString &error) {
+        if (!blob)
+            return;
+        Q_UNUSED(path);
+        Q_UNUSED(offset);
+        blobResult = error.isEmpty() ? data : (QStringLiteral("error: ") + error).toUtf8();
+        app.quit();
     });
     QObject::connect(&client, &WardClient::fileTextChanged, &app, [&]() {
         if (!read || client.fileText().isEmpty())
@@ -117,7 +142,7 @@ int main(int argc, char **argv)
         }
         if (client.state() != WardClient::Ready || prompted)
             return;
-        if (terminal || read) {
+        if (terminal || read || blob) {
             prompted = true;
             client.createSession();
             return;
@@ -136,7 +161,7 @@ int main(int argc, char **argv)
     });
     QObject::connect(&client, &WardClient::sessionsLoadingChanged, &app, [&]() {
         if (client.state() == WardClient::Ready && !parser.isSet(promptOption)
-                && !terminal && !read && !parser.isSet(sessionOption)
+                && !terminal && !read && !blob && !parser.isSet(sessionOption)
                 && !client.sessionsLoading())
             app.quit();
     });
@@ -153,6 +178,14 @@ int main(int argc, char **argv)
             readStarted = true;
             QTextStream(stderr) << "session " << client.sessionId() << "\n";
             client.readFile(parser.value(readOption));
+            return;
+        }
+        if (blob && !blobStarted) {
+            blobStarted = true;
+            QTextStream(stderr) << "session " << client.sessionId() << "\n";
+            client.readBlob(parser.value(blobOption),
+                            parser.value(blobOffsetOption).toLongLong(),
+                            parser.value(blobLenOption).toLongLong());
             return;
         }
         if (prompted || !parser.isSet(promptOption))
@@ -177,6 +210,9 @@ int main(int argc, char **argv)
         out << readResult;
         if (!readResult.isEmpty() && !readResult.endsWith(QLatin1Char('\n')))
             out << '\n';
+    } else if (blob) {
+        fwrite(blobResult.constData(), 1, size_t(blobResult.size()), stdout);
+        fflush(stdout);
     } else {
         out << text;
         if (!text.isEmpty() && !text.endsWith(QLatin1Char('\n')))

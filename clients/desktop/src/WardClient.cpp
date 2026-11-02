@@ -44,6 +44,9 @@ QVariant cborToVariant(cbor_item_t *item)
     if (cbor_isa_string(item))
         return QString::fromUtf8(reinterpret_cast<const char *>(cbor_string_handle(item)),
                                  int(cbor_string_length(item)));
+    if (cbor_isa_bytestring(item))
+        return QByteArray(reinterpret_cast<const char *>(cbor_bytestring_handle(item)),
+                          int(cbor_bytestring_length(item)));
     if (cbor_isa_array(item)) {
         QVariantList list;
         for (size_t i = 0; i < cbor_array_size(item); ++i)
@@ -72,6 +75,12 @@ cbor_item_t *variantToCbor(const QVariant &value)
     case QMetaType::LongLong:
     case QMetaType::ULongLong:
         return wd_uint(value.toULongLong());
+    case QMetaType::QByteArray: {
+        const QByteArray bytes = value.toByteArray();
+        return cbor_build_bytestring(
+            reinterpret_cast<const unsigned char *>(bytes.constData()),
+            size_t(bytes.size()));
+    }
     case QMetaType::QVariantList:
     case QMetaType::QStringList: {
         const QVariantList list = value.toList();
@@ -487,6 +496,8 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
             emit fileTextChanged();
             emit fileBytesChanged();
         }
+        if (method == QLatin1String("session.file_read_blob"))
+            emit blobRead(m_blobPath, m_blobOffset, QByteArray(), text);
         return;
     }
 
@@ -574,6 +585,10 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
     } else if (method == QLatin1String("goal.set")) {
         m_goal = result.value(QStringLiteral("goal")).toMap();
         emit goalChanged();
+    } else if (method == QLatin1String("session.file_read_blob")) {
+        emit blobRead(result.value(QStringLiteral("path")).toString(),
+                      qint64(result.value(QStringLiteral("offset")).toULongLong()),
+                      result.value(QStringLiteral("data")).toByteArray(), QString());
     } else if (method == QLatin1String("session.file_read")) {
         m_fileSelectedPath = result.value(QStringLiteral("path")).toString();
         m_fileText = result.value(QStringLiteral("text")).toString();
@@ -1118,6 +1133,26 @@ void WardClient::toggleDirectory(const QString &path)
     Q_UNUSED(path);
 }
 
+void WardClient::readBlob(const QString &path, qint64 offset, qint64 len)
+{
+    if (m_sessionId.isEmpty()) {
+        emit blobRead(path, offset, QByteArray(), QStringLiteral("no session to read a file in"));
+        return;
+    }
+    if (path.isEmpty() || len <= 0) {
+        emit blobRead(path, offset, QByteArray(), QStringLiteral("path and len are required"));
+        return;
+    }
+    m_blobPath = path;
+    m_blobOffset = offset;
+    m_blobLen = len;
+    sendRequest(QStringLiteral("session.file_read_blob"),
+                {{QStringLiteral("id"), m_sessionId},
+                 {QStringLiteral("path"), path},
+                 {QStringLiteral("offset"), offset},
+                 {QStringLiteral("len"), len}});
+}
+
 void WardClient::readFile(const QString &path)
 {
     if (m_sessionId.isEmpty()) {
@@ -1271,7 +1306,8 @@ QStringList WardClient::protocolMethods() const
 {
     return {QStringLiteral("session.create"), QStringLiteral("session.list"),
             QStringLiteral("session.get"), QStringLiteral("session.resume"),
-            QStringLiteral("session.file_read"), QStringLiteral("session.fork"),
+            QStringLiteral("session.file_read"), QStringLiteral("session.file_read_blob"),
+            QStringLiteral("session.fork"),
             QStringLiteral("session.rename"),
             QStringLiteral("session.archive"), QStringLiteral("session.pin"),
             QStringLiteral("session.search"), QStringLiteral("session.prompt"),
