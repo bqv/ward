@@ -221,6 +221,7 @@ public:
     Q_INVOKABLE void resizeTerminal(int cols, int rows);
     Q_INVOKABLE void closeTerminal();
     Q_INVOKABLE void readBlob(const QString &path, qint64 offset, qint64 len);
+    Q_INVOKABLE void refreshApprovals();
 
     Q_INVOKABLE void wardCall(const QString &method, const QVariantMap &params);
     Q_INVOKABLE QStringList protocolMethods() const;
@@ -299,6 +300,7 @@ private:
     void applySession(const QVariantMap &session);
     void setSessions(const QVariantList &sessions);
     void rebuildWorkspaces();
+    void applyApprovals(const QVariantList &entries);
     void subscribe(const QString &sessionId);
     void doPrompt(const QString &text);
     void appendRow(const QString &kind, const QString &text, const QString &title = {},
@@ -393,4 +395,5 @@ private:
 
     QString m_queuedPrompt;
     QString m_pendingApproval;
+    QHash<QString, QVariantMap> m_approvals;
 };

@@ -373,6 +373,7 @@ void WardClient::connectToDaemon()
     emit sessionsLoadingChanged();
     sendRequest(QStringLiteral("session.list"), {{QStringLiteral("limit"), 1000}});
     refreshConfigOptions();
+    refreshApprovals();
 }
 
 void WardClient::onReadable()
@@ -637,6 +638,8 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
         emit fileBytesChanged();
         emit fileTruncatedChanged();
         emit fileErrorChanged();
+    } else if (method == QLatin1String("approval.list")) {
+        applyApprovals(result.value(QStringLiteral("approvals")).toList());
     } else if (method == QLatin1String("approval.respond")) {
         if (!m_pendingApproval.isEmpty()) {
             emit permissionWithdrawn(m_pendingApproval);
@@ -782,6 +785,13 @@ void WardClient::handleEvent(uint64_t sub, uint64_t seq, const QString &kind,
             .arg(payload.value(QStringLiteral("call")).toULongLong())
             .arg(payload.value(QStringLiteral("epoch")).toULongLong());
         m_pendingApproval = requestId;
+        QVariantMap entry{
+            {QStringLiteral("session"), m_sessionId},
+            {QStringLiteral("call"), payload.value(QStringLiteral("call"))},
+            {QStringLiteral("epoch"), payload.value(QStringLiteral("epoch"))},
+            {QStringLiteral("tool"), QStringLiteral("tool")},
+            {QStringLiteral("reason"), payload.value(QStringLiteral("reason"))}};
+        m_approvals.insert(requestId, entry);
         if (!m_pendingInteractionSessions.contains(m_sessionId))
             m_pendingInteractionSessions.append(m_sessionId);
         emit sessionMarksChanged();
@@ -790,14 +800,25 @@ void WardClient::handleEvent(uint64_t sub, uint64_t seq, const QString &kind,
         setState(Ready, QStringLiteral("waiting for approval"));
         emit permissionRequested(requestId, QStringLiteral("tool"),
                                  payload.value(QStringLiteral("reason")).toString());
+        refreshApprovals();
     } else if (kind == QLatin1String("approval.resolved")) {
         const QString requestId = QStringLiteral("%1:%2")
             .arg(payload.value(QStringLiteral("call")).toULongLong())
             .arg(payload.value(QStringLiteral("epoch")).toULongLong());
         emit permissionWithdrawn(requestId);
         m_pendingApproval.clear();
-        m_pendingInteractionSessions.removeAll(m_sessionId);
+        m_approvals.remove(requestId);
+        bool stillPending = false;
+        for (auto it = m_approvals.constBegin(); it != m_approvals.constEnd(); ++it) {
+            if (it.value().value(QStringLiteral("session")).toString() == m_sessionId) {
+                stillPending = true;
+                break;
+            }
+        }
+        if (!stillPending)
+            m_pendingInteractionSessions.removeAll(m_sessionId);
         emit sessionMarksChanged();
+        refreshApprovals();
     } else if (kind == QLatin1String("error")) {
         const QString message = payload.value(QStringLiteral("message")).toString();
         m_lastError = message;
@@ -1012,6 +1033,7 @@ void WardClient::followSession(const QString &sessionId)
     emit pendingSessionChanged();
     if (m_subscribing != sessionId)
         subscribe(sessionId);
+    refreshApprovals();
 }
 
 void WardClient::sendPrompt(const QString &text)
@@ -1108,7 +1130,37 @@ void WardClient::loadEarlierHistory()
     emit hasEarlierChanged();
 }
 
+
+void WardClient::refreshApprovals()
+{
+    if (m_fd >= 0)
+        sendRequest(QStringLiteral("approval.list"));
+}
+
+void WardClient::applyApprovals(const QVariantList &entries)
+{
+    QVariantList sessions;
+    m_approvals.clear();
+    for (const QVariant &value : entries) {
+        const QVariantMap entry = value.toMap();
+        const QString session = entry.value(QStringLiteral("session")).toString();
+        const QString key = QStringLiteral("%1:%2")
+                                .arg(entry.value(QStringLiteral("call")).toULongLong())
+                                .arg(entry.value(QStringLiteral("epoch")).toULongLong());
+        if (session.isEmpty())
+            continue;
+        m_approvals.insert(key, entry);
+        if (!sessions.contains(session))
+            sessions.append(session);
+    }
+    if (sessions != m_pendingInteractionSessions) {
+        m_pendingInteractionSessions = sessions;
+        emit sessionMarksChanged();
+    }
+}
+
 void WardClient::refreshConfigOptions()
+
 {
     if (m_fd >= 0)
         sendRequest(QStringLiteral("model.list"));
@@ -1491,7 +1543,8 @@ QStringList WardClient::protocolMethods() const
             QStringLiteral("session.undo"), QStringLiteral("session.search"),
             QStringLiteral("session.checkpoint"),
             QStringLiteral("model.list"), QStringLiteral("model.select"),
-            QStringLiteral("model.probe"), QStringLiteral("approval.respond"),
+            QStringLiteral("model.probe"), QStringLiteral("approval.list"),
+            QStringLiteral("approval.respond"),
             QStringLiteral("subagent.prompt"), QStringLiteral("subagent.interrupt"),
             QStringLiteral("job.list"), QStringLiteral("job.kill"),
             QStringLiteral("schedule.list"), QStringLiteral("schedule.set"),
