@@ -33,6 +33,7 @@
 #include "core/manifest.h"
 #include "core/modstate.h"
 #include "core/prompt.h"
+#include "core/devlock.h"
 #include "core/probe.h"
 #include "net/http.h"
 #include "core/pty.h"
@@ -86,6 +87,7 @@ struct wd_run {
   wd_turn *turn;
   int worker_fd;
   int http_fd;
+  wd_device_lock devlock;
   uint8_t *http_body;
   size_t http_len;
   size_t http_cap;
@@ -1350,15 +1352,29 @@ static int device_slot_for(wd_server *srv, wd_session *session, int *slots_out) 
 static bool device_free(wd_server *srv, wd_session *session) {
   int slot = device_slot_for(srv, session, NULL);
   if (slot < 0) return true;
-  return srv->devices[slot].inflight < srv->devices[slot].slots;
+  if (srv->devices[slot].inflight >= srv->devices[slot].slots) return false;
+  wd_device_lock probe;
+  int rc = wd_device_acquire(srv->state_dir, srv->devices[slot].name,
+                             srv->devices[slot].slots, &probe);
+  if (rc != 0) return false;
+  wd_device_release(&probe);
+  return true;
 }
 
-static void device_acquire(wd_server *srv, wd_session *session) {
+static int device_acquire(wd_server *srv, wd_session *session,
+                          wd_device_lock *lock) {
   int slot = device_slot_for(srv, session, NULL);
-  if (slot >= 0) srv->devices[slot].inflight++;
+  if (slot < 0) return 0;
+  int rc = wd_device_acquire(srv->state_dir, srv->devices[slot].name,
+                             srv->devices[slot].slots, lock);
+  if (rc != 0) return rc;
+  srv->devices[slot].inflight++;
+  return 0;
 }
 
-static void device_release(wd_server *srv, wd_session *session) {
+static void device_release(wd_server *srv, wd_session *session,
+                           wd_device_lock *lock) {
+  wd_device_release(lock);
   int slot = device_slot_for(srv, session, NULL);
   if (slot >= 0 && srv->devices[slot].inflight > 0) srv->devices[slot].inflight--;
 }
@@ -2127,6 +2143,7 @@ static wd_run *run_new(wd_server *srv, wd_session *session, char **err) {
   }
   run->worker_fd = -1;
   run->http_fd = -1;
+  run->devlock.fd = -1;
   run->http_body = NULL;
   run->http_len = 0;
   run->http_cap = 0;
@@ -2134,6 +2151,7 @@ static wd_run *run_new(wd_server *srv, wd_session *session, char **err) {
   run->sse_ctx = NULL;
   run->http_status_seen = 0;
   run->streamed = 0;
+  run->devlock.fd = -1;
   snprintf(run->session_id, sizeof(run->session_id), "%s", session->id);
   run->turn = wd_turn_new_pinned(srv->engine, dir, session->cwd, session->pins,
                                 session->pins_len, err);
@@ -2141,7 +2159,14 @@ static wd_run *run_new(wd_server *srv, wd_session *session, char **err) {
     free(run);
     return NULL;
   }
-  device_acquire(srv, session);
+  if (device_acquire(srv, session, &run->devlock) != 0) {
+    wd_turn_free(run->turn);
+    free(run->sse_ctx);
+    if (run->sse != NULL) wd_sse_destroy(run->sse);
+    free(run);
+    if (err != NULL) *err = strdup("the device has no free slot");
+    return NULL;
+  }
   if (session->system != NULL)
     wd_turn_set_session_system(run->turn, session->system);
   if (session->head == NULL || session->head[0] == '\0') {
@@ -2368,7 +2393,7 @@ static void run_free(wd_server *srv, wd_run *run) {
   }
   {
     wd_session *owner = wd_session_find(&srv->store, run->session_id);
-    if (owner != NULL) device_release(srv, owner);
+    if (owner != NULL) device_release(srv, owner, &run->devlock);
   }
   persist_state(srv, run);
   wd_turn_free(run->turn);

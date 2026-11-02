@@ -1667,3 +1667,16 @@ That closes the first of §7's two documented limits at the library level. Wirin
 in-process counter stays authoritative for queueing, and the file lock is consulted when acquiring, releasing on
 `run_free` — with the busy case feeding the same `enqueue_turn` path a full pool already uses. Not wired yet, and the
 test says nothing about the daemon until it is.
+
+Hundred-and-twenty-sixth: the device lock is in the daemon's path. `run_new` acquires the file lock with the run's
+slot count and refuses with "the device has no free slot" when another process holds them; `run_free` releases it;
+`device_free` probes by taking and releasing a slot, so the queue decides on evidence from both the in-process counter
+and the filesystem. The probe is what makes a second daemon visible.
+
+The banked state had one bug worth naming: the acquire-failure path began with `srv->runs = run->next;`, copied from a
+teardown that runs *after* the run is linked. At that point the run is not yet on the list, so the line would have set
+`srv->runs` to NULL and dropped every active run. Removed before committing; both sanitizer builds pass.
+
+Still unmeasured: two daemons actually contending for one device. The lock test proves the mechanism at library level
+and the daemon now uses it, but nothing yet starts a second daemon against the same state directory and asserts the
+second turn waits.
