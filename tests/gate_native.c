@@ -163,6 +163,19 @@ int main(void) {
   assert(wd_uint_of(wd_get(second_result, "ahead"), &ahead));
   assert(ahead == 0);
   wd_free(second_result);
+  cbor_item_t *queue_params = wd_map(1);
+  wd_put(queue_params, "id", wd_text(queued_session));
+  cbor_item_t *queue_result = NULL;
+  assert(wd_client_call(&queuer, "session.queue", queue_params,
+                        &queue_result) == 0);
+  cbor_item_t *queued_items = wd_get(queue_result, "items");
+  assert(cbor_array_size(queued_items) == 1);
+  cbor_item_t *queued_item = cbor_array_get(queued_items, 0);
+  char *queued_text = wd_text_copy(wd_get(queued_item, "text"));
+  assert(queued_text != NULL && strstr(queued_text, "second prompt") != NULL);
+  free(queued_text);
+  cbor_decref(&queued_item);
+  wd_free(queue_result);
   cbor_item_t *steer_create = wd_map(1);
   wd_put(steer_create, "cwd", wd_text(root));
   cbor_item_t *steer_created = NULL;

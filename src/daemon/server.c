@@ -2176,6 +2176,37 @@ static void handle_policy_select(wd_server *srv, wd_conn *conn, uint64_t id,
   conn_arm(srv, conn);
 }
 
+static void handle_session_queue(wd_server *srv, wd_conn *conn, uint64_t id,
+                                 cbor_item_t *params) {
+  char *session_id = wd_text_copy(wd_get(params, "id"));
+  if (session_id == NULL) {
+    conn_send_error(conn, id, WD_ERR_INVALID_PARAMS, "id is required");
+    conn_arm(srv, conn);
+    return;
+  }
+  size_t count = 0;
+  for (wd_queue *at = srv->queue; at != NULL; at = at->next)
+    if (strcmp(at->session, session_id) == 0) count++;
+  cbor_item_t *items = wd_array(count);
+  size_t ahead = 0;
+  for (wd_queue *at = srv->queue; at != NULL; at = at->next) {
+    if (strcmp(at->session, session_id) != 0) continue;
+    cbor_item_t *item = wd_map(2);
+    wd_put(item, "text", wd_text(at->text != NULL ? at->text : ""));
+    wd_put(item, "ahead", wd_uint(ahead));
+    bool pushed = cbor_array_push(items, item);
+    cbor_decref(&item);
+    ahead++;
+    if (!pushed) break;
+  }
+  cbor_item_t *result = wd_map(2);
+  wd_put(result, "session", wd_text(session_id));
+  wd_put(result, "items", items);
+  free(session_id);
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
 static void handle_approval_list(wd_server *srv, wd_conn *conn, uint64_t id) {
   wd_approval_info pending[WD_MAX_APPROVALS];
   size_t count = wd_approval_list(srv->approvals, wd_now_ms(), pending,
@@ -3567,6 +3598,8 @@ static void handle_request(wd_server *srv, wd_conn *conn, uint64_t id,
     handle_policy_list(srv, conn, id);
   } else if (strcmp(method, "policy.select") == 0) {
     handle_policy_select(srv, conn, id, params);
+  } else if (strcmp(method, "session.queue") == 0) {
+    handle_session_queue(srv, conn, id, params);
   } else if (strcmp(method, "approval.list") == 0) {
     handle_approval_list(srv, conn, id);
   } else if (strcmp(method, "session.file_read_blob") == 0) {

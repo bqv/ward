@@ -2104,3 +2104,11 @@ exists; with `reads-only` selected, `/write` returns no approval and the file do
 
 The lesson is the one this week keeps repeating: the store, the method and the chip were all correct, and the decision path
 was wrong. Only the end-to-end gate could see it.
+
+Hundred-and-sixtieth: `session.queue`. The daemon already held the queue and `job.list` exposed it as flat rows with a state
+of `queued`; `session.queue {id}` gives the same thing per session as `{items: [{text, ahead}]}`, which is what a dock needs and
+what a client-side mirror can never do — see another client's prompts.
+
+`gate_native` asserts the queued text and its position. The first attempt leaked 144 bytes under ASan because `cbor_array_get`
+hands back a reference the caller must release; the leak was in my test, not the handler, and the trace only made sense once I
+compared the handler with `job.list`, which is the same shape and does not leak.
