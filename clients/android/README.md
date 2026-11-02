@@ -118,7 +118,9 @@ indefinite forms are refused on decode.
   `dangerous` flag, never from its id; selecting it shows the host's own
   `warning` text verbatim and only then sends `policy.select {id, confirm: true}`.
   The daemon's default stays `default` because the client never invents a
-  selection;
+  selection. The daemon's end-to-end gate (`0accc91`) now proves the mode:
+  under full access a `/write` returns no approval and the file exists, while
+  under reads-only it writes nothing;
 - stats: `stats.session` becomes the session and token projections behind the
   stat pills; the provider's wall-time fields do not exist on ward's wire and are
   left at zero rather than invented;
@@ -153,11 +155,6 @@ repository and the message cannot drift.
   answers an empty document and the plugin switch is read-only; module reload is
   the one management action offered. The slash-command catalogue is supplied by
   the client for the commands ward's `skills` guest serves.
-- **Full access is served but not proven end-to-end.** The client renders the
-  host's `dangerous`/`warning` fields, shows the warning before sending
-  confirmation, and maps the all-allow id to the chip's `danger-full-access`
-  name. The gate that a write then proceeds unapproved is still the daemon
-  owner's missing measurement, so this row stays partial until that gate exists.
 - **Binary reads are bounded.** `session.file_read_blob` caps one call at 1 MiB
   and 4 MiB total; the app reassembles multiple windows, but a larger file is
   refused by the daemon rather than truncated.
