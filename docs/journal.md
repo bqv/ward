@@ -1865,3 +1865,17 @@ Removed rather than committed, because a gate that always fails is as useless as
 The other thing the run showed: `wd_cgroup_leave` builds its path from `/proc/self/cgroup`, which ends in a newline, so the
 `sudo tee` fallback received `.../cgroup.procs\n` and failed — the daemon cannot leave its cgroup on shutdown, so the test
 cgroup is left behind for the sweep. Trimming the newline is a two-line fix for the next round.
+
+Hundred-and-fortieth: the native gate got further and exposed a different question. With `endpoint` written into the
+fixture's `models.toml` — not relying on the inherited `WARD_ENDPOINT` — the daemon does reach the fake endpoint: the log
+shows the SSE events, the provider's reply parsed, and the turn's drive() beginning. What still does not happen within
+forty-five seconds is the *response to `session.prompt`*: the client blocks, the alarm kills it, and the gate reports an
+empty capture.
+
+So the remaining question is not connectivity but ordering: either the daemon answers `session.prompt` only after the turn
+runs to completion, or the turn itself does not finish. That is worth knowing beyond the gate — a client that must wait for
+a whole turn before its prompt is acknowledged is not the behaviour the protocol describes.
+
+Removed again, with the finding recorded. The next attempt should prompt from a *second* process while a first one holds a
+subscription, exactly as `gate_tool` does, and see whether the response arrives then; that distinguishes "the daemon defers
+the reply" from "the turn never ends".
