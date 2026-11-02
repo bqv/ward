@@ -104,6 +104,40 @@ static int num_field(const char *body, uint32_t len, const char *key,
   return 0;
 }
 
+static int has_token(const char *body, uint32_t len, const char *token) {
+  uint32_t token_len = (uint32_t)wd_len(token);
+  for (uint32_t i = 0; i + token_len <= len; i++) {
+    uint32_t k = 0;
+    while (k < token_len && body[i + k] == token[k]) k++;
+    if (k == token_len) return 1;
+  }
+  return 0;
+}
+
+static int text_field(const char *body, uint32_t len, const char *key,
+                      char *out, uint32_t cap) {
+  uint32_t key_len = (uint32_t)wd_len(key);
+  for (uint32_t i = 0; i + key_len < len; i++) {
+    uint32_t k = 0;
+    while (k < key_len && body[i + k] == key[k]) k++;
+    if (k != key_len) continue;
+    uint32_t j = i + key_len;
+    uint32_t used = 0;
+    while (j < len && body[j] != '"' && used + 1 < cap) {
+      if (body[j] == '\\' && j + 1 < len) {
+        out[used++] = body[j + 1];
+        j += 2;
+        continue;
+      }
+      out[used++] = body[j];
+      j++;
+    }
+    out[used] = '\0';
+    return used > 0 ? 1 : 0;
+  }
+  return 0;
+}
+
 static uint32_t scan_content(const uint8_t *body, uint32_t len) {
   static const char key[] = "\"content\":\"";
   uint32_t key_len = sizeof(key) - 1;
@@ -246,8 +280,18 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
     num_field((const char *)body, body_len, "\"predicted_n\"", &predicted_n);
     num_field((const char *)body, body_len, "\"predicted_ms\"", &predicted_ms);
     num_field((const char *)body, body_len, "\"cache_n\"", &cache_n);
+    char tool[128];
+    char arguments[1024];
+    tool[0] = '\0';
+    arguments[0] = '\0';
+    if (has_token((const char *)body, body_len, "tool_calls")) {
+      text_field((const char *)body, body_len, "\"name\":\"", tool,
+                 sizeof(tool));
+      text_field((const char *)body, body_len, "\"arguments\":\"", arguments,
+                 sizeof(arguments));
+    }
     wd_w_init(&w, reply, REPLY_SIZE);
-    wd_w_map(&w, 7);
+    wd_w_map(&w, 9);
     wd_w_textz(&w, "text");
     wd_w_text(&w, answer, text_at);
     wd_w_textz(&w, "status");
@@ -262,6 +306,10 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
     wd_w_uint(&w, predicted_ms);
     wd_w_textz(&w, "cache_n");
     wd_w_uint(&w, cache_n);
+    wd_w_textz(&w, "tool");
+    wd_w_textz(&w, tool);
+    wd_w_textz(&w, "arguments");
+    wd_w_textz(&w, arguments);
     if (!w.failed) pair(out, reply, w.at);
     return;
   }

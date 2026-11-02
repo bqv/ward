@@ -115,6 +115,32 @@ int main(void) {
   free(text);
   wd_free(answer);
 
+  static const char tool_body[] =
+      "data: {\"choices\":[{\"finish_reason\":\"tool_calls\",\"message\":"
+      "{\"tool_calls\":[{\"function\":{\"name\":\"read\",\"arguments\":"
+      "\"{\\\"path\\\":\\\"notes.txt\\\"}\"}}]}}]}\n\n";
+  cbor_item_t *tool_phase = wd_map(2);
+  wd_put(tool_phase, "status", wd_uint(200));
+  wd_put(tool_phase, "body", wd_text(tool_body));
+  size_t tool_len = 0;
+  uint8_t *tool_bytes = wd_encode(tool_phase, &tool_len);
+  assert(tool_bytes != NULL);
+  uint8_t *tool_out = NULL;
+  size_t tool_out_len = 0;
+  assert(wd_instance_call(inst, tool_bytes, tool_len, &tool_out, &tool_out_len,
+                          &err) == 0);
+  free(tool_bytes);
+  cbor_item_t *tool_reply = wd_decode(tool_out, tool_out_len);
+  free(tool_out);
+  assert(tool_reply != NULL);
+  char *tool_name = wd_text_copy(wd_get(tool_reply, "tool"));
+  char *tool_args = wd_text_copy(wd_get(tool_reply, "arguments"));
+  assert(tool_name != NULL && strcmp(tool_name, "read") == 0);
+  assert(tool_args != NULL && strstr(tool_args, "notes.txt") != NULL);
+  free(tool_name);
+  free(tool_args);
+  wd_free(tool_reply);
+
   wd_instance_free(inst);
   wd_module_free(module);
   wd_engine_free(engine);

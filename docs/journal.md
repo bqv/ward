@@ -1411,3 +1411,16 @@ the same turn. The note asked for the cap so one parent cannot starve another; t
 prevents is duplicating the parent's own work.
 
 Tests pass in all three builds unchanged: the existing queue assertions already bound the count.
+
+Hundred-and-seventh: the provider can see a native tool call. When the completion carries `tool_calls`, the
+provider pulls out the first `function.name` and its `arguments` string and answers `{tool, arguments}` beside the
+text. That is the parse half of §4: the guest now reports what the model asked for rather than swallowing it as
+text.
+
+The test feeds a real tool_calls-shaped SSE body and asserts the name and the argument text survive the escape
+handling. Its first placement put the block after `wd_instance_free`, which ASan reported as a use-after-free in
+`wd_instance_call` — the test was wrong, not the guest, and moving the block before teardown fixed it.
+
+Still ahead for §4: dispatch. `process_action` must turn a `tool` reply into an `invoke` so the driver's tool path
+runs, the grammar-only fallback, the lenient parse with one repair, and refusing multiple calls instead of
+silently taking the first.
