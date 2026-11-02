@@ -55,6 +55,7 @@ The probe is the display-free path and the client's gate:
 ./build/ward-gui-probe --socket /run/user/1000/ward.sock --prompt "hello"
 ./build/ward-gui-probe --socket /run/user/1000/ward.sock --approve --prompt "/write note.txt hi"
 ./build/ward-gui-probe --socket /run/user/1000/ward.sock --session <id>
+./build/ward-gui-probe --socket /run/user/1000/ward.sock --terminal
 ```
 
 It prints the assistant text on stdout and every event kind on stderr; `--approve`
@@ -78,11 +79,12 @@ The client speaks ward's method names and event kinds, not an adapter vocabulary
 | compact | `session.compact` |
 | goal | `goal.set`, `goal.clear` |
 | models | `model.list`, `session.set_model` |
+| terminal | `terminal.open/write/resize/close`, `terminal.output`, eof |
 | jobs, schedules | `job.list`, `job.kill`, `schedule.list`, `schedule.delete` |
 | any other method | `wardCall(method, params)` is the generic door; `protocolMethods()` lists the frozen table |
 
-Events the shell has no control for (`terminal.output`, `turn.timings`,
-`job.updated`, `session.modules`, ...) still reach `eventReceived(kind, payload)`
+Events the shell has no control for (`turn.timings`, `job.updated`,
+`session.modules`, ...) still reach `eventReceived(kind, payload)`
 and are never silently dropped by the wire layer.
 
 ## Not adopted yet
@@ -90,9 +92,9 @@ and are never silently dropped by the wire layer.
 - **QUIC.** `WardClient` connects over `AF_UNIX` and loopback TCP. ward's QUIC
   transport, device certificates and pairing are not in this client yet; the
   daemon's own QUIC client (`src/net/quic.c`) is the code to reuse.
-- **Terminal, files, attachments, workspaces, plugin inventory, permission
-  presets.** ward has no matching client surface or no matching method in this
-  tree; the properties exist and answer empty so the widgets degrade honestly.
+- **Files, attachments, workspaces, plugin inventory, permission presets.**
+  ward has no matching client surface or no matching method in this tree; the
+  properties exist and answer empty so the widgets degrade honestly.
 - **Deferred new-session seats.** A new session is created immediately rather
   than on the first send.
 
@@ -103,7 +105,7 @@ document panes are copied from dsh-native. The ward-specific code is:
 
 | file | role |
 |---|---|
-| `src/WardClient.{h,cpp}` | the ward transport: connect, handshake, framed CBOR requests, event routing, the facade surface |
+| `src/WardClient.{h,cpp}` | the ward transport: connect, handshake, framed CBOR requests, event routing, terminal, the facade surface |
 | `tools/ward_probe.cpp` | the display-free gate |
 | `CMakeLists.txt` | builds `wardwire` from ward's `src/proto` and `src/core/util.c` |
 

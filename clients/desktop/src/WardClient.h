@@ -91,7 +91,10 @@ public:
     Q_PROPERTY(bool hasEarlier READ hasEarlier NOTIFY hasEarlierChanged)
     Q_PROPERTY(bool loadingEarlier READ loadingEarlier NOTIFY hasEarlierChanged)
 
-    Q_PROPERTY(QObject *terminalModel READ terminalModel CONSTANT)
+    Q_PROPERTY(bool terminalOpen READ terminalOpen NOTIFY terminalChanged)
+    Q_PROPERTY(QString terminalId READ terminalId NOTIFY terminalChanged)
+    Q_PROPERTY(int terminalCols READ terminalCols NOTIFY terminalSizeChanged)
+    Q_PROPERTY(int terminalRows READ terminalRows NOTIFY terminalSizeChanged)
 
     explicit WardClient(const QString &socketPath, QObject *parent = nullptr);
     ~WardClient() override;
@@ -156,7 +159,10 @@ public:
     AcpTranscript *transcript() const { return m_transcript; }
     bool hasEarlier() const { return false; }
     bool loadingEarlier() const { return m_loadingEarlier; }
-    QObject *terminalModel() const { return nullptr; }
+    bool terminalOpen() const { return m_terminalOpen; }
+    QString terminalId() const { return m_terminalId; }
+    int terminalCols() const { return m_terminalCols; }
+    int terminalRows() const { return m_terminalRows; }
 
     Q_INVOKABLE void connectToDaemon();
     Q_INVOKABLE void createSession();
@@ -209,6 +215,10 @@ public:
     Q_INVOKABLE void loadScheduleHistory(const QString &id);
     Q_INVOKABLE void setBundleEnabled(const QString &name, bool enabled);
     Q_INVOKABLE void replay(uint64_t sub, uint64_t from);
+    Q_INVOKABLE void openTerminal(int cols, int rows);
+    Q_INVOKABLE void writeTerminal(const QByteArray &data);
+    Q_INVOKABLE void resizeTerminal(int cols, int rows);
+    Q_INVOKABLE void closeTerminal();
 
     Q_INVOKABLE void wardCall(const QString &method, const QVariantMap &params);
     Q_INVOKABLE QStringList protocolMethods() const;
@@ -259,6 +269,10 @@ signals:
     void questionsRequested(const QString &eventId, const QVariantList &questions);
     void eventReceived(const QString &kind, const QVariantMap &payload);
     void railNotice(const QString &text, bool error);
+    void terminalOutput(const QByteArray &data);
+    void terminalState(const QString &state, int exitCode);
+    void terminalChanged();
+    void terminalSizeChanged();
 
 private slots:
     void onReadable();
@@ -360,6 +374,11 @@ private:
 
     QStringList m_railExpanded;
     QStringList m_railCollapsed;
+
+    bool m_terminalOpen = false;
+    QString m_terminalId;
+    int m_terminalCols = 0;
+    int m_terminalRows = 0;
 
     QString m_queuedPrompt;
     QString m_pendingApproval;

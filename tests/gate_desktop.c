@@ -15,7 +15,7 @@
 
 #include "fake_endpoint.h"
 
-static int run_capture(const char *socket, const char *bin, const char *prompt,
+static int run_capture(const char *socket, const char *bin, char *const argv[],
                        char *out, size_t cap) {
   int fds[2];
   if (pipe(fds) != 0) return -1;
@@ -29,7 +29,6 @@ static int run_capture(const char *socket, const char *bin, const char *prompt,
     dup2(fds[1], 2);
     close(fds[0]);
     close(fds[1]);
-    char *argv[] = {(char *)bin, (char *)"--prompt", (char *)prompt, NULL};
     execv(bin, argv);
     _exit(127);
   }
@@ -139,12 +138,19 @@ int main(void) {
   assert(tcp_url[0] != '\0');
 
   char out[8192];
-  assert(run_capture(sock, probe, "hello desktop", out, sizeof(out)) == 0);
+  char *prompt_argv[] = {(char *)probe, (char *)"--prompt", (char *)"hello desktop", NULL};
+  assert(run_capture(sock, probe, prompt_argv, out, sizeof(out)) == 0);
   assert(count_text(out, "hello desktop") == 1);
 
   char tcp_out[8192];
-  assert(run_capture(tcp_url, probe, "hello tcp", tcp_out, sizeof(tcp_out)) == 0);
+  char *tcp_argv[] = {(char *)probe, (char *)"--prompt", (char *)"hello tcp", NULL};
+  assert(run_capture(tcp_url, probe, tcp_argv, tcp_out, sizeof(tcp_out)) == 0);
   assert(count_text(tcp_out, "hello tcp") == 1);
+
+  char terminal_out[8192];
+  char *terminal_argv[] = {(char *)probe, (char *)"--terminal", NULL};
+  assert(run_capture(sock, probe, terminal_argv, terminal_out, sizeof(terminal_out)) == 0);
+  assert(count_text(terminal_out, "ward-terminal-ok") >= 1);
 
   kill(pid, SIGTERM);
   int status = 0;
@@ -152,6 +158,6 @@ int main(void) {
   stop_server(endpoint);
   if (strcmp(cgroup_base, "off") != 0) drop_test_cgroup(cgroup_base);
 
-  printf("desktop gate passed: ward-gui drove a session over UDS and TCP\n");
+  printf("desktop gate passed: ward-gui drove a session over UDS, TCP and a terminal\n");
   return 0;
 }

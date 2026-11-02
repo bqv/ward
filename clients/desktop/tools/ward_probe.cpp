@@ -29,18 +29,25 @@ int main(int argc, char **argv)
                                      QStringLiteral("id"));
     QCommandLineOption approveOption(QStringList{QStringLiteral("approve")},
                                      QStringLiteral("allow every approval the turn asks for"));
+    QCommandLineOption terminalOption(QStringList{QStringLiteral("terminal")},
+                                      QStringLiteral("open a terminal and write a marker through it"));
     parser.addOption(socketOption);
     parser.addOption(cwdOption);
     parser.addOption(promptOption);
     parser.addOption(sessionOption);
     parser.addOption(approveOption);
+    parser.addOption(terminalOption);
     parser.process(app);
 
     WardClient client(parser.value(socketOption));
     QString text;
     bool prompted = false;
     bool failed = false;
+    bool terminalOpened = false;
+    bool terminalWritten = false;
+    QByteArray terminalText;
     const bool approve = parser.isSet(approveOption);
+    const bool terminal = parser.isSet(terminalOption);
 
     QObject::connect(&client, &WardClient::lastErrorChanged, &app, [&]() {
         if (!client.lastError().isEmpty()) {
@@ -55,8 +62,23 @@ int main(int argc, char **argv)
             text += payload.value(QStringLiteral("text")).toString();
         if (kind == QLatin1String("turn.end"))
             app.quit();
-        if (kind == QLatin1String("replay.end") && !parser.isSet(promptOption))
+        if (kind == QLatin1String("replay.end") && !parser.isSet(promptOption)
+                && !terminal && !parser.isSet(sessionOption))
             app.quit();
+    });
+    QObject::connect(&client, &WardClient::terminalChanged, &app, [&]() {
+        if (!terminal || !client.terminalOpen() || terminalWritten)
+            return;
+        terminalWritten = true;
+        client.writeTerminal("echo ward-terminal-ok\n");
+    });
+    QObject::connect(&client, &WardClient::terminalOutput, &app,
+                     [&](const QByteArray &data) {
+        terminalText.append(data);
+        if (terminalText.contains("ward-terminal-ok")) {
+            client.closeTerminal();
+            app.quit();
+        }
     });
     QObject::connect(&client, &WardClient::permissionRequested, &app,
                      [&](const QString &requestId, const QString &tool,
@@ -74,6 +96,11 @@ int main(int argc, char **argv)
         }
         if (client.state() != WardClient::Ready || prompted)
             return;
+        if (terminal) {
+            prompted = true;
+            client.createSession();
+            return;
+        }
         if (parser.isSet(sessionOption)) {
             prompted = true;
             client.followSession(parser.value(sessionOption));
@@ -88,11 +115,20 @@ int main(int argc, char **argv)
     });
     QObject::connect(&client, &WardClient::sessionsLoadingChanged, &app, [&]() {
         if (client.state() == WardClient::Ready && !parser.isSet(promptOption)
+                && !terminal && !parser.isSet(sessionOption)
                 && !client.sessionsLoading())
             app.quit();
     });
     QObject::connect(&client, &WardClient::sessionChanged, &app, [&]() {
-        if (prompted || client.sessionId().isEmpty() || !parser.isSet(promptOption))
+        if (client.sessionId().isEmpty())
+            return;
+        if (terminal && !terminalOpened) {
+            terminalOpened = true;
+            QTextStream(stderr) << "session " << client.sessionId() << "\n";
+            client.openTerminal(80, 24);
+            return;
+        }
+        if (prompted || !parser.isSet(promptOption))
             return;
         prompted = true;
         QTextStream(stderr) << "session " << client.sessionId() << "\n";
@@ -108,8 +144,12 @@ int main(int argc, char **argv)
     app.exec();
 
     QTextStream out(stdout);
-    out << text;
-    if (!text.isEmpty() && !text.endsWith(QLatin1Char('\n')))
-        out << '\n';
+    if (terminal) {
+        out << QString::fromUtf8(terminalText);
+    } else {
+        out << text;
+        if (!text.isEmpty() && !text.endsWith(QLatin1Char('\n')))
+            out << '\n';
+    }
     return failed ? 1 : 0;
 }

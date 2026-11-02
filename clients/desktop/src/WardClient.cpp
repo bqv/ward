@@ -573,6 +573,25 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
         m_busy = true;
         emit busyChanged();
         setState(Ready, QStringLiteral("thinking…"));
+    } else if (method == QLatin1String("terminal.open")) {
+        m_terminalId = result.value(QStringLiteral("terminal")).toString();
+        m_terminalOpen = !m_terminalId.isEmpty();
+        if (m_terminalOpen) {
+            emit terminalState(QStringLiteral("running"), 0);
+            setState(Ready, QStringLiteral("terminal open"));
+        }
+        emit terminalChanged();
+    } else if (method == QLatin1String("terminal.write")) {
+        if (!result.value(QStringLiteral("written")).toBool())
+            emit railNotice(QStringLiteral("the terminal refused those bytes"), true);
+    } else if (method == QLatin1String("terminal.resize")) {
+        if (!result.value(QStringLiteral("resized")).toBool())
+            emit railNotice(QStringLiteral("the terminal refused the new size"), true);
+    } else if (method == QLatin1String("terminal.close")) {
+        m_terminalOpen = false;
+        m_terminalId.clear();
+        emit terminalState(QStringLiteral("closed"), 0);
+        emit terminalChanged();
     }
 }
 
@@ -677,6 +696,18 @@ void WardClient::handleEvent(uint64_t sub, uint64_t seq, const QString &kind,
         emit openingSessionChanged();
         if (!m_busy)
             setState(Ready, QStringLiteral("ready"));
+    } else if (kind == QLatin1String("terminal.output")) {
+        const QString handle = payload.value(QStringLiteral("terminal")).toString();
+        if (!handle.isEmpty() && handle == m_terminalId) {
+            if (payload.value(QStringLiteral("eof")).toBool()) {
+                m_terminalOpen = false;
+                m_terminalId.clear();
+                emit terminalState(QStringLiteral("exited"), -1);
+                emit terminalChanged();
+            } else {
+                emit terminalOutput(payload.value(QStringLiteral("data")).toString().toUtf8());
+            }
+        }
     } else if (kind == QLatin1String("session.modules")
                || kind == QLatin1String("session.upgraded")) {
         appendRow(QStringLiteral("notice"), kind);
@@ -755,6 +786,8 @@ void WardClient::subscribe(const QString &sessionId)
         return;
     if (m_subscribing == sessionId)
         return;
+    if (!m_terminalId.isEmpty())
+        closeTerminal();
     m_subscribing = sessionId;
     clearTranscript();
     m_openingSession = true;
@@ -1136,6 +1169,60 @@ void WardClient::replay(uint64_t sub, uint64_t from)
     wd_put(control, "replay", wd_uint(sub));
     wd_put(control, "from", wd_uint(from));
     sendFrame(WD_FRAME_CONTROL, 0, 0, control);
+}
+
+void WardClient::openTerminal(int cols, int rows)
+{
+    if (m_sessionId.isEmpty()) {
+        emit railNotice(QStringLiteral("no session to open a terminal in"), true);
+        return;
+    }
+    if (!m_terminalId.isEmpty())
+        return;
+    m_terminalCols = qMax(1, cols);
+    m_terminalRows = qMax(1, rows);
+    emit terminalSizeChanged();
+    sendRequest(QStringLiteral("terminal.open"),
+                {{QStringLiteral("id"), m_sessionId},
+                 {QStringLiteral("cols"), m_terminalCols},
+                 {QStringLiteral("rows"), m_terminalRows}});
+}
+
+void WardClient::writeTerminal(const QByteArray &data)
+{
+    if (m_terminalId.isEmpty() || data.isEmpty())
+        return;
+    sendRequest(QStringLiteral("terminal.write"),
+                {{QStringLiteral("terminal"), m_terminalId},
+                 {QStringLiteral("data"), QString::fromUtf8(data)}});
+}
+
+void WardClient::resizeTerminal(int cols, int rows)
+{
+    cols = qMax(1, cols);
+    rows = qMax(1, rows);
+    if (m_terminalId.isEmpty() || (cols == m_terminalCols && rows == m_terminalRows))
+        return;
+    m_terminalCols = cols;
+    m_terminalRows = rows;
+    emit terminalSizeChanged();
+    sendRequest(QStringLiteral("terminal.resize"),
+                {{QStringLiteral("terminal"), m_terminalId},
+                 {QStringLiteral("cols"), cols},
+                 {QStringLiteral("rows"), rows}});
+}
+
+void WardClient::closeTerminal()
+{
+    if (m_terminalId.isEmpty())
+        return;
+    const QString handle = m_terminalId;
+    m_terminalOpen = false;
+    m_terminalId.clear();
+    emit terminalState(QStringLiteral("closed"), 0);
+    emit terminalChanged();
+    sendRequest(QStringLiteral("terminal.close"),
+                {{QStringLiteral("terminal"), handle}});
 }
 
 void WardClient::wardCall(const QString &method, const QVariantMap &params)

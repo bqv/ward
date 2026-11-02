@@ -37,12 +37,14 @@ and `WardClient.cpp` includes the same headers the daemon does.
 ./build/ward-gui-probe --socket <path> --prompt "hello"
 ./build/ward-gui-probe --socket <path> --approve --prompt "/write note.txt hi"
 ./build/ward-gui-probe --socket <path> --session <id>
+./build/ward-gui-probe --socket <path> --terminal
 ```
 
 The first covers handshake, `session.create`, `session.resume`, `session.prompt`
 and the `text.delta`/`turn.end` stream. The second covers `approval.requested`,
 `approval.respond` and `approval.resolved`. The third covers replay from
-`from: 0` through `replay.end`. Against a fixture daemon the probe returned
+`from: 0` through `replay.end`; `--terminal` opens a PTY, writes `echo
+ward-terminal-ok` and prints the bytes that come back. Against a fixture daemon the probe returned
 `hello desktop` once, wrote through an approved tool call, and replayed the same
 turn without duplicating a row.
 
@@ -53,6 +55,12 @@ rather than using `popen`, so a stalled probe fails the gate and a killed gate
 does not leave a server behind. `make test` builds the probe and runs the gate.
 In a sandbox that cannot write `/sys/fs/cgroup`, run the gate directly with
 `WARD_GATE_CGROUP=off`.
+
+The gate also exposed a daemon failure rather than only a client one: a
+subscriber that closed right after `turn.end` could kill the daemon with
+`SIGPIPE` while it was still broadcasting the turn's tail. `setup_signals` now
+ignores `SIGPIPE`, and the gate runs repeatedly without losing the fixture
+daemon.
 
 ## Protocol coverage
 
@@ -65,6 +73,7 @@ In a sandbox that cannot write `/sys/fs/cgroup`, run the gate directly with
 | events | routed by kind and subscription; `eventReceived(kind, payload)` is the generic door |
 | replay | `session.resume {from: 0}` and the `replay` control frame |
 | approvals | request, respond, resolved; `requestId` is `call:epoch` |
+| terminal | `terminal.open/write/resize/close`, `terminal.output`, eof and exit state |
 | session lifecycle | create, list, resume, prompt, cancel, rename, pin, archive, compact, set_model |
 | catalog | `model.list`, `session.set_model` |
 | goals, jobs, schedules | `goal.set/clear`, `job.list/kill`, `schedule.list/delete` |
@@ -81,23 +90,22 @@ proven yet. They are reported to the ward session as well.
 1. **QUIC.** The client uses Unix sockets and loopback TCP. ward's QUIC
    transport, device certificates, pairing and `device.*` are not in the client;
    `src/net/quic.h` is the code to reuse.
-2. **Terminal.** ward serves `terminal.open/write/resize/close` and
-   `terminal.output`, but `WardClient` publishes no terminal surface, so the
-   dock says "no terminal" rather than opening one.
-3. **Files and attachments.** ward has no `file.read`; the files dock and image
-   lightbox therefore answer empty. `attachment.add/list` exists in ward, but
-   the composer's staging surface is not wired to it.
-4. **Workspaces.** ward has no workspace registry; the rail groups by nothing
+2. **Files and attachments.** ward has no `file.read`; the files dock and image
+   lightbox therefore answer empty until the ward-side method lands.
+   `attachment.add/list` exists in ward, but the composer's staging surface is
+   not wired to it.
+3. **Workspaces.** ward has no workspace registry; the rail groups by nothing
    and the facade reports `hasWorkspaces = false`.
-5. **Permission presets.** ward's policy is a server-side rule table, not a
+4. **Permission presets.** ward's policy is a server-side rule table, not a
    preset catalog; the access chip is absent and `/permission` answers why.
-6. **Trajectory page.** A tool call produces a minimal ledger entry; ward's
+5. **Trajectory page.** A tool call produces a minimal ledger entry; ward's
    richer journal has no equivalent projection in this client yet.
-7. **Deferred new sessions.** dsh-native defers `session.create` until the
+6. **Deferred new sessions.** dsh-native defers `session.create` until the
    first send. `WardClient` creates immediately, so a New Session press leaves a
    roster row even if nothing is sent.
-8. **Headless `--prompt`.** dsh-native's `--prompt` is ACP-only; ward-gui has no
+7. **Headless `--prompt`.** dsh-native's `--prompt` is ACP-only; ward-gui has no
    equivalent path in the shell. The probe is the display-free path instead.
 
-The gate closes the "no make test gate" hole; the remaining items are client
-surfaces, one ward-side decision (`file.read`), and the QUIC transport.
+The gate closes the "no make test gate" hole and the terminal surface is wired;
+the remaining items are client surfaces, one ward-side decision (`file.read`),
+and the QUIC transport.
