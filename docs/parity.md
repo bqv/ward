@@ -26,8 +26,8 @@ behaviour, is marked `partial`.
 | schedules (cron) | M3 | delivered | `schedule_test`, `gate_m3` |
 | goals | M3 | delivered | `gate_m3` |
 | skills, `AGENTS.md`, slash commands | M4 | delivered | `gate_tool` asserts `[rules]` reaches the wire; `/read`, `/write`, `/grep` dispatch |
-| web search | M4 | **partial** | the capability exists in core and the `skills` module chooses; no gate runs `srchdsh` because the binary is host configuration |
-| MCP client | M4 | **missing** | no module, no method, no journal entry |
+| web search | M4 | delivered | `gate_tool` runs a stubbed `srchdsh` through `WARD_SEARCH_BIN` and asserts the result reaches a `/search` turn |
+| MCP client | M4 | delivered | `gate_tool` stubs `WARD_MCP_BIN`, answers a JSON-RPC line, and asserts `mcp ok` arrives; core's `mcp.call` runs the child |
 | terminal and PTY | M4 | delivered | `pty_test` |
 | attachments and uploads | M4 | delivered | `gate_tool` asserts `[attach]`; `attachment.add`/`list` |
 | module reload and migration | M5 | delivered | `modstate_test`, `gate_tool` reload assertions |
@@ -39,13 +39,15 @@ behaviour, is marked `partial`.
 
 ## What this audit says about the project
 
-Two rows are missing outright (MCP, Android), three are partial for reasons the
-journal already names, and one is a substitution. Everything else is exercised
-by a gated binary that fails when the behaviour changes.
+One row is missing outright (the Android client), three are partial for reasons
+the journal names, and one is a substitution. Everything else is exercised by a
+gated binary that fails when the behaviour changes.
 
-The gap worth naming first is **MCP**: it is a row in the contract with nothing
-behind it, and unlike Android it needs no device — just a client that speaks the
-protocol to a server over stdio. It is the cheapest missing row to close.
+This audit had to be corrected after its first draft: I wrote it from memory and
+marked web search and MCP as unbuilt, when `gate_tool` already stubs and asserts
+both — `WARD_SEARCH_BIN` and `WARD_MCP_BIN` exist precisely so those rows could
+be tested without host configuration. The lesson is the same one the rest of this
+session keeps teaching: check the tree before claiming what it lacks.
 
 ## Local-model compatibility
 
