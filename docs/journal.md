@@ -1633,3 +1633,13 @@ content.
 That means streaming works and the gate I wanted does not need a bigger constant — it needs a fixture prompt long
 enough that both halves are non-empty, or an assertion on the *event* count rather than the delta count. The debug print
 stays: it costs nothing outside `WARD_DEBUG` and answers this exact question in one run.
+
+Hundred-and-twenty-third: a longer prompt did not produce a second content event either. The gate's log shows two provider
+replies on the SSE path with one content event each (57 and 91 bytes) plus `[DONE]` — so the fixture's second `data:` line
+never reaches the wire as an event, whatever the prompt length. Either the second `%.*s`/`%s` chunk is empty for the text
+the fixture extracts, or its two lines are being written as one.
+
+That means the assertion cannot be written against the fixture as it stands, and the fixture is the thing to fix: it should
+emit two obviously non-empty fragments (fixed strings, not halves of a request field) so the split is controlled by the
+test rather than by the length of whatever the request happened to carry. Reverted again rather than leaving a failing
+gate; the fix belongs in `tests/fake_endpoint.h`, which is where the next attempt should start.
