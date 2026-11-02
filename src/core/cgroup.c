@@ -175,6 +175,10 @@ int wd_cgroup_enter(const wd_cgroup_config *config, char **err) {
   if (read_small(origin_path, saved_origin, sizeof(saved_origin)) == 0) {
     char *slash = strchr(saved_origin, '/');
     if (slash != NULL) memmove(saved_origin, slash, strlen(slash) + 1);
+    size_t len = strlen(saved_origin);
+    while (len > 0 && (saved_origin[len - 1] == '\n' ||
+                       saved_origin[len - 1] == '\r'))
+      saved_origin[--len] = '\0';
   }
   snprintf(saved_base, sizeof(saved_base), "%s", config->base);
   char fence_procs[1024];
