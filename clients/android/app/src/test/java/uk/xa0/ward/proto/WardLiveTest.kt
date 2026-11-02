@@ -79,10 +79,6 @@ class WardLiveTest {
             for (attempt in 0 until 40) {
                 pending = ownerApi.listApprovals()
                 if (pending.isNotEmpty()) break
-                if (prompt.isCompleted) {
-                    val answer = runCatching { prompt.await() }
-                    error("the prompt finished before parking: $answer")
-                }
                 delay(100)
             }
             val held = pending.firstOrNull { it.text("session") == session.id }

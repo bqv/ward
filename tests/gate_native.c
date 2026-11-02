@@ -92,6 +92,7 @@ int main(void) {
     setenv("WARD_MODULE_DIR", modules, 1);
     setenv("WARD_TOOL_ROOT", root, 1);
     setenv("WARD_QUIC_BIND", "off", 1);
+    setenv("WARD_FAKE_DELAY_MS", "1500", 1);
     setenv("WARD_TCP_BIND", "127.0.0.1:0", 1);
     prctl(PR_SET_PDEATHSIG, SIGTERM);
     execl(daemon, "ward", "up", "--socket", sock, "--state", state,
@@ -132,6 +133,38 @@ int main(void) {
   }
   session[at] = '\0';
   assert(at == 16);
+
+  wd_client queuer;
+  assert(wd_client_connect(&queuer, sock) == 0);
+  assert(wd_client_handshake(&queuer) == 0);
+  cbor_item_t *created = wd_map(1);
+  wd_put(created, "cwd", wd_text(root));
+  cbor_item_t *created_result = NULL;
+  assert(wd_client_call(&queuer, "session.create", created, &created_result) == 0);
+  cbor_item_t *created_session = wd_get(created_result, "session");
+  char *queued_session = wd_text_copy(wd_get(created_session, "id"));
+  assert(queued_session != NULL);
+  wd_free(created_result);
+  cbor_item_t *first = wd_map(2);
+  wd_put(first, "id", wd_text(queued_session));
+  wd_put(first, "text", wd_text("first prompt"));
+  cbor_item_t *first_result = NULL;
+  assert(wd_client_call(&queuer, "session.prompt", first, &first_result) == 0);
+  wd_free(first_result);
+  cbor_item_t *second = wd_map(2);
+  wd_put(second, "id", wd_text(queued_session));
+  wd_put(second, "text", wd_text("second prompt"));
+  cbor_item_t *second_result = NULL;
+  assert(wd_client_call(&queuer, "session.prompt", second, &second_result) == 0);
+  bool queued = false;
+  uint64_t ahead = 99;
+  assert(wd_bool_of(wd_get(second_result, "queued"), &queued));
+  assert(queued);
+  assert(wd_uint_of(wd_get(second_result, "ahead"), &ahead));
+  assert(ahead == 0);
+  wd_free(second_result);
+  free(queued_session);
+  close(queuer.fd);
 
   char *prompt_argv[] = {(char *)bin, "prompt", session, "native hello", NULL};
   int prompt_rc = run_capture(sock, bin, prompt_argv, out, sizeof(out));

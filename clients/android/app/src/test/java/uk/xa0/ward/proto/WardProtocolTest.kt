@@ -77,6 +77,25 @@ class WardProtocolTest {
     }
 
     @Test
+    fun `an approval list decodes as a list of maps`() {
+        val value = cborMap(
+            "approvals" to cborArray(
+                cborMap(
+                    "session" to "s1".cbor(),
+                    "tool" to "fs.write".cbor(),
+                    "reason" to "write a file".cbor(),
+                    "call" to 7L.cbor(),
+                    "epoch" to 2L.cbor(),
+                    "expires_ms" to 99L.cbor(),
+                ),
+            ),
+        )
+        val items = value.map("approvals")?.asArray()?.items
+        assertEquals(1, items?.size)
+        assertEquals("fs.write", (items!!.first() as Cbor.Map).text("tool"))
+    }
+
+    @Test
     fun `the codec round-trips every type in the ward subset`() {
         val value = cborMap(
             "text" to "hello".cbor(),

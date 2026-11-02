@@ -21,8 +21,8 @@ sealed interface Cbor {
     data class Bool(val value: Boolean) : Cbor
     data object Null : Cbor
 
-    fun asMap(): Map = this as? Map ?: throw CborException("expected a map")
-    fun asArray(): Array = this as? Array ?: throw CborException("expected an array")
+    fun asMap(): Cbor.Map = this as? Cbor.Map ?: throw CborException("expected a map")
+    fun asArray(): Cbor.Array = this as? Cbor.Array ?: throw CborException("expected an array")
     fun asText(): String = (this as? Text)?.value ?: throw CborException("expected text")
     fun asLong(): Long = when (this) {
         is UInt -> value
@@ -32,12 +32,12 @@ sealed interface Cbor {
     fun asBoolean(): Boolean = (this as? Bool)?.value ?: throw CborException("expected a bool")
     fun asBytes(): ByteArray = (this as? Bytes)?.value ?: throw CborException("expected bytes")
 
-    fun get(key: String): Cbor? = (this as? Map)?.entries?.firstOrNull { it.first == key }?.second
+    fun get(key: String): Cbor? = (this as? Cbor.Map)?.entries?.firstOrNull { it.first == key }?.second
     fun text(key: String): String? = (get(key) as? Text)?.value
     fun long(key: String): Long? = (get(key) as? UInt)?.value ?: (get(key) as? NInt)?.value
     fun bool(key: String): Boolean? = (get(key) as? Bool)?.value
-    fun map(key: String): Map? = get(key) as? Map
-    fun array(key: String): Array? = get(key) as? Array
+    fun map(key: String): Cbor.Map? = get(key) as? Cbor.Map
+    fun array(key: String): Cbor.Array? = get(key) as? Cbor.Array
     fun bytes(key: String): ByteArray? = (get(key) as? Bytes)?.value
 }
 
