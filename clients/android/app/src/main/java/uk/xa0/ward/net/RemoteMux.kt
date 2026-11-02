@@ -117,19 +117,20 @@ class RemoteMux(
             close()
             return@callbackFlow
         }
+        val producer = this
         val job = scope.launch {
             while (isActive && !closed) {
                 try {
                     ensureConnected()
                     when (endpoint) {
-                        "\$events" -> collectEvents(this)
-                        "session/follow" -> collectFollow(args, this)
-                        "session/control" -> collectControl(this)
-                        "workspace/follow" -> collectWorkspaces(this)
-                        "job/list", "job/follow" -> collectJobs(args, this)
-                        "terminal/follow" -> collectTerminal(args, this)
+                        "\$events" -> collectEvents(producer)
+                        "session/follow" -> collectFollow(args, producer)
+                        "session/control" -> collectControl(producer)
+                        "workspace/follow" -> collectWorkspaces(producer)
+                        "job/list", "job/follow" -> collectJobs(args, producer)
+                        "terminal/follow" -> collectTerminal(args, producer)
                         else -> {
-                            trySend(StreamEvent.Failure("not_supported", "ward has no $endpoint stream"))
+                            producer.trySend(StreamEvent.Failure("not_supported", "ward has no $endpoint stream"))
                             delay(5_000)
                         }
                     }
@@ -137,7 +138,7 @@ class RemoteMux(
                     throw cancelled
                 } catch (error: Throwable) {
                     Log.w(TAG, "$endpoint stream failed: ${error.message}")
-                    trySend(StreamEvent.Failure("stream/error", error.message ?: "stream failed"))
+                    producer.trySend(StreamEvent.Failure("stream/error", error.message ?: "stream failed"))
                     delay(3_000)
                 }
             }
@@ -257,7 +258,7 @@ class RemoteMux(
         }
     }
 
-    private fun collectControl(out: kotlinx.coroutines.channels.ProducerScope<StreamEvent>) {
+    private suspend fun collectControl(out: kotlinx.coroutines.channels.ProducerScope<StreamEvent>) {
         out.trySend(StreamEvent.Item(JSONObject()
             .put("type", "baseline")
             .put("value", JSONObject()
@@ -298,7 +299,7 @@ class RemoteMux(
         delay(Long.MAX_VALUE)
     }
 
-    private fun collectTerminal(
+    private suspend fun collectTerminal(
         args: JSONObject,
         out: kotlinx.coroutines.channels.ProducerScope<StreamEvent>,
     ) {

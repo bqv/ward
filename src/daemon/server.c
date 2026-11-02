@@ -36,6 +36,7 @@
 #include "core/modstate.h"
 #include "core/prompt.h"
 #include "core/devlock.h"
+#include "core/files.h"
 #include "core/probe.h"
 #include "net/http.h"
 #include "core/pty.h"
@@ -1985,6 +1986,50 @@ static void handle_attachment_list(wd_server *srv, wd_conn *conn, uint64_t id,
   conn_arm(srv, conn);
 }
 
+static void handle_session_file_read(wd_server *srv, wd_conn *conn, uint64_t id,
+                                     cbor_item_t *params) {
+  char *session_id = wd_text_copy(wd_get(params, "id"));
+  char *path = wd_text_copy(wd_get(params, "path"));
+  wd_session *session =
+      session_id != NULL ? wd_session_find(&srv->store, session_id) : NULL;
+  if (session == NULL) {
+    free(session_id);
+    free(path);
+    conn_send_error(conn, id, WD_ERR_NOT_FOUND, "no such session");
+    conn_arm(srv, conn);
+    return;
+  }
+  if (path == NULL || path[0] == '\0') {
+    free(session_id);
+    free(path);
+    conn_send_error(conn, id, WD_ERR_INVALID_PARAMS, "path is required");
+    conn_arm(srv, conn);
+    return;
+  }
+  char *text = NULL;
+  size_t len = 0;
+  char *err = NULL;
+  int rc = wd_file_read(session->cwd, path, 64 * 1024, &text, &len, &err);
+  free(session_id);
+  if (rc != 0) {
+    conn_send_error(conn, id, WD_ERR_INVALID_PARAMS,
+                    err != NULL ? err : "cannot read the file");
+    free(err);
+    free(path);
+    conn_arm(srv, conn);
+    return;
+  }
+  free(err);
+  cbor_item_t *result = wd_map(3);
+  wd_put(result, "path", wd_text(path != NULL ? path : ""));
+  wd_put(result, "size", wd_uint((uint64_t)len));
+  wd_put(result, "text", wd_text_len(text != NULL ? text : "", len));
+  free(text);
+  free(path);
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
 static void handle_session_cancel(wd_server *srv, wd_conn *conn, uint64_t id,
                                   cbor_item_t *params) {
   char *session_id = wd_text_copy(wd_get(params, "id"));
@@ -3166,6 +3211,8 @@ static void handle_request(wd_server *srv, wd_conn *conn, uint64_t id,
     handle_model_list(srv, conn, id);
   } else if (strcmp(method, "model.select") == 0) {
     handle_model_select(srv, conn, id, params);
+  } else if (strcmp(method, "session.file_read") == 0) {
+    handle_session_file_read(srv, conn, id, params);
   } else if (strcmp(method, "session.prompt") == 0) {
     handle_session_prompt(srv, conn, id, params);
   } else if (strcmp(method, "device.pair") == 0) {

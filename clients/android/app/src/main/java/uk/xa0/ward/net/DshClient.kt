@@ -221,5 +221,17 @@ class DshClient(context: Context) {
 
     companion object {
         private const val TAG = "WardRoute"
+
+        private fun displayUrlOf(raw: String): HttpUrl? {
+            val trimmed = raw.trim().trimEnd('/')
+            if (trimmed.isEmpty()) return null
+            val http = when {
+                trimmed.startsWith("tcp://", ignoreCase = true) -> "http://" + trimmed.substring(6)
+                trimmed.startsWith("http://", ignoreCase = true) -> trimmed
+                trimmed.startsWith("https://", ignoreCase = true) -> trimmed
+                else -> "http://$trimmed"
+            }
+            return http.toHttpUrlOrNull()
+        }
     }
 }

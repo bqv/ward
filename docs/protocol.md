@@ -23,6 +23,10 @@ M1 adds one method: `session.prompt`, which runs a turn and streams its events. 
 described below with the session object.
 
 Later milestones add methods without a version bump, because adding a method is compatible.
+`session.file_read {id, path}` answers `{path, size, text}` — a regular file under
+the session's working directory, refused rather than truncated when it exceeds
+64 KiB, and refused when the path resolves outside that directory.
+
 `model.probe {id}` answers `{id, n_ctx, n_slots, context_source}` — the window and slot count the
 provider reports, or the catalog's `context`, or a default, and which of the three it was.
 `module.list`, `module.reload`, `session.upgrade`, `stats.session`, `stats.global`,

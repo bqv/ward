@@ -1982,3 +1982,14 @@ build-tools' `d8` is class file 55 and will not run under the system `java` 8; `
 `java_t` against `user_tmp_t`); and `getrandom` needs API 28.
 
 `docs/parity.md` now has no missing row: Android is delivered, with the logcat line as its evidence.
+
+Hundred-and-forty-ninth: `session.file_read` exists. `wd_file_read` resolves the path against the session's cwd, refuses
+anything that resolves outside it (both `../` and an absolute path elsewhere), refuses a non-regular file, and refuses a
+file larger than 64 KiB rather than truncating it — the rule that a reader should not quietly return part of a file.
+
+Two gates: `files_test` covers the helper directly (content, escape by `../`, escape by absolute path, missing file, cap),
+and `gate_native` calls the method over the socket for both the success and the refusal, so the protocol path is measured
+rather than assumed. All three builds green.
+
+The desktop client's files dock can now answer: the method returns the bytes and the size, and the refusal is a message a
+UI can show rather than an empty pane.

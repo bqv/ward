@@ -140,6 +140,33 @@ int main(void) {
             kill(pid, 0) == 0 ? 1 : 0);
   assert(prompt_rc == 0);
 
+  char note_path[256];
+  snprintf(note_path, sizeof(note_path), "%s/note.txt", root);
+  FILE *note = fopen(note_path, "w");
+  assert(note != NULL);
+  assert(fputs("desktop fixture\n", note) >= 0);
+  fclose(note);
+  wd_client reader;
+  assert(wd_client_connect(&reader, sock) == 0);
+  assert(wd_client_handshake(&reader) == 0);
+  cbor_item_t *read_params = wd_map(2);
+  wd_put(read_params, "id", wd_text(session));
+  wd_put(read_params, "path", wd_text("note.txt"));
+  cbor_item_t *read_result = NULL;
+  assert(wd_client_call(&reader, "session.file_read", read_params,
+                        &read_result) == 0);
+  char *read_text = wd_text_copy(wd_get(read_result, "text"));
+  assert(read_text != NULL && strstr(read_text, "desktop fixture") != NULL);
+  free(read_text);
+  wd_free(read_result);
+  cbor_item_t *escape_params = wd_map(2);
+  wd_put(escape_params, "id", wd_text(session));
+  wd_put(escape_params, "path", wd_text("../outside.txt"));
+  cbor_item_t *escape_result = NULL;
+  assert(wd_client_call(&reader, "session.file_read", escape_params,
+                        &escape_result) != 0);
+  close(reader.fd);
+
   char *resume_argv[] = {(char *)bin, "resume", session, NULL};
   int resume_rc = run_capture(sock, bin, resume_argv, out, sizeof(out));
   if (resume_rc != 0) fprintf(stderr, "resume rc=%d out=%s\n", resume_rc, out);

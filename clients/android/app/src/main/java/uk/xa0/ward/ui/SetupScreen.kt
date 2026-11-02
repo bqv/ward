@@ -78,7 +78,7 @@ fun SetupScreen(
     onForgetCertificate: (String) -> Unit = {},
 ) {
     val colors = DshTheme.colors
-    var url by rememberSaveable { mutableStateOf(initialUrl.ifBlank { "http://192.168.1.110/" }) }
+    var url by rememberSaveable { mutableStateOf(initialUrl.ifBlank { "tcp://127.0.0.1:45872" }) }
     var lanUrl by rememberSaveable { mutableStateOf(initialLanUrl) }
     var username by rememberSaveable { mutableStateOf(initialUsername) }
     var password by rememberSaveable { mutableStateOf("") }
@@ -112,10 +112,10 @@ fun SetupScreen(
         Spacer(Modifier.height(48.dp))
         DshMark(size = 44.dp)
         Spacer(Modifier.height(DshSpacing.xl))
-        Text("DSH", style = DshType.heading1, color = colors.ink)
+        Text("Ward", style = DshType.heading1, color = colors.ink)
         Spacer(Modifier.height(DshSpacing.md))
         Text(
-            text = "Connect to your DeepSeek Harness host",
+            text = "Connect to your ward daemon",
             style = DshType.bodyMedium,
             color = colors.labelTertiary,
         )
@@ -125,91 +125,18 @@ fun SetupScreen(
             DshTextField(
                 value = url,
                 onValueChange = { url = it },
-                placeholder = "http://192.168.1.110/",
-                label = "Server",
+                placeholder = "tcp://127.0.0.1:45872",
+                label = "Daemon",
                 keyboardType = KeyboardType.Uri,
-            )
-            CertificateSection(
-                url = url,
-                acceptedCerts = acceptedCerts,
-                readout = readout,
-                checking = checking,
-                certError = certError,
-                onCheckCertificate = onCheckCertificate,
-                onTrustCertificate = onTrustCertificate,
-                onForgetCertificate = onForgetCertificate,
-            )
-            DshTextField(
-                value = username,
-                onValueChange = { username = it },
-                placeholder = "username",
-                label = "Account",
-                // A username is an identifier, not prose: an IME that capitalises
-                // it or autocorrects it submits a different account than the one
-                // typed, and repeated failures are how an account gets locked.
-                // The type stays Text rather than Email, which would change the
-                // keyboard layout for a field that is not an address.
-                keyboardType = KeyboardType.Text,
-                keyboardCapitalization = KeyboardCapitalization.None,
-                autoCorrect = false,
-                imeAction = ImeAction.Next,
-            )
-            DshTextField(
-                value = password,
-                onValueChange = { password = it },
-                placeholder = "password",
-                label = "Password",
-                isPassword = true,
-                // Done posts the form rather than only putting the keyboard away,
-                // which is what it did when no keyboard actions were wired.
                 imeAction = ImeAction.Done,
                 onImeDone = submit,
             )
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = if (advanced) "Hide advanced" else "Advanced",
-                    style = DshType.bodySmall,
-                    color = colors.link,
-                    modifier = Modifier.clickableNoRipple { advanced = !advanced },
-                )
-            }
-
-            if (advanced) {
-                Column {
-                    DshTextField(
-                        value = lanUrl,
-                        onValueChange = { lanUrl = it },
-                        placeholder = "http://192.168.1.110/",
-                        label = "LAN address (optional)",
-                        keyboardType = KeyboardType.Uri,
-                    )
-                    Spacer(Modifier.height(DshSpacing.md))
-                    Text(
-                        text = "A second address for the same host, reachable only on your " +
-                            "own network. Tried first when it answers, so the app uses the " +
-                            "LAN at home and the server address everywhere else.",
-                        style = DshType.micro,
-                        color = colors.labelCaption,
-                    )
-                    Spacer(Modifier.height(DshSpacing.xl))
-                    DshTextField(
-                        value = cookie,
-                        onValueChange = { cookie = it },
-                        placeholder = "dsh-auth-…=v1.…  or  dsh_auth_session=…",
-                        label = "Cookie (optional — bypasses login)",
-                        singleLine = false,
-                        minHeight = 96.dp,
-                    )
-                    Spacer(Modifier.height(DshSpacing.md))
-                    Text(
-                        text = "For a host reached directly on its carrier port, paste the " +
-                            "browser cookie instead of a password. Leave the account blank.",
-                        style = DshType.micro,
-                        color = colors.labelCaption,
-                    )
-                }
-            }
+            Text(
+                text = "Use the loopback TCP door ward prints, forwarded to this phone with " +
+                    "adb reverse tcp:45872 tcp:45872. A plain host:port is accepted too.",
+                style = DshType.micro,
+                color = colors.labelCaption,
+            )
 
             if (error != null) {
                 Text(
@@ -238,8 +165,8 @@ fun SetupScreen(
 
             Spacer(Modifier.height(DshSpacing.lg))
             Text(
-                text = "The app speaks the same HTTP and WebSocket API as the DSH web " +
-                    "client. Nothing needs to be installed on the host.",
+                text = "Ward speaks its own binary CBOR protocol over a socket. " +
+                    "Nothing is installed on the host and no web UI is involved.",
                 style = DshType.micro,
                 color = colors.labelCaption,
             )

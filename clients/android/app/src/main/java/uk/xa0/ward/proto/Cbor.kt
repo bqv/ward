@@ -59,8 +59,8 @@ object CborCodec {
     private fun write(value: Cbor, out: ByteArrayOutputStream, depth: Int) {
         require(depth <= MAX_DEPTH) { "CBOR nesting is too deep" }
         when (value) {
-            is Cbor.UInt -> head(out, 0, value.value)
-            is Cbor.NInt -> head(out, 1, -1L - value.value)
+            is Cbor.UInt -> fixed64(out, 0, value.value)
+            is Cbor.NInt -> fixed64(out, 1, -1L - value.value)
             is Cbor.Bytes -> {
                 head(out, 2, value.value.size.toLong())
                 out.write(value.value)
@@ -83,6 +83,13 @@ object CborCodec {
             }
             is Cbor.Bool -> out.write(if (value.value) 0xf5 else 0xf4)
             Cbor.Null -> out.write(0xf6)
+        }
+    }
+
+    private fun fixed64(out: ByteArrayOutputStream, major: Int, value: Long) {
+        out.write((major shl 5) or 27)
+        for (shift in intArrayOf(56, 48, 40, 32, 24, 16, 8, 0)) {
+            out.write((value ushr shift).toInt() and 0xff)
         }
     }
 
