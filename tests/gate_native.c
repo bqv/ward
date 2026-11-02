@@ -47,31 +47,29 @@ static int run_capture(const char *socket, const char *bin, char *const argv[],
   return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 }
 
-static int count_prompted(wd_client *client, const char *text, int want)
-    __attribute__((unused));
 static int count_prompted(wd_client *client, const char *text, int want) {
   int seen = 0;
   while (seen < want) {
     wd_frame frame;
-    if (wd_client_read_frame(client->fd, &frame) == NULL) return seen;
-    if (frame.type != WD_FRAME_EVENT) continue;
-    cbor_item_t *root = wd_decode(frame.body, frame.len);
-    if (root == NULL) continue;
-    char *kind = NULL;
-    cbor_item_t *payload = NULL;
-    bool read = wd_read_event(root, &kind, &payload);
-    wd_free(root);
-    if (!read) {
-      free(kind);
-      continue;
+    uint8_t *body = wd_client_read_frame(client->fd, &frame);
+    if (body == NULL) return seen;
+    if (frame.type == WD_FRAME_EVENT) {
+      cbor_item_t *root = wd_decode(body, frame.len);
+      if (root != NULL) {
+        char *kind = NULL;
+        cbor_item_t *payload = NULL;
+        bool read = wd_read_event(root, &kind, &payload);
+        if (read && kind != NULL &&
+            strcmp(kind, "session.prompted") == 0) {
+          char *said = wd_text_copy(wd_get(payload, "text"));
+          if (said != NULL && strcmp(said, text) == 0) seen++;
+          free(said);
+        }
+        free(kind);
+        wd_free(root);
+      }
     }
-    if (kind != NULL && strcmp(kind, "session.prompted") == 0) {
-      char *said = wd_text_copy(wd_get(payload, "text"));
-      if (said != NULL && strcmp(said, text) == 0) seen++;
-      free(said);
-    }
-    wd_free(payload);
-    free(kind);
+    free(body);
   }
   return seen;
 }
@@ -396,6 +394,62 @@ int main(void) {
   assert(wd_client_call(&follower, "job.follow", gone_params, &gone) != 0);
   free(live_id);
   close(follower.fd);
+
+  wd_client watcher;
+  assert(wd_client_connect(&watcher, sock) == 0);
+  assert(wd_client_handshake(&watcher) == 0);
+  wd_client speaker;
+  assert(wd_client_connect(&speaker, sock) == 0);
+  assert(wd_client_handshake(&speaker) == 0);
+  cbor_item_t *seed = wd_map(1);
+  wd_put(seed, "cwd", wd_text(root));
+  cbor_item_t *seeded = NULL;
+  assert(wd_client_call(&speaker, "session.create", seed, &seeded) == 0);
+  char *late_id = wd_text_copy(wd_get(wd_get(seeded, "session"), "id"));
+  assert(late_id != NULL);
+  wd_free(seeded);
+  cbor_item_t *watch_join = wd_map(2);
+  wd_put(watch_join, "id", wd_text(late_id));
+  wd_put(watch_join, "from", wd_uint(0));
+  cbor_item_t *watch_joined = NULL;
+  assert(wd_client_call(&watcher, "session.resume", watch_join,
+                        &watch_joined) == 0);
+  wd_free(watch_joined);
+  cbor_item_t *late_pick = wd_map(1);
+  wd_put(late_pick, "id", wd_text("default"));
+  cbor_item_t *late_picked = NULL;
+  assert(wd_client_call(&speaker, "policy.select", late_pick, &late_picked) ==
+         0);
+  wd_free(late_picked);
+  cbor_item_t *late_park = wd_map(2);
+  wd_put(late_park, "id", wd_text(late_id));
+  wd_put(late_park, "text", wd_text("/write late.txt go"));
+  cbor_item_t *late_parked = NULL;
+  assert(wd_client_call(&speaker, "session.prompt", late_park,
+                        &late_parked) == 0);
+  assert(wd_get(late_parked, "approval") != NULL);
+  wd_free(late_parked);
+  cbor_item_t *late_steer = wd_map(3);
+  wd_put(late_steer, "id", wd_text(late_id));
+  wd_put(late_steer, "text", wd_text("carried text"));
+  wd_put(late_steer, "steer", cbor_build_bool(true));
+  cbor_item_t *late_steered = NULL;
+  assert(wd_client_call(&speaker, "session.prompt", late_steer,
+                        &late_steered) == 0);
+  bool late_ok = false;
+  assert(wd_bool_of(wd_get(late_steered, "steered"), &late_ok));
+  assert(late_ok);
+  wd_free(late_steered);
+  cbor_item_t *late_cancel = wd_map(1);
+  wd_put(late_cancel, "id", wd_text(late_id));
+  cbor_item_t *late_cancelled = NULL;
+  assert(wd_client_call(&speaker, "session.cancel", late_cancel,
+                        &late_cancelled) == 0);
+  wd_free(late_cancelled);
+  assert(count_prompted(&watcher, "carried text", 2) == 2);
+  free(late_id);
+  close(speaker.fd);
+  close(watcher.fd);
 
   kill(pid, SIGTERM);
   int status = 0;

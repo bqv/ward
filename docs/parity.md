@@ -6,12 +6,6 @@ rule applied throughout: **a row is `delivered` only when a gate exercises it**;
 anything proven by reading alone, or by a fixture that does not cover the
 behaviour, is marked `partial`.
 
-## Unmeasured, deliberately
-
-`session.prompt` with `steer: true` is implemented and its answer is gated, but the **late-steer carry-over** — the
-turn-end path that re-queues a steer the turn never delivered — has no assertion. `docs/journal.md` entry one hundred and
-fifty-five records the shape that assertion needs. Until it exists, this row is **not** delivered, whatever the suite says.
-
 ## The table
 
 | row | phase | status | evidence |

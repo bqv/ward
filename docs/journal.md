@@ -2200,3 +2200,14 @@ version segfaulted in the test process before it could report, so it is not comm
 
 Next session: a watcher connection that never sends a request, a bounded read, and the assertion is three lines. The parity note
 stays as it is until that lands.
+
+Hundred-and-sixty-eighth: the carry-over assertion passes, so the label comes off. The test uses two connections: a watcher that
+resumes and then never sends a request, and a speaker that creates, parks a write, steers, and cancels. The watcher counts two
+`session.prompted` events carrying the steer text — the acceptance and the carried turn — which is only possible if the turn
+ended without delivering the steer and the queue then ran it.
+
+The earlier segfault was my counter freeing a payload that `wd_read_event` borrows from the root, then freeing the root as
+well. One `wd_free(root)` and nothing else is the rule.
+
+`docs/parity.md` no longer carries the "Unmeasured, deliberately" section. Entry one hundred and sixty-six stays in the
+journal as the record of how long that label was correct.
