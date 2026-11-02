@@ -171,6 +171,9 @@ class WardApi(private val connection: WardConnection) {
             ),
         )
 
+    suspend fun sessionQueue(id: String): Cbor.Map =
+        connection.call("session.queue", cborMap("id" to id.cbor())).asMap()
+
     suspend fun listApprovals(): List<Cbor.Map> =
         connection.call("approval.list", Cbor.Map(emptyList())).array("approvals")?.items
             ?.mapNotNull { it as? Cbor.Map }.orEmpty()

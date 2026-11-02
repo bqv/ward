@@ -2077,7 +2077,12 @@ forever.
 That also explains the earlier full-access failure: the write turn parks for an approval before any `turn.start`, so "assert
 no approval appeared" was asking a question the turn had not reached yet.
 
-What the gate needs instead is a trigger core owns: `session.prompted` arrives at accept, but the turn may not be running
+A better observable than `turn.start` exists and makes the carry-over assertion straightforward: a delivered steer emits no
+`session.prompted` at delivery, but a steer **carried into the queue** is enqueued as its own prompt and therefore emits one
+when its turn starts. So the assertion is "a second `session.prompted` carrying the steer text appears after the first turn
+ends" — one event core owns, no driver involvement, no `turn.start` at all.
+
+What the gate needs instead of a delay is a trigger core owns: `session.prompted` arrives at accept, but the turn may not be running
 yet. The reliable shape is to queue a second prompt (which guarantees the first turn is running, since the queue only
 answers `ahead` while a turn is active) and steer once that second turn starts — or to poll `job.list` for the running turn.
 Both are more honest than a delay, and neither is built yet.
