@@ -144,6 +144,20 @@ $(DESKTOP_GUI): $(DESKTOP_PROBE)
 
 FORCE:
 
+fixture-quic: $(TEST_BINS) $(WARD)
+	@set -e; \
+	WARD_GATE_CGROUP=off WARD_BIN=$(abspath $(WARD)) \
+	  WARD_MODULE_DIR=$(abspath $(BUILDDIR)) \
+	  timeout 120 $(BUILDDIR)/gate_quic >/dev/null; \
+	newest=$$(ls -dt /tmp/ward-quic-* | head -1); \
+	rm -rf $(HOME)/tmp/ward-quic-fixture; \
+	mkdir -p $(HOME)/tmp/ward-quic-fixture; \
+	cp -a $$newest/state $(HOME)/tmp/ward-quic-fixture/; \
+	cp -a $$newest/device.crt $$newest/device.key $$newest/ca.crt \
+	  $(HOME)/tmp/ward-quic-fixture/; \
+	rm -f $(HOME)/tmp/ward-quic-fixture/state/ward.lock; \
+	echo "fixture at $(HOME)/tmp/ward-quic-fixture"
+
 modules: $(MODULE_WASM)
 guests: $(GUEST_WASM)
 
