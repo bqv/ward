@@ -221,6 +221,42 @@ int main(void) {
   free(partial_text);
   wd_free(partial_reply);
 
+  cbor_item_t *round = wd_map(2);
+  wd_put(round, "text", wd_text(""));
+  wd_put(round, "status", wd_uint(0));
+  size_t round_len = 0;
+  uint8_t *round_bytes = wd_encode(round, &round_len);
+  assert(round_bytes != NULL);
+  cbor_item_t *round_reply = wd_decode(round_bytes, round_len);
+  free(round_bytes);
+  assert(round_reply != NULL);
+  uint64_t round_status = 99;
+  assert(wd_uint_of(wd_get(round_reply, "status"), &round_status));
+  fprintf(stderr, "roundtrip status=%llu len=%zu\n",
+          (unsigned long long)round_status, round_len);
+  assert(round_status == 0);
+  wd_free(round_reply);
+
+  cbor_item_t *probe_phase = wd_map(0);
+  size_t probe_len = 0;
+  uint8_t *probe_bytes = wd_encode(probe_phase, &probe_len);
+  assert(probe_bytes != NULL);
+  uint8_t *probe_out = NULL;
+  size_t probe_out_len = 0;
+  assert(wd_instance_call(inst, probe_bytes, probe_len, &probe_out,
+                          &probe_out_len, &err) == 0);
+  free(probe_bytes);
+  cbor_item_t *probe_reply = wd_decode(probe_out, probe_out_len);
+  free(probe_out);
+  assert(probe_reply != NULL);
+  uint64_t probe_status = 99;
+  assert(wd_uint_of(wd_get(probe_reply, "status"), &probe_status));
+  assert(probe_status == 0);
+  char *probe_text = wd_text_copy(wd_get(probe_reply, "text"));
+  assert(probe_text != NULL && probe_text[0] == '\0');
+  free(probe_text);
+  wd_free(probe_reply);
+
   wd_instance_free(inst);
   wd_module_free(module);
   wd_engine_free(engine);

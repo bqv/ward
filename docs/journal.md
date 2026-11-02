@@ -1773,3 +1773,13 @@ Not verified by a unit test: my first attempt called the guest with an empty map
 2^39, which is not what the encoder was told to write, so I reverted the test rather than ship an assertion I could not
 explain. The guard is a strictly better failure mode than silence, and the test needs a second look at how the reply is
 marshalled for a zero-length text.
+
+Hundred-and-thirty-third: the 2^39 was my test, not the guest. Dumping the guest's bytes for a promptless call shows exactly
+`a2 64 "text" 60 66 "status" 00` — a two-pair map with an empty text and a zero status, fifteen bytes, precisely what the
+encoder was told to write. Decoded, the status is 0. The earlier assertion that read 2^39 was reading something other than
+what it thought; the guard was correct all along, and is now covered by a real assertion on the reply's status and empty
+text.
+
+That is the third time this session that a measurement apparatus, not the product, was the fault — the pipe that looked
+like a hang, the fixture that answered by content, and now a decode that read the wrong item. The pattern is consistent
+enough to be a rule for next time: when a number is impossible, print the bytes before theorising about the layer below.
