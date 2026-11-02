@@ -167,6 +167,32 @@ int main(void) {
   free(two_text);
   wd_free(two_reply);
 
+  static const char lenient_body[] =
+      "data: {\"choices\":[{\"delta\":{\"content\":\"I will read it "
+      "{\\\"tool\\\":\\\"read\\\",\\\"path\\\":\\\"notes.txt"
+      "\\\"}\"}}]}\n\ndata: [DONE]\n\n";
+  cbor_item_t *lenient_phase = wd_map(2);
+  wd_put(lenient_phase, "status", wd_uint(200));
+  wd_put(lenient_phase, "body", wd_text(lenient_body));
+  size_t lenient_len = 0;
+  uint8_t *lenient_bytes = wd_encode(lenient_phase, &lenient_len);
+  assert(lenient_bytes != NULL);
+  uint8_t *lenient_out = NULL;
+  size_t lenient_out_len = 0;
+  assert(wd_instance_call(inst, lenient_bytes, lenient_len, &lenient_out,
+                          &lenient_out_len, &err) == 0);
+  free(lenient_bytes);
+  cbor_item_t *lenient_reply = wd_decode(lenient_out, lenient_out_len);
+  free(lenient_out);
+  assert(lenient_reply != NULL);
+  char *lenient_tool = wd_text_copy(wd_get(lenient_reply, "tool"));
+  char *lenient_args = wd_text_copy(wd_get(lenient_reply, "arguments"));
+  assert(lenient_tool != NULL && strcmp(lenient_tool, "read") == 0);
+  assert(lenient_args != NULL && strstr(lenient_args, "notes.txt") != NULL);
+  free(lenient_tool);
+  free(lenient_args);
+  wd_free(lenient_reply);
+
   wd_instance_free(inst);
   wd_module_free(module);
   wd_engine_free(engine);

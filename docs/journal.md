@@ -1495,3 +1495,16 @@ Measured: `gate_tool` passes in all three builds with that assertion in place, w
 provider reply carrying `tool`, through `{kind:"tool"}`, through the driver's `json_field` scan, to an actual
 `invoke` of the tools module, is now exercised rather than assumed. The dispatch landed in `b305ea9` untested; this
 closes that gap two entries later.
+
+Hundred-and-thirteenth: a tool call written in the text is still a tool call. When a completion carries no native
+`tool_calls`, the provider strips the SSE's backslash escapes from the answer and looks for a `{"tool":…,"path":…}`
+object; finding one, it answers with the same `{tool, arguments}` shape the native path produces, so the driver
+needs no second protocol. The arguments are rebuilt as `{"path":"…"}` so the driver's existing `json_field` scan
+works unchanged.
+
+That is the note's "lenient parse" for the common failure of a model that writes the call instead of emitting it.
+The gate is in `provider_test`: a completion whose content is an escaped JSON call yields `tool == read` and an
+arguments string naming the path.
+
+The one-repair step is still open: this accepts a call the model wrote in prose, it does not yet re-ask once when
+the parse fails, and a `tool` without a `path` is treated as no call at all.

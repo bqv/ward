@@ -116,6 +116,34 @@ static uint32_t count_token(const char *body, uint32_t len,
   return count;
 }
 
+static void strip_slashes(const char *in, char *out, uint32_t cap) {
+  uint32_t used = 0;
+  for (uint32_t i = 0; in[i] != '\0' && used + 1 < cap; i++) {
+    if (in[i] == '\\' && in[i + 1] != '\0') continue;
+    out[used++] = in[i];
+  }
+  out[used] = '\0';
+}
+
+static void quoted_after(const char *text, const char *key, char *out,
+                         uint32_t cap) {
+  out[0] = '\0';
+  uint32_t key_len = (uint32_t)wd_len(key);
+  for (uint32_t i = 0; text[i] != '\0'; i++) {
+    uint32_t k = 0;
+    while (k < key_len && text[i + k] == key[k]) k++;
+    if (k != key_len) continue;
+    uint32_t j = i + key_len;
+    while (text[j] == ' ' || text[j] == ':' || text[j] == '"') j++;
+    if (text[j] == '\0') return;
+    uint32_t used = 0;
+    while (text[j] != '\0' && text[j] != '"' && used + 1 < cap)
+      out[used++] = text[j++];
+    out[used] = '\0';
+    return;
+  }
+}
+
 static int has_token(const char *body, uint32_t len, const char *token) {
   uint32_t token_len = (uint32_t)wd_len(token);
   for (uint32_t i = 0; i + token_len <= len; i++) {
@@ -313,6 +341,30 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
         }
         answer[m] = '\0';
         text_at = m;
+      }
+    }
+    if (tool[0] == '\0') {
+      static char plain[TEXT_SIZE];
+      strip_slashes(answer, plain, sizeof(plain));
+      if (has_token(plain, (uint32_t)wd_len(plain), "\"tool\"")) {
+        quoted_after(plain, "\"tool\"", tool, sizeof(tool));
+        char path[512];
+        quoted_after(plain, "\"path\"", path, sizeof(path));
+        if (tool[0] != '\0' && path[0] != '\0') {
+          uint32_t used = 0;
+          static const char open_key[] = "{\"path\":\"";
+          for (uint32_t k = 0; open_key[k] != '\0' && used + 1 < sizeof(arguments);
+               k++)
+            arguments[used++] = open_key[k];
+          for (uint32_t k = 0; path[k] != '\0' && used + 1 < sizeof(arguments);
+               k++)
+            arguments[used++] = path[k];
+          if (used + 3 < sizeof(arguments)) {
+            arguments[used++] = '"';
+            arguments[used++] = '}';
+          }
+          arguments[used] = '\0';
+        }
       }
     }
     wd_w_init(&w, reply, REPLY_SIZE);
