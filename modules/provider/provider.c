@@ -364,6 +364,18 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
             arguments[used++] = '}';
           }
           arguments[used] = '\0';
+        } else if (tool[0] != '\0') {
+          tool[0] = '\0';
+          static const char incomplete[] =
+              "the model asked for a tool without a path; refusing rather than "
+              "guessing";
+          uint32_t m = 0;
+          while (incomplete[m] != '\0' && m + 1 < sizeof(answer)) {
+            answer[m] = incomplete[m];
+            m++;
+          }
+          answer[m] = '\0';
+          text_at = m;
         }
       }
     }

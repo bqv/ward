@@ -1508,3 +1508,12 @@ arguments string naming the path.
 
 The one-repair step is still open: this accepts a call the model wrote in prose, it does not yet re-ask once when
 the parse fails, and a `tool` without a `path` is treated as no call at all.
+
+Hundred-and-fourteenth: a malformed written call is said out loud. When the text holds `{"tool":"read"}` with no
+path, the provider now answers with an empty tool and the text "the model asked for a tool without a path; refusing
+rather than guessing", where before the call would have been dispatched with an empty path and failed somewhere
+deeper. Same shape as the multi-call refusal, and the test asserts both halves.
+
+It is the same principle as the error taxonomy: a failure a client can read is worth more than a failure buried two
+layers down. Still open is the one *repair* — re-asking the model once when the parse fails — which needs a second
+provider phase rather than a better parse.

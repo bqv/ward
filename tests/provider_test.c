@@ -193,6 +193,31 @@ int main(void) {
   free(lenient_args);
   wd_free(lenient_reply);
 
+  static const char partial_body[] =
+      "data: {\"choices\":[{\"delta\":{\"content\":\"{\\\"tool\\\":"
+      "\\\"read\\\"}\"}}]}\n\ndata: [DONE]\n\n";
+  cbor_item_t *partial_phase = wd_map(2);
+  wd_put(partial_phase, "status", wd_uint(200));
+  wd_put(partial_phase, "body", wd_text(partial_body));
+  size_t partial_len = 0;
+  uint8_t *partial_bytes = wd_encode(partial_phase, &partial_len);
+  assert(partial_bytes != NULL);
+  uint8_t *partial_out = NULL;
+  size_t partial_out_len = 0;
+  assert(wd_instance_call(inst, partial_bytes, partial_len, &partial_out,
+                          &partial_out_len, &err) == 0);
+  free(partial_bytes);
+  cbor_item_t *partial_reply = wd_decode(partial_out, partial_out_len);
+  free(partial_out);
+  assert(partial_reply != NULL);
+  char *partial_tool = wd_text_copy(wd_get(partial_reply, "tool"));
+  char *partial_text = wd_text_copy(wd_get(partial_reply, "text"));
+  assert(partial_tool != NULL && partial_tool[0] == '\0');
+  assert(partial_text != NULL && strstr(partial_text, "without a path") != NULL);
+  free(partial_tool);
+  free(partial_text);
+  wd_free(partial_reply);
+
   wd_instance_free(inst);
   wd_module_free(module);
   wd_engine_free(engine);
