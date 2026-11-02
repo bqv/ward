@@ -1813,3 +1813,14 @@ key.
 
 Stopping on the repair for now. It is an extra beyond the note's list, it has now cost four rounds, and the same effort
 spent on M6 buys far more of the objective. Reverted; tree green.
+
+Hundred-and-thirty-sixth: the client is a library. `wd_client`, connect, handshake, the frame reader, the send helper and
+the request call moved from `src/cli/main.c` into `src/client/client.c` with a `client/client.h`, and the CLI now links
+against them. `wd_client_read_frame` and `wd_client_send_item` are exported because the CLI's own follow and resume loops
+need them; the rest stayed static.
+
+Everything that uses the CLI is the regression test and nothing changed: the suite is green in all three builds, and a
+live `session list` and `stats` against the running daemon answer as before.
+
+This is the first slice of M6 — until now nothing but `src/cli/main.c` could speak the protocol, so a native client or an
+Android app had nothing to link. The next slice is `clients/native/` with its own gate, then the phone.

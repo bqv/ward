@@ -66,7 +66,8 @@ CORE_SRC := \
   src/net/quic.c
 
 CORE_OBJ := $(patsubst %.c,$(BUILDDIR)/%.o,$(CORE_SRC))
-BIN_OBJ := $(BUILDDIR)/src/cli/main.o $(BUILDDIR)/src/daemon/server.o
+BIN_OBJ := $(BUILDDIR)/src/cli/main.o $(BUILDDIR)/src/client/client.o \
+           $(BUILDDIR)/src/daemon/server.o
 CORE_LIB := $(BUILDDIR)/libward-core.a
 
 WARD := $(BUILDDIR)/ward

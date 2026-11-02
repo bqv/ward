@@ -17,15 +17,11 @@
 #include <unistd.h>
 
 #include "core/cgroup.h"
+#include "client/client.h"
 #include "core/util.h"
 #include "daemon/server.h"
 #include "proto/codec.h"
 #include "proto/frame.h"
-
-typedef struct {
-  int fd;
-  uint64_t next_id;
-} wd_client;
 
 static void usage(FILE *out) {
   fprintf(out,
@@ -61,25 +57,6 @@ static void usage(FILE *out) {
           "socket defaults to $XDG_RUNTIME_DIR/ward.sock or /tmp/ward-$UID.sock\n");
 }
 
-static int read_full(int fd, void *buf, size_t len) {
-  size_t off = 0;
-  uint8_t *p = buf;
-  while (off < len) {
-    ssize_t n = read(fd, p + off, len - off);
-    if (n == 0) return -1;
-    if (n < 0) {
-      if (errno == EINTR) continue;
-      return -1;
-    }
-    off += (size_t)n;
-  }
-  return 0;
-}
-
-static int write_full(int fd, const void *buf, size_t len) {
-  return wd_write_all(fd, buf, len);
-}
-
 static char *socket_from_args(int argc, char **argv) {
   for (int i = 0; i < argc; i++)
     if (strcmp(argv[i], "--socket") == 0 && i + 1 < argc)
@@ -87,141 +64,6 @@ static char *socket_from_args(int argc, char **argv) {
   const char *env = getenv("WARD_SOCKET");
   if (env != NULL && env[0] != '\0') return strdup(env);
   return wd_default_socket_path();
-}
-
-static int client_connect(wd_client *client, const char *path) {
-  struct sockaddr_un addr;
-  memset(&addr, 0, sizeof(addr));
-  addr.sun_family = AF_UNIX;
-  if (strlen(path) >= sizeof(addr.sun_path)) {
-    fprintf(stderr, "ward: socket path too long\n");
-    return -1;
-  }
-  snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", path);
-  int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
-  if (fd < 0) return -1;
-  if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
-    fprintf(stderr, "ward: no daemon at %s: %s\n", path, strerror(errno));
-    close(fd);
-    return -1;
-  }
-  client->fd = fd;
-  client->next_id = 1;
-  return 0;
-}
-
-static int client_send_item(wd_client *client, cbor_item_t *item) {
-  size_t len = 0;
-  uint8_t *body = wd_encode(item, &len);
-  if (body == NULL) return -1;
-  uint8_t header[WD_FRAME_HEADER];
-  wd_frame_header(header, WD_FRAME_REQUEST, 0, 0, (uint32_t)len);
-  int rc = write_full(client->fd, header, sizeof(header));
-  if (rc == 0) rc = write_full(client->fd, body, len);
-  free(body);
-  return rc;
-}
-
-static uint8_t *client_read_frame(int fd, wd_frame *frame) {
-  uint8_t header[WD_FRAME_HEADER];
-  if (read_full(fd, header, sizeof(header)) != 0) return NULL;
-  uint32_t len = (uint32_t)header[0] | ((uint32_t)header[1] << 8) |
-                 ((uint32_t)header[2] << 16) | ((uint32_t)header[3] << 24);
-  if (len == 0 || len > WD_MAX_BODY) return NULL;
-  uint8_t *body = malloc(len);
-  if (body == NULL) return NULL;
-  if (read_full(fd, body, len) != 0) {
-    free(body);
-    return NULL;
-  }
-  frame->type = (uint16_t)((uint16_t)header[4] | ((uint16_t)header[5] << 8));
-  frame->sub = 0;
-  frame->seq = 0;
-  for (unsigned i = 0; i < 8; i++) {
-    frame->sub |= (uint64_t)header[6 + i] << (8 * i);
-    frame->seq |= (uint64_t)header[14 + i] << (8 * i);
-  }
-  frame->len = len;
-  frame->body = body;
-  return body;
-}
-
-static int client_handshake(wd_client *client) {
-  cbor_item_t *hello = wd_hello();
-  size_t len = 0;
-  uint8_t *body = wd_encode(hello, &len);
-  if (body == NULL) return -1;
-  uint8_t header[WD_FRAME_HEADER];
-  wd_frame_header(header, WD_FRAME_HELLO, 0, 0, (uint32_t)len);
-  int rc = write_full(client->fd, header, sizeof(header));
-  if (rc == 0) rc = write_full(client->fd, body, len);
-  free(body);
-  if (rc != 0) return -1;
-  wd_frame frame;
-  uint8_t *frame_body = client_read_frame(client->fd, &frame);
-  if (frame_body == NULL) return -1;
-  cbor_item_t *root = wd_decode(frame_body, frame.len);
-  free(frame_body);
-  if (root == NULL) return -1;
-  unsigned version = 0;
-  uint64_t uid = 0;
-  int ok = frame.type == WD_FRAME_WELCOME &&
-           wd_read_welcome(root, &version, &uid) && version == WD_PROTOCOL_VERSION;
-  if (!ok) {
-    char *name = wd_text_copy(wd_get(root, "error"));
-    if (name != NULL) free(name);
-    fprintf(stderr, "ward: handshake refused\n");
-  }
-  wd_free(root);
-  return ok ? 0 : -1;
-}
-
-static int client_request(wd_client *client, const char *method,
-                          cbor_item_t *params, cbor_item_t **result) {
-  uint64_t id = client->next_id++;
-  if (client_send_item(client, wd_request(id, method, params)) != 0) return -1;
-  for (;;) {
-    wd_frame frame;
-    uint8_t *body = client_read_frame(client->fd, &frame);
-    if (body == NULL) return -1;
-    cbor_item_t *root = wd_decode(body, frame.len);
-    free(body);
-    if (root == NULL) return -1;
-    if (frame.type == WD_FRAME_EVENT) {
-      char *kind = NULL;
-      cbor_item_t *payload = NULL;
-      if (wd_read_event(root, &kind, &payload) && strcmp(kind, "replay.end") != 0)
-        continue;
-      free(kind);
-      wd_free(root);
-      continue;
-    }
-    if (frame.type != WD_FRAME_RESPONSE) {
-      wd_free(root);
-      return -1;
-    }
-    uint64_t got = 0;
-    bool ok = false;
-    cbor_item_t *value = NULL;
-    if (!wd_read_response(root, &got, &ok, &value) || got != id) {
-      wd_free(root);
-      return -1;
-    }
-    if (!ok) {
-      char *name = wd_text_copy(wd_get(value, "name"));
-      char *message = wd_text_copy(wd_get(value, "message"));
-      fprintf(stderr, "ward: %s: %s\n", name != NULL ? name : "error",
-              message != NULL ? message : "");
-      free(name);
-      free(message);
-      wd_free(root);
-      return -1;
-    }
-    (void)cbor_incref(value);
-    wd_free(root);
-    *result = value;
-    return 0;
-  }
 }
 
 static void print_json(cbor_item_t *item) {
@@ -387,12 +229,12 @@ static int command_session(int argc, char **argv) {
   char *path = socket_from_args(argc, argv);
   if (path == NULL) return 1;
   wd_client client;
-  if (client_connect(&client, path) != 0) {
+  if (wd_client_connect(&client, path) != 0) {
     free(path);
     return 1;
   }
   free(path);
-  if (client_handshake(&client) != 0) {
+  if (wd_client_handshake(&client) != 0) {
     close(client.fd);
     return 1;
   }
@@ -403,7 +245,7 @@ static int command_session(int argc, char **argv) {
     cbor_item_t *params = wd_map(2);
     if (cwd != NULL) wd_put(params, "cwd", wd_text(cwd));
     if (model != NULL) wd_put(params, "model", wd_text(model));
-    if (client_request(&client, "session.create", params, &result) != 0) goto done;
+    if (wd_client_call(&client, "session.create", params, &result) != 0) goto done;
     if (json) {
       print_json(result);
     } else {
@@ -416,7 +258,7 @@ static int command_session(int argc, char **argv) {
   } else if (strcmp(sub, "list") == 0) {
     cbor_item_t *params = wd_map(1);
     wd_put(params, "limit", wd_uint(limit));
-    if (client_request(&client, "session.list", params, &result) != 0) goto done;
+    if (wd_client_call(&client, "session.list", params, &result) != 0) goto done;
     if (json) {
       print_json(result);
     } else {
@@ -433,7 +275,7 @@ static int command_session(int argc, char **argv) {
     }
     cbor_item_t *params = wd_map(1);
     wd_put(params, "id", wd_text(id));
-    if (client_request(&client, "session.get", params, &result) != 0) goto done;
+    if (wd_client_call(&client, "session.get", params, &result) != 0) goto done;
     cbor_item_t *session = wd_get(result, "session");
     if (json) {
       print_json(session);
@@ -459,14 +301,14 @@ static int command_session(int argc, char **argv) {
     cbor_item_t *params = wd_map(2);
     wd_put(params, "id", wd_text(id));
     if (have_from) wd_put(params, "from", wd_uint(from));
-    if (client_request(&client, "session.resume", params, &result) != 0) goto done;
+    if (wd_client_call(&client, "session.resume", params, &result) != 0) goto done;
     if (json) print_json(result);
     for (;;) {
       struct pollfd pfd = {.fd = client.fd, .events = POLLIN};
       int ready = poll(&pfd, 1, follow || have_from ? 1000 : 0);
       if (ready <= 0) break;
       wd_frame frame;
-      uint8_t *body = client_read_frame(client.fd, &frame);
+      uint8_t *body = wd_client_read_frame(client.fd, &frame);
       if (body == NULL) break;
       cbor_item_t *root = wd_decode(body, frame.len);
       free(body);
@@ -499,7 +341,7 @@ static int command_session(int argc, char **argv) {
     cbor_item_t *params = wd_map(2);
     wd_put(params, "id", wd_text(id));
     wd_put(params, "name", wd_text(text));
-    if (client_request(&client, "session.rename", params, &result) != 0)
+    if (wd_client_call(&client, "session.rename", params, &result) != 0)
       goto done;
     printf("renamed %s\n", text);
     rc = 0;
@@ -515,7 +357,7 @@ static int command_session(int argc, char **argv) {
            cbor_build_bool(on));
     char method[32];
     snprintf(method, sizeof(method), "session.%s", sub);
-    if (client_request(&client, method, params, &result) != 0) goto done;
+    if (wd_client_call(&client, method, params, &result) != 0) goto done;
     printf("%s %s\n", sub, on ? "on" : "off");
     rc = 0;
   } else if (strcmp(sub, "search") == 0) {
@@ -525,7 +367,7 @@ static int command_session(int argc, char **argv) {
     }
     cbor_item_t *params = wd_map(1);
     wd_put(params, "query", wd_text(text));
-    if (client_request(&client, "session.search", params, &result) != 0)
+    if (wd_client_call(&client, "session.search", params, &result) != 0)
       goto done;
     if (json) {
       print_json(result);
@@ -544,7 +386,7 @@ static int command_session(int argc, char **argv) {
     }
     cbor_item_t *params = wd_map(1);
     wd_put(params, "id", wd_text(id));
-    if (client_request(&client, "session.cancel", params, &result) != 0)
+    if (wd_client_call(&client, "session.cancel", params, &result) != 0)
       goto done;
     bool cancelled = false;
     wd_bool_of(wd_get(result, "cancelled"), &cancelled);
@@ -558,7 +400,7 @@ static int command_session(int argc, char **argv) {
     cbor_item_t *params = wd_map(have_from ? 2 : 1);
     wd_put(params, "id", wd_text(id));
     if (have_from) wd_put(params, "from", wd_uint(from));
-    if (client_request(&client, "session.fork", params, &result) != 0) goto done;
+    if (wd_client_call(&client, "session.fork", params, &result) != 0) goto done;
     if (json) {
       print_json(result);
     } else {
@@ -575,7 +417,7 @@ static int command_session(int argc, char **argv) {
     cbor_item_t *params = wd_map(2);
     wd_put(params, "id", wd_text(id));
     wd_put(params, "model", wd_text(text));
-    if (client_request(&client, "session.set_model", params, &result) != 0)
+    if (wd_client_call(&client, "session.set_model", params, &result) != 0)
       goto done;
     printf("model %s\n", text);
     rc = 0;
@@ -586,7 +428,7 @@ static int command_session(int argc, char **argv) {
     }
     cbor_item_t *params = wd_map(1);
     wd_put(params, "id", wd_text(id));
-    if (client_request(&client, "session.compact", params, &result) != 0)
+    if (wd_client_call(&client, "session.compact", params, &result) != 0)
       goto done;
     char *branch = wd_text_copy(wd_get(result, "session"));
     char *parent = wd_text_copy(wd_get(result, "parent"));
@@ -605,7 +447,7 @@ static int command_session(int argc, char **argv) {
     cbor_item_t *params = wd_map(2);
     wd_put(params, "id", wd_text(id));
     wd_put(params, "text", wd_text(text));
-    if (client_request(&client, "session.set_system", params, &result) != 0)
+    if (wd_client_call(&client, "session.set_system", params, &result) != 0)
       goto done;
     printf("system prompt set\n");
     rc = 0;
@@ -616,18 +458,18 @@ static int command_session(int argc, char **argv) {
     }
     cbor_item_t *focus = wd_map(1);
     wd_put(focus, "id", wd_text(id));
-    if (client_request(&client, "session.resume", focus, &result) != 0) goto done;
+    if (wd_client_call(&client, "session.resume", focus, &result) != 0) goto done;
     wd_free(result);
     result = NULL;
     uint64_t req = client.next_id++;
     cbor_item_t *params = wd_map(2);
     wd_put(params, "id", wd_text(id));
     wd_put(params, "text", wd_text(text));
-    if (client_send_item(&client, wd_request(req, "session.prompt", params)) != 0)
+    if (wd_client_send_item(&client, wd_request(req, "session.prompt", params)) != 0)
       goto done;
     for (;;) {
       wd_frame frame;
-      uint8_t *body = client_read_frame(client.fd, &frame);
+      uint8_t *body = wd_client_read_frame(client.fd, &frame);
       if (body == NULL) break;
       cbor_item_t *root = wd_decode(body, frame.len);
       free(body);
@@ -706,7 +548,7 @@ static int command_session(int argc, char **argv) {
     }
     cbor_item_t *focus = wd_map(1);
     wd_put(focus, "id", wd_text(id));
-    if (client_request(&client, "session.resume", focus, &result) != 0) goto done;
+    if (wd_client_call(&client, "session.resume", focus, &result) != 0) goto done;
     wd_free(result);
     result = NULL;
     uint64_t req = client.next_id++;
@@ -715,13 +557,13 @@ static int command_session(int argc, char **argv) {
     wd_put(params, "call", wd_uint(call));
     wd_put(params, "epoch", wd_uint(epoch));
     wd_put(params, "allow", cbor_build_bool(allow == 1));
-    if (client_send_item(&client, wd_request(req, "approval.respond", params)) !=
+    if (wd_client_send_item(&client, wd_request(req, "approval.respond", params)) !=
         0)
       goto done;
     rc = 0;
     for (;;) {
       wd_frame frame;
-      uint8_t *body = client_read_frame(client.fd, &frame);
+      uint8_t *body = wd_client_read_frame(client.fd, &frame);
       if (body == NULL) break;
       cbor_item_t *root = wd_decode(body, frame.len);
       free(body);
@@ -787,19 +629,19 @@ static int command_job(int argc, char **argv) {
   char *path = socket_from_args(argc, argv);
   if (path == NULL) return 1;
   wd_client client;
-  if (client_connect(&client, path) != 0) {
+  if (wd_client_connect(&client, path) != 0) {
     free(path);
     return 1;
   }
   free(path);
-  if (client_handshake(&client) != 0) {
+  if (wd_client_handshake(&client) != 0) {
     close(client.fd);
     return 1;
   }
   int rc = 1;
   cbor_item_t *result = NULL;
   if (strcmp(sub, "list") == 0) {
-    if (client_request(&client, "job.list", wd_map(0), &result) != 0) goto done;
+    if (wd_client_call(&client, "job.list", wd_map(0), &result) != 0) goto done;
     if (json) {
       print_json(result);
     } else {
@@ -824,7 +666,7 @@ static int command_job(int argc, char **argv) {
     }
     cbor_item_t *params = wd_map(1);
     wd_put(params, "job", wd_text(job));
-    if (client_request(&client, "job.kill", params, &result) != 0) goto done;
+    if (wd_client_call(&client, "job.kill", params, &result) != 0) goto done;
     bool killed = false;
     wd_bool_of(wd_get(result, "killed"), &killed);
     printf("%s %s\n", job, killed ? "killed" : "not running");
@@ -856,12 +698,12 @@ static int command_prompt(int argc, char **argv) {
   char *path = socket_from_args(argc, argv);
   if (path == NULL) return 1;
   wd_client client;
-  if (client_connect(&client, path) != 0) {
+  if (wd_client_connect(&client, path) != 0) {
     free(path);
     return 1;
   }
   free(path);
-  if (client_handshake(&client) != 0) {
+  if (wd_client_handshake(&client) != 0) {
     close(client.fd);
     return 1;
   }
@@ -869,7 +711,7 @@ static int command_prompt(int argc, char **argv) {
   cbor_item_t *result = NULL;
   cbor_item_t *params = wd_map(1);
   wd_put(params, "id", wd_text(id));
-  if (client_request(&client, "prompt.preview", params, &result) != 0) goto done;
+  if (wd_client_call(&client, "prompt.preview", params, &result) != 0) goto done;
   if (json) {
     print_json(result);
   } else {
@@ -909,12 +751,12 @@ static int command_stats(int argc, char **argv) {
   char *path = socket_from_args(argc, argv);
   if (path == NULL) return 1;
   wd_client client;
-  if (client_connect(&client, path) != 0) {
+  if (wd_client_connect(&client, path) != 0) {
     free(path);
     return 1;
   }
   free(path);
-  if (client_handshake(&client) != 0) {
+  if (wd_client_handshake(&client) != 0) {
     close(client.fd);
     return 1;
   }
@@ -923,10 +765,10 @@ static int command_stats(int argc, char **argv) {
   if (id != NULL) {
     cbor_item_t *params = wd_map(1);
     wd_put(params, "id", wd_text(id));
-    if (client_request(&client, "stats.session", params, &result) != 0)
+    if (wd_client_call(&client, "stats.session", params, &result) != 0)
       goto done;
   } else {
-    if (client_request(&client, "stats.global", wd_map(0), &result) != 0)
+    if (wd_client_call(&client, "stats.global", wd_map(0), &result) != 0)
       goto done;
   }
   if (json) {
@@ -995,19 +837,19 @@ static int command_model(int argc, char **argv) {
   char *path = socket_from_args(argc, argv);
   if (path == NULL) return 1;
   wd_client client;
-  if (client_connect(&client, path) != 0) {
+  if (wd_client_connect(&client, path) != 0) {
     free(path);
     return 1;
   }
   free(path);
-  if (client_handshake(&client) != 0) {
+  if (wd_client_handshake(&client) != 0) {
     close(client.fd);
     return 1;
   }
   int rc = 1;
   cbor_item_t *result = NULL;
   if (strcmp(sub, "list") == 0) {
-    if (client_request(&client, "model.list", wd_map(0), &result) != 0)
+    if (wd_client_call(&client, "model.list", wd_map(0), &result) != 0)
       goto done;
     if (json) {
       print_json(result);
@@ -1038,7 +880,7 @@ static int command_model(int argc, char **argv) {
     }
     cbor_item_t *params = wd_map(1);
     wd_put(params, "id", wd_text(id));
-    if (client_request(&client, "model.probe", params, &result) != 0) goto done;
+    if (wd_client_call(&client, "model.probe", params, &result) != 0) goto done;
     if (json) {
       print_json(result);
     } else {
@@ -1060,7 +902,7 @@ static int command_model(int argc, char **argv) {
     }
     cbor_item_t *params = wd_map(1);
     wd_put(params, "id", wd_text(id));
-    if (client_request(&client, "model.select", params, &result) != 0) goto done;
+    if (wd_client_call(&client, "model.select", params, &result) != 0) goto done;
     printf("model %s\n", id);
     rc = 0;
   } else {
@@ -1104,12 +946,12 @@ static int command_device(int argc, char **argv) {
   char *path = socket_from_args(argc, argv);
   if (path == NULL) return 1;
   wd_client client;
-  if (client_connect(&client, path) != 0) {
+  if (wd_client_connect(&client, path) != 0) {
     free(path);
     return 1;
   }
   free(path);
-  if (client_handshake(&client) != 0) {
+  if (wd_client_handshake(&client) != 0) {
     close(client.fd);
     return 1;
   }
@@ -1119,7 +961,7 @@ static int command_device(int argc, char **argv) {
   if (strcmp(sub, "pair") == 0) {
     cbor_item_t *params = wd_map(1);
     if (scope != NULL) wd_put(params, "scope", wd_text(scope));
-    if (client_request(&client, "device.pair", params, &result) != 0) goto done;
+    if (wd_client_call(&client, "device.pair", params, &result) != 0) goto done;
     if (json) {
       print_json(result);
     } else {
@@ -1144,7 +986,7 @@ static int command_device(int argc, char **argv) {
     rc = 0;
   } else if (strcmp(sub, "list") == 0) {
     cbor_item_t *params = wd_map(0);
-    if (client_request(&client, "device.list", params, &result) != 0) goto done;
+    if (wd_client_call(&client, "device.list", params, &result) != 0) goto done;
     if (json) {
       print_json(result);
     } else {
@@ -1176,7 +1018,7 @@ static int command_device(int argc, char **argv) {
     }
     cbor_item_t *params = wd_map(1);
     wd_put(params, "serial", wd_text(serial));
-    if (client_request(&client, "device.revoke", params, &result) != 0) goto done;
+    if (wd_client_call(&client, "device.revoke", params, &result) != 0) goto done;
     printf("revoked %s\n", serial);
     rc = 0;
   } else {
@@ -1222,19 +1064,19 @@ static int command_print(int argc, char **argv) {
     char *path = socket_from_args(argc, argv);
     if (path == NULL) return 1;
     wd_client client;
-    if (client_connect(&client, path) != 0) {
+    if (wd_client_connect(&client, path) != 0) {
       free(path);
       return 1;
     }
     free(path);
-    if (client_handshake(&client) != 0) {
+    if (wd_client_handshake(&client) != 0) {
       close(client.fd);
       return 1;
     }
     cbor_item_t *params = wd_map(cwd != NULL ? 1 : 0);
     if (cwd != NULL) wd_put(params, "cwd", wd_text(cwd));
     cbor_item_t *result = NULL;
-    int rc = client_request(&client, "session.create", params, &result);
+    int rc = wd_client_call(&client, "session.create", params, &result);
     close(client.fd);
     if (rc != 0) return 1;
     own_session = wd_text_copy(wd_get(wd_get(result, "session"), "id"));
