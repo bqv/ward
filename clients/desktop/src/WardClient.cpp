@@ -821,6 +821,8 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
                        preset.value(QStringLiteral("description")));
             row.insert(QStringLiteral("rules"), preset.value(QStringLiteral("rules")));
             row.insert(QStringLiteral("observe"), preset.value(QStringLiteral("observe")));
+            row.insert(QStringLiteral("dangerous"), preset.value(QStringLiteral("dangerous")));
+            row.insert(QStringLiteral("warning"), preset.value(QStringLiteral("warning")));
             mapped.append(row);
         }
         m_permissionPresets = mapped;
@@ -829,6 +831,12 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
         emit permissionPresetsChanged();
         emit permissionPresetChanged();
         emit accessNoticeChanged();
+        if (!m_pendingPresetSelection.isEmpty()) {
+            const QString pending = m_pendingPresetSelection;
+            m_pendingPresetSelection.clear();
+            if (!mapped.isEmpty())
+                setPermissionPreset(pending);
+        }
     } else if (method == QLatin1String("policy.select")) {
         refreshPermissionPresets();
     } else if (method == QLatin1String("model.list")) {
@@ -1552,7 +1560,33 @@ void WardClient::setPermissionPreset(const QString &value)
 {
     if (value.isEmpty())
         return;
+    if (m_permissionPresets.isEmpty()) {
+        m_pendingPresetSelection = value;
+        refreshPermissionPresets();
+        return;
+    }
+    for (const QVariant &entry : m_permissionPresets) {
+        const QVariantMap preset = entry.toMap();
+        if (preset.value(QStringLiteral("value")).toString() != value)
+            continue;
+        if (preset.value(QStringLiteral("dangerous")).toBool()) {
+            m_pendingDangerousPreset = value;
+            emit dangerousPresetRequested(
+                value, preset.value(QStringLiteral("warning")).toString());
+            return;
+        }
+        break;
+    }
     sendRequest(QStringLiteral("policy.select"), {{QStringLiteral("id"), value}});
+}
+
+void WardClient::confirmPermissionPreset(const QString &value)
+{
+    if (value.isEmpty() || value != m_pendingDangerousPreset)
+        return;
+    m_pendingDangerousPreset.clear();
+    sendRequest(QStringLiteral("policy.select"),
+                {{QStringLiteral("id"), value}, {QStringLiteral("confirm"), true}});
 }
 
 void WardClient::setConfigOption(const QString &configId, const QString &value)

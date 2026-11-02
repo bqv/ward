@@ -2054,3 +2054,16 @@ the prompt, the second can only come from the carried-over steer. `gate_tool` al
 the next session does not have to rediscover the design. `gate_native` proves the steered answer and that the suite
 still passes, but nothing in the suite yet counts the extra turn that the carry-over starts. The code is four lines and the
 failure would be loud in the daemon log, but this is recorded as unmeasured rather than claimed.
+
+Hundred-and-fifty-sixth: two gates needed the same thing and neither had it — a way to wait for a named event in
+`gate_native`. The steer gate has been passing on a 1500 ms delay and a hope: prompt, then steer immediately, and the steer
+only lands if the turn has actually started. On this run it did not, so the prompt fell through to the queue path and the
+assertion failed — a race I had called a measurement.
+
+The same missing piece blocks the full-access write gate: prompt `/write`, then assert no approval appears. My first attempt
+asserted the absence without first proving the selection had taken effect, which is the wrong order — assert
+`policy.list.current == "full-access"` first, then the write.
+
+What both need is one helper: resume (which subscribes), then read frames until a named event arrives, with the socket
+timeout as the only wait. That is the same helper the late-steer assertion needs for two `turn.start` events, so it is worth
+building once. Reverted rather than shipped: the tree is green at 7648146 and nothing flaky is in the suite.

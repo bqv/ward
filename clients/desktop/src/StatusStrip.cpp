@@ -17,6 +17,7 @@
 #include <QLabel>
 #include <QLayoutItem>
 #include <QMenu>
+#include <QMessageBox>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QScreen>
@@ -856,6 +857,11 @@ StatusStrip::StatusStrip(ClientFacade *facade, QWidget *parent)
     // is a ring and a tooltip and the jobs chip's roster is a later slice; both
     // stay inert rather than opening an empty menu.
     m_access->setActivated([this]() { openAccessMenu(); });
+    if (QObject *transport = facade->transport()) {
+        if (transport->metaObject()->indexOfSignal("dangerousPresetRequested(QString,QString)") >= 0)
+            connect(transport, SIGNAL(dangerousPresetRequested(QString,QString)), this,
+                    SLOT(onDangerousPresetRequested(QString,QString)));
+    }
     m_model->setActivated([this]() { openModelMenu(); });
     m_effort->setActivated([this]() { openEffortMenu(); });
 
@@ -913,7 +919,8 @@ void StatusStrip::refresh()
 
     const QString access = accessLevelName();
     m_access->setVisible(!access.isEmpty());
-    m_access->setValue(QStringLiteral("access"), access, theme->dim(), 0);
+    m_access->setValue(QStringLiteral("access"), access,
+                       accessDangerous() ? theme->danger() : theme->dim(), 0);
     m_access->setToolTip(!m_facade->accessNotice().isEmpty()
                              ? m_facade->accessNotice()
                              : (!accessDescription().isEmpty()
@@ -1409,8 +1416,12 @@ QString StatusStrip::accessLevelName() const
     const QVariantList presets = m_facade->permissionPresets();
     for (const QVariant &entry : presets) {
         const QVariantMap preset = entry.toMap();
-        if (preset.value(QStringLiteral("value")).toString() == level)
-            return preset.value(QStringLiteral("name")).toString();
+        if (preset.value(QStringLiteral("value")).toString() == level) {
+            const QString name = preset.value(QStringLiteral("name")).toString();
+            return preset.value(QStringLiteral("dangerous")).toBool()
+                       ? QStringLiteral("\u26a0 ") + name
+                       : name;
+        }
     }
     // The key is still the truth: "read-only", "auto" and "custom" all read as
     // themselves, with the hyphen opened to a space so a key reads as a phrase.
@@ -1427,10 +1438,44 @@ QString StatusStrip::accessDescription() const
     const QVariantList presets = m_facade->permissionPresets();
     for (const QVariant &entry : presets) {
         const QVariantMap preset = entry.toMap();
-        if (preset.value(QStringLiteral("value")).toString() == level)
+        if (preset.value(QStringLiteral("value")).toString() == level) {
+            if (preset.value(QStringLiteral("dangerous")).toBool())
+                return preset.value(QStringLiteral("warning")).toString();
             return preset.value(QStringLiteral("description")).toString();
+        }
     }
     return {};
+}
+
+bool StatusStrip::accessDangerous() const
+{
+    const QString level = m_facade->permissionPreset();
+    for (const QVariant &entry : m_facade->permissionPresets()) {
+        const QVariantMap preset = entry.toMap();
+        if (preset.value(QStringLiteral("value")).toString() == level)
+            return preset.value(QStringLiteral("dangerous")).toBool();
+    }
+    return false;
+}
+
+void StatusStrip::onDangerousPresetRequested(const QString &id, const QString &warning)
+{
+    if (!m_facade)
+        return;
+    QMessageBox box(this);
+    box.setIcon(QMessageBox::Warning);
+    box.setWindowTitle(QStringLiteral("Full access"));
+    box.setText(warning);
+    box.setInformativeText(QStringLiteral("Select this preset?"));
+    box.setStandardButtons(QMessageBox::Yes | QMessageBox::Cancel);
+    box.setDefaultButton(QMessageBox::Cancel);
+    if (box.exec() != QMessageBox::Yes)
+        return;
+    QObject *transport = m_facade->transport();
+    if (transport == nullptr)
+        return;
+    QMetaObject::invokeMethod(transport, "confirmPermissionPreset",
+                              Q_ARG(QString, id));
 }
 
 QString StatusStrip::jobText() const

@@ -112,11 +112,11 @@ indefinite forms are refused on decode.
 - modules and plugins: `module.list` is the bundle list, with a read-only switch
   because ward reloads the registry as one set; `module.reload` is available;
 - policy and access: `policy.list`/`policy.select` drive the access chip through
-  the DSH permission names. The list is the authority: whatever presets the
-  daemon serves are rendered, and an all-allow preset maps to the chip's
+  the DSH permission names. The daemon now serves four presets. The list remains
+  the authority, and the all-allow preset maps to the chip's
   `danger-full-access` name. A preset row is marked dangerous from the host's
-  `dangerous` flag, never from its id; selecting one shows the host's own
-  `warning` text first and only then sends `policy.select {id, confirm: true}`.
+  `dangerous` flag, never from its id; selecting it shows the host's own
+  `warning` text verbatim and only then sends `policy.select {id, confirm: true}`.
   The daemon's default stays `default` because the client never invents a
   selection;
 - stats: `stats.session` becomes the session and token projections behind the
@@ -153,11 +153,11 @@ repository and the message cannot drift.
   answers an empty document and the plugin switch is read-only; module reload is
   the one management action offered. The slash-command catalogue is supplied by
   the client for the commands ward's `skills` guest serves.
-- **Full access is pending on the daemon.** The client is ready for the fourth
-  preset: it renders the host's `dangerous`/`warning` fields, shows the warning
-  before sending confirmation, and maps an all-allow id to the chip's
-  `danger-full-access` name. Until `policy.list` serves it, the chip is absent
-  rather than faked.
+- **Full access is served but not proven end-to-end.** The client renders the
+  host's `dangerous`/`warning` fields, shows the warning before sending
+  confirmation, and maps the all-allow id to the chip's `danger-full-access`
+  name. The gate that a write then proceeds unapproved is still the daemon
+  owner's missing measurement, so this row stays partial until that gate exists.
 - **Binary reads are bounded.** `session.file_read_blob` caps one call at 1 MiB
   and 4 MiB total; the app reassembles multiple windows, but a larger file is
   refused by the daemon rather than truncated.

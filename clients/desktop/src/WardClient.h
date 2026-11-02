@@ -187,6 +187,7 @@ public:
     Q_INVOKABLE void refreshPermissionPresets();
     Q_INVOKABLE void refreshModelCatalog();
     Q_INVOKABLE void setPermissionPreset(const QString &value);
+    Q_INVOKABLE void confirmPermissionPreset(const QString &value);
     Q_INVOKABLE void setConfigOption(const QString &configId, const QString &value);
     Q_INVOKABLE void pinSession(const QString &sessionId);
     Q_INVOKABLE void unpinSession(const QString &sessionId);
@@ -274,6 +275,7 @@ signals:
     void hasEarlierChanged();
     void permissionRequested(const QString &requestId, const QString &toolName,
                              const QString &detail);
+    void dangerousPresetRequested(const QString &id, const QString &warning);
     void permissionWithdrawn(const QString &requestId);
     void questionsRequested(const QString &eventId, const QVariantList &questions);
     void eventReceived(const QString &kind, const QVariantMap &payload);
@@ -419,6 +421,8 @@ private:
     bool m_steerAttempt = false;
     int m_steerCount = 0;
     QString m_pendingApproval;
+    QString m_pendingDangerousPreset;
+    QString m_pendingPresetSelection;
     QHash<QString, QVariantMap> m_approvals;
     QHash<QString, QByteArray> m_attachments;
     QSet<QString> m_attachmentPending;

@@ -70,6 +70,7 @@ private:
     void openModelMenu();
     void openEffortMenu();
     void openAccessMenu();
+    void onDangerousPresetRequested(const QString &id, const QString &warning);
     int fillModelMenu();
     int fillAccessMenu();
     void chooseModel(const QString &value);
@@ -87,6 +88,7 @@ private:
     QString effortLabel() const;
     QString accessLevelName() const;
     QString accessDescription() const;
+    bool accessDangerous() const;
     QString jobText() const;
     bool jobsLive() const;
     int contextPercent() const;

@@ -56,4 +56,27 @@ class WardLiveTest {
             connection.close()
         }
     }
+    @Test
+    fun `policy list serves the dangerous full access entry`() = runBlocking {
+        val endpoint = System.getenv("WARD_TEST_ENDPOINT") ?: return@runBlocking
+        val connection = WardConnection(endpoint)
+        connection.connect()
+        try {
+            val policy = WardApi(connection).policyList()
+            val presets = policy.array("presets")?.items.orEmpty().mapNotNull { it as? Cbor.Map }
+            assertTrue("policy.list must carry the four presets", presets.size >= 4)
+            val full = presets.firstOrNull { it.text("id") == "full-access" }
+                ?: error("policy.list did not carry full-access: $presets")
+            assertEquals(true, full.bool("dangerous"))
+            assertEquals(
+                "Writes, edits and exec run without asking. Every command the model chooses will run on this machine.",
+                full.text("warning"),
+            )
+            assertEquals("default", policy.text("current"))
+        } finally {
+            connection.close()
+        }
+    }
+
+
 }

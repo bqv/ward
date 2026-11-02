@@ -49,6 +49,8 @@ int main(int argc, char **argv)
     QCommandLineOption presetOption(QStringList{QStringLiteral("preset")},
                                     QStringLiteral("select a policy preset and print the current one"),
                                     QStringLiteral("id"));
+    QCommandLineOption confirmDangerOption(QStringList{QStringLiteral("confirm-danger")},
+                                           QStringLiteral("answer a dangerous preset warning automatically"));
     parser.addOption(socketOption);
     parser.addOption(cwdOption);
     parser.addOption(promptOption);
@@ -61,6 +63,7 @@ int main(int argc, char **argv)
     parser.addOption(blobLenOption);
     parser.addOption(listOption);
     parser.addOption(presetOption);
+    parser.addOption(confirmDangerOption);
     parser.process(app);
 
     WardClient client(parser.value(socketOption));
@@ -84,6 +87,7 @@ int main(int argc, char **argv)
     const bool blob = parser.isSet(blobOption);
     const bool list = parser.isSet(listOption);
     const bool preset = parser.isSet(presetOption);
+    const bool confirmDanger = parser.isSet(confirmDangerOption);
 
     QObject::connect(&client, &WardClient::lastErrorChanged, &app, [&]() {
         if (read || blob || list || preset)
@@ -104,6 +108,12 @@ int main(int argc, char **argv)
                 && !terminal && !read && !blob && !list && !preset
                 && !parser.isSet(sessionOption))
             app.quit();
+    });
+    QObject::connect(&client, &WardClient::dangerousPresetRequested, &app,
+                     [&](const QString &id, const QString &warning) {
+        QTextStream(stderr) << "dangerous preset " << id << ": " << warning << "\n";
+        if (confirmDanger)
+            client.confirmPermissionPreset(id);
     });
     QObject::connect(&client, &WardClient::permissionPresetChanged, &app, [&]() {
         if (!preset || client.permissionPreset().isEmpty())
