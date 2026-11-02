@@ -1452,3 +1452,20 @@ extra key decoded as garbage and was reverted rather than shipped.
 
 The test feeds a two-call body and asserts an empty tool plus the refusal text; `provider_test` is the right place
 for it because the count lives in the provider, over the body it already scans.
+
+Hundred-and-tenth: a tool call now reaches the driver. When the provider reply carries a non-empty `tool`,
+`wd_turn_resume_http` stops handing the driver `{kind:"result"}` and sends `{kind:"tool", payload:{tool, arguments}}`
+instead. The driver gains that branch beside its slash commands: it scans the arguments text for `path` and `text`
+with a small `json_field`, checks policy exactly as `/read` and `/write` do, and calls the existing `invoke_tool`.
+An unknown tool, or one with no name, answers with a text delta naming the problem rather than inventing a call.
+
+The result returns through the ordinary `invoke` path, so `perform_capability`, approvals and the worker are
+untouched — the reason to route through the driver instead of dispatching from core.
+
+What is *not* done, stated plainly: no test exercises this branch end to end. The reply keys only appear when a
+model actually returns `tool_calls`, and the gate fixtures serve canned completions only to `provider_test`. The
+branch is unreachable from every existing path — which is why three suites stay green unchanged — but a feature
+whose new path nothing runs is a claim, not a measurement. The gate it needs: a fixture endpoint that answers the
+first completion with the two-call-free `tool_calls` body `provider_test` already uses, then asserts a `tool.call`
+event and a `tool.result` for a `read` of a file written by the fixture, followed by a second completion carrying
+ordinary text so the turn ends.

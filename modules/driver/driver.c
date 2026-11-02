@@ -198,6 +198,39 @@ static uint32_t split_token(const char *text, uint32_t at, char *out,
   return at;
 }
 
+static int str_eq(const char *a, const char *b) {
+  uint32_t i = 0;
+  while (a[i] != '\0' && b[i] != '\0' && a[i] == b[i]) i++;
+  return a[i] == '\0' && b[i] == '\0';
+}
+
+static void json_field(const char *json, const char *key, char *out,
+                       uint32_t cap) {
+  uint32_t klen = wd_len(key);
+  out[0] = '\0';
+  for (uint32_t i = 0; json[i] != '\0'; i++) {
+    if (json[i] != '"') continue;
+    uint32_t k = 0;
+    while (k < klen && json[i + 1 + k] == key[k]) k++;
+    if (k != klen || json[i + 1 + k] != '"') continue;
+    uint32_t j = i + 1 + k + 1;
+    while (json[j] == ':' || json[j] == ' ') j++;
+    if (json[j] != '"') continue;
+    j++;
+    uint32_t used = 0;
+    while (json[j] != '\0' && json[j] != '"' && used + 1 < cap) {
+      if (json[j] == '\\' && json[j + 1] != '\0') {
+        out[used++] = json[j + 1];
+        j += 2;
+        continue;
+      }
+      out[used++] = json[j++];
+    }
+    out[used] = '\0';
+    return;
+  }
+}
+
 static void invoke_tool(uint32_t out, const char *tool, const char *path,
                         const char *text, int approve) {
   wd_w w;
@@ -243,13 +276,18 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
   if (wd_r_map(&r, &n) != 0) return;
   int step = 0;
   int result = 0;
+  int tool_call = 0;
   char kind[TEXT_SIZE];
   char text[TEXT_SIZE];
   char payload[TEXT_SIZE];
+  char tool_name[TEXT_SIZE];
+  char arguments[TEXT_SIZE];
   uint32_t plen = 0;
   kind[0] = '\0';
   text[0] = '\0';
   payload[0] = '\0';
+  tool_name[0] = '\0';
+  arguments[0] = '\0';
   for (uint32_t i = 0; i < n; i++) {
     const uint8_t *kp = 0;
     uint32_t kn = 0;
@@ -258,6 +296,7 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
       if (wd_r_text(&r, kind, sizeof(kind), &plen) != 0) return;
       step = wd_key_eq((const uint8_t *)kind, plen, "step");
       result = wd_key_eq((const uint8_t *)kind, plen, "result");
+      if (wd_key_eq((const uint8_t *)kind, plen, "tool")) tool_call = 1;
     } else if (wd_key_eq(kp, kn, "text")) {
       if (wd_r_text(&r, text, sizeof(text), &plen) != 0) return;
     } else if (wd_key_eq(kp, kn, "prompt")) {
@@ -271,6 +310,10 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
         if (wd_r_text_ptr(&r, &pk, &pl) != 0) return;
         if (wd_key_eq(pk, pl, "text")) {
           if (wd_r_text(&r, payload, sizeof(payload), &plen) != 0) return;
+        } else if (wd_key_eq(pk, pl, "tool")) {
+          if (wd_r_text(&r, tool_name, sizeof(tool_name), &plen) != 0) return;
+        } else if (wd_key_eq(pk, pl, "arguments")) {
+          if (wd_r_text(&r, arguments, sizeof(arguments), &plen) != 0) return;
         } else if (wd_key_eq(pk, pl, "error")) {
           if (wd_r_text(&r, payload, sizeof(payload), &plen) != 0) return;
         } else if (wd_r_skip(&r) != 0) {
@@ -280,6 +323,43 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
     } else if (wd_r_skip(&r) != 0) {
       return;
     }
+  }
+  if (tool_call) {
+    char arg_path[TEXT_SIZE];
+    char arg_text[TEXT_SIZE];
+    arg_path[0] = '\0';
+    arg_text[0] = '\0';
+    json_field(arguments, "path", arg_path, sizeof(arg_path));
+    json_field(arguments, "text", arg_text, sizeof(arg_text));
+    if (tool_name[0] == '\0') {
+      emit_text_delta(out, "the model asked for a tool without a name");
+      return;
+    }
+    if (str_eq(tool_name, "read")) {
+      int verdict = policy_check("read", arg_path);
+      if (verdict == 0) {
+        emit_text_delta(out, "the policy denied read");
+        return;
+      }
+      invoke_tool(out, "read", arg_path, "", verdict == 2);
+      return;
+    }
+    if (str_eq(tool_name, "write")) {
+      int verdict = policy_check("write", arg_path);
+      if (verdict == 0) {
+        emit_text_delta(out, "the policy denied write");
+        return;
+      }
+      invoke_tool(out, "write", arg_path, arg_text, verdict == 2);
+      return;
+    }
+    if (str_eq(tool_name, "grep")) {
+      invoke_tool(out, "grep", "", arg_text[0] != '\0' ? arg_text : arg_path,
+                  policy_check("grep", arg_path) == 2);
+      return;
+    }
+    emit_text_delta(out, "the model asked for a tool this build does not run");
+    return;
   }
   if (step) {
     if (text_prefix(text, "/read ")) {

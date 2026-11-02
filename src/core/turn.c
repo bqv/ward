@@ -1849,6 +1849,22 @@ int wd_turn_resume_tool(wd_turn *turn, wd_turn_emit emit, void *ctx,
       (void)emit(ctx, "turn.timings", timing, err);
     }
   }
+  char *tool = wd_text_copy(wd_get(reply, "tool"));
+  if (tool != NULL && tool[0] != '\0') {
+    char *arguments = wd_text_copy(wd_get(reply, "arguments"));
+    wd_free(message);
+    message = wd_map(2);
+    wd_put(message, "kind", wd_text("tool"));
+    cbor_item_t *call = wd_map(2);
+    wd_put(call, "tool", wd_text(tool));
+    wd_put(call, "arguments", wd_text(arguments != NULL ? arguments : ""));
+    wd_put(message, "payload", call);
+    free(arguments);
+    free(tool);
+    wd_free(reply);
+    return drive(turn, message, emit, ctx, err);
+  }
+  free(tool);
   wd_put(message, "payload", reply);
   return drive(turn, message, emit, ctx, err);
 }
