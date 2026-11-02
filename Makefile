@@ -60,6 +60,7 @@ CORE_SRC := \
            src/core/devlock.c \
            src/core/files.c \
            src/core/jobring.c \
+           src/core/settings.c \
            src/core/presets.c \
            src/core/prompt.c \
            src/core/probe.c \

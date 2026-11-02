@@ -2211,3 +2211,15 @@ well. One `wd_free(root)` and nothing else is the rule.
 
 `docs/parity.md` no longer carries the "Unmeasured, deliberately" section. Entry one hundred and sixty-six stays in the
 journal as the record of how long that label was correct.
+
+Hundred-and-sixty-ninth: `settings.get` / `settings.set`. A small validated document beside `models.toml`: `max_runs` (1..64)
+and `debug` (true/false), loaded at startup, persisted atomically, and applied immediately — a `max_runs` change takes effect
+without a restart. Unknown keys and out-of-range values are refused with a message; the file is written only after the value
+passes validation, so a rejected setting cannot leave a broken document behind.
+
+`gate_native` sets `max_runs` to 3, reads it back, and asserts that 99 and an unknown key are both refused. All three builds
+green.
+
+What is not done from item five: the writable plugin bundle switch. `module.list` and `module.reload` exist, but nothing
+enables or disables a bundle yet, and adding that is a decision about what a disabled bundle means mid-session rather than a
+line of code.

@@ -33,6 +33,10 @@ counts the prompts before it (0 means next). The prompt is appended to the
 transcript immediately as `session.prompted`; its own `turn.start` arrives when
 it runs. A queue deeper than eight answers a busy error rather than a queued one.
 
+`settings.get {}` answers `{max_runs, debug}`; `settings.set {key, value}` validates
+against the known keys and persists them beside `models.toml`. Unknown keys and out
+of-range values are refused with a message rather than stored.
+
 `job.follow {id, from}` answers `{job, chunks: [{from, text}], next, dropped}`
 while the job runs: a 64 KiB ring per run, appended from its text events, `next`
 being the offset to ask from again and `dropped` the bytes lost off the front.

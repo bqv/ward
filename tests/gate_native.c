@@ -395,6 +395,33 @@ int main(void) {
   free(live_id);
   close(follower.fd);
 
+  wd_client setter;
+  assert(wd_client_connect(&setter, sock) == 0);
+  assert(wd_client_handshake(&setter) == 0);
+  cbor_item_t *setting = wd_map(2);
+  wd_put(setting, "key", wd_text("max_runs"));
+  wd_put(setting, "value", wd_text("3"));
+  cbor_item_t *setting_done = NULL;
+  assert(wd_client_call(&setter, "settings.set", setting, &setting_done) == 0);
+  wd_free(setting_done);
+  cbor_item_t *read_back = NULL;
+  assert(wd_client_call(&setter, "settings.get", wd_map(0), &read_back) == 0);
+  uint64_t stored_runs = 0;
+  assert(wd_uint_of(wd_get(read_back, "max_runs"), &stored_runs));
+  assert(stored_runs == 3);
+  wd_free(read_back);
+  cbor_item_t *bad = wd_map(2);
+  wd_put(bad, "key", wd_text("max_runs"));
+  wd_put(bad, "value", wd_text("99"));
+  cbor_item_t *bad_result = NULL;
+  assert(wd_client_call(&setter, "settings.set", bad, &bad_result) != 0);
+  cbor_item_t *bad_key = wd_map(2);
+  wd_put(bad_key, "key", wd_text("nonsense"));
+  wd_put(bad_key, "value", wd_text("1"));
+  cbor_item_t *bad_key_result = NULL;
+  assert(wd_client_call(&setter, "settings.set", bad_key, &bad_key_result) != 0);
+  close(setter.fd);
+
   wd_client watcher;
   assert(wd_client_connect(&watcher, sock) == 0);
   assert(wd_client_handshake(&watcher) == 0);

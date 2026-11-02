@@ -38,6 +38,7 @@
 #include "core/devlock.h"
 #include "core/files.h"
 #include "core/jobring.h"
+#include "core/settings.h"
 #include "core/presets.h"
 #include "core/probe.h"
 #include "net/http.h"
@@ -97,6 +98,7 @@ struct wd_run {
   uint8_t *http_body;
   size_t http_len;
   size_t http_cap;
+  wd_settings settings;
   wd_jobring *ring;
   wd_sse *sse;
   void *sse_ctx;
@@ -187,6 +189,7 @@ typedef struct {
   wd_registry registry;
   char *module_dir;
   size_t max_runs;
+  wd_settings settings;
   char *default_model;
   char *quic_endpoint;
   int quic_port;
@@ -2237,6 +2240,43 @@ static void handle_session_queue(wd_server *srv, wd_conn *conn, uint64_t id,
   conn_arm(srv, conn);
 }
 
+static void handle_settings_get(wd_server *srv, wd_conn *conn, uint64_t id) {
+  cbor_item_t *result = wd_map(2);
+  wd_put(result, "max_runs", wd_uint((uint64_t)srv->settings.max_runs));
+  wd_put(result, "debug", cbor_build_bool(srv->settings.debug));
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
+static void handle_settings_set(wd_server *srv, wd_conn *conn, uint64_t id,
+                                cbor_item_t *params) {
+  char *key = wd_text_copy(wd_get(params, "key"));
+  char *value = wd_text_copy(wd_get(params, "value"));
+  char *err = NULL;
+  wd_settings next = srv->settings;
+  if (key == NULL || value == NULL ||
+      wd_settings_apply(&next, key, value, &err) != 0) {
+    conn_send_error(conn, id, WD_ERR_INVALID_PARAMS,
+                    err != NULL ? err : "key and value are required");
+    free(err);
+    free(key);
+    free(value);
+    conn_arm(srv, conn);
+    return;
+  }
+  free(err);
+  srv->settings = next;
+  if (srv->settings.max_runs > 0) srv->max_runs = (size_t)srv->settings.max_runs;
+  wd_settings_save(srv->state_dir, &srv->settings);
+  cbor_item_t *result = wd_map(2);
+  wd_put(result, "key", wd_text(key));
+  wd_put(result, "value", wd_text(value));
+  free(key);
+  free(value);
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
 static void handle_job_follow(wd_server *srv, wd_conn *conn, uint64_t id,
                               cbor_item_t *params) {
   char *job = wd_text_copy(wd_get(params, "id"));
@@ -3670,6 +3710,10 @@ static void handle_request(wd_server *srv, wd_conn *conn, uint64_t id,
     handle_policy_list(srv, conn, id);
   } else if (strcmp(method, "policy.select") == 0) {
     handle_policy_select(srv, conn, id, params);
+  } else if (strcmp(method, "settings.get") == 0) {
+    handle_settings_get(srv, conn, id);
+  } else if (strcmp(method, "settings.set") == 0) {
+    handle_settings_set(srv, conn, id, params);
   } else if (strcmp(method, "job.follow") == 0) {
     handle_job_follow(srv, conn, id, params);
   } else if (strcmp(method, "session.queue") == 0) {
@@ -4273,8 +4317,9 @@ int wd_up_run(const wd_up_config *cfg) {
       free(sched_err);
     }
   }
+  wd_settings_load(srv.state_dir, &srv.settings);
   const char *max_runs = getenv("WARD_MAX_RUNS");
-  srv.max_runs = 8;
+  srv.max_runs = (size_t)srv.settings.max_runs;
   if (max_runs != NULL) {
     long value = strtol(max_runs, NULL, 10);
     if (value > 0 && value <= WD_MAX_RUNS) srv.max_runs = (size_t)value;
