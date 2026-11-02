@@ -66,8 +66,10 @@ CORE_SRC := \
   src/net/quic.c
 
 CORE_OBJ := $(patsubst %.c,$(BUILDDIR)/%.o,$(CORE_SRC))
+NATIVE := $(BUILDDIR)/ward-native
 BIN_OBJ := $(BUILDDIR)/src/cli/main.o $(BUILDDIR)/src/client/client.o \
            $(BUILDDIR)/src/daemon/server.o
+NATIVE_OBJ := $(BUILDDIR)/clients/native/main.o $(BUILDDIR)/src/client/client.o
 CORE_LIB := $(BUILDDIR)/libward-core.a
 
 WARD := $(BUILDDIR)/ward
@@ -82,7 +84,7 @@ GUEST_WASM := $(addprefix $(BUILDDIR)/,$(addsuffix .wasm,$(GUESTS)))
 
 .PHONY: all test guests modules clean install check-deps
 
-all: check-deps $(WARD) $(MODULE_WASM) $(GUEST_WASM) $(TEST_BINS)
+all: check-deps $(WARD) $(NATIVE) $(MODULE_WASM) $(GUEST_WASM) $(TEST_BINS)
 
 check-deps:
 	@pkg-config --exists --print-errors 'libcbor >= 0.10'
@@ -96,6 +98,9 @@ $(CORE_LIB): $(CORE_OBJ)
 
 $(WARD): $(BIN_OBJ) $(CORE_LIB)
 	$(CC) $(CFLAGS) $(BIN_OBJ) $(CORE_LIB) $(LDFLAGS) $(PKG_LIBS) -o $@
+
+$(NATIVE): $(NATIVE_OBJ) $(CORE_LIB)
+	$(CC) $(CFLAGS) $(NATIVE_OBJ) $(CORE_LIB) $(LDFLAGS) $(PKG_LIBS) -o $@
 
 $(BUILDDIR)/%.o: %.c
 	@mkdir -p $(@D)
@@ -182,6 +187,6 @@ install: $(WARD)
 clean:
 	rm -rf -- $(BUILDDIR)
 
--include $(CORE_OBJ:.o=.d) $(BIN_OBJ:.o=.d)
+-include $(CORE_OBJ:.o=.d) $(BIN_OBJ:.o=.d) $(NATIVE_OBJ:.o=.d)
 
 .DELETE_ON_ERROR:

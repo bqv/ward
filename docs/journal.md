@@ -1824,3 +1824,12 @@ live `session list` and `stats` against the running daemon answer as before.
 
 This is the first slice of M6 — until now nothing but `src/cli/main.c` could speak the protocol, so a native client or an
 Android app had nothing to link. The next slice is `clients/native/` with its own gate, then the phone.
+
+Hundred-and-thirty-seventh: a second consumer exists. `clients/native/main.c` builds as `ward-native` and speaks the
+protocol through the new library: `create` answers a session id, `prompt` sends a turn, `resume` reads frames until
+`turn.end` and prints the deltas. Smoke-tested against the running daemon — a session was created (`c03e623271f4a4e2`)
+and a prompt accepted; the turn failed only because the local router cannot load its model, which is the box, not the
+client.
+
+No gate yet, and the document says so. The gate is the next slice: a daemon on the fake endpoint, the three commands run
+as subprocesses, and an assertion that `resume` prints the echoed prompt before `turn.end`.
