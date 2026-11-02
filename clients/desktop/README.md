@@ -58,7 +58,9 @@ The probe is the display-free path and the client's gate:
 ```
 
 It prints the assistant text on stdout and every event kind on stderr; `--approve`
-answers each `approval.requested` with `allow`.
+answers each `approval.requested` with `allow`. `make test` from the repository
+root builds the probe and runs `tests/gate_desktop.c`, which asserts the prompt
+text arrives exactly once over both the Unix socket and loopback TCP.
 
 ## What ward-gui uses
 

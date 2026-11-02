@@ -68,6 +68,8 @@ CORE_SRC := \
 CORE_OBJ := $(patsubst %.c,$(BUILDDIR)/%.o,$(CORE_SRC))
 CLIENT_OBJ := $(BUILDDIR)/src/client/client.o
 NATIVE := $(BUILDDIR)/ward-native
+DESKTOP_BUILD ?= clients/desktop/build
+DESKTOP_PROBE := $(DESKTOP_BUILD)/ward-gui-probe
 BIN_OBJ := $(BUILDDIR)/src/cli/main.o $(BUILDDIR)/src/daemon/server.o
 NATIVE_OBJ := $(BUILDDIR)/clients/native/main.o
 CORE_LIB := $(BUILDDIR)/libward-core.a
@@ -82,7 +84,7 @@ MODULE_WASM := $(addprefix $(BUILDDIR)/,$(addsuffix .wasm,$(MODULES)))
 GUESTS := echo wasi importer trap
 GUEST_WASM := $(addprefix $(BUILDDIR)/,$(addsuffix .wasm,$(GUESTS)))
 
-.PHONY: all test guests modules clean install check-deps desktop
+.PHONY: all test guests modules clean install check-deps desktop FORCE
 
 all: check-deps $(WARD) $(NATIVE) $(MODULE_WASM) $(GUEST_WASM) $(TEST_BINS)
 
@@ -129,9 +131,13 @@ android-test: $(ANDROID_LIB)
 	$(JAVA_HOME)/bin/java -Djava.library.path=$(abspath $(BUILDDIR)) \
 	  -cp $(BUILDDIR)/java uk.xa0.ward.WardClient
 
-desktop:
-	cmake -S clients/desktop -B clients/desktop/build -G Ninja
-	cmake --build clients/desktop/build
+desktop: $(DESKTOP_PROBE)
+
+$(DESKTOP_PROBE): FORCE
+	cmake -S clients/desktop -B $(DESKTOP_BUILD) -G Ninja
+	cmake --build $(DESKTOP_BUILD)
+
+FORCE:
 
 modules: $(MODULE_WASM)
 guests: $(GUEST_WASM)
@@ -188,7 +194,7 @@ $(BUILDDIR)/importer.wasm: tests/guest/importer.c
 	@mkdir -p $(@D)
 	$(WASI_CC) $(WASI_FLAGS) $< -o $@
 
-test: $(TEST_BINS) $(WARD) $(NATIVE) $(MODULE_WASM) $(GUEST_WASM)
+test: $(TEST_BINS) $(WARD) $(NATIVE) $(DESKTOP_PROBE) $(MODULE_WASM) $(GUEST_WASM)
 	@set -u; \
 	fail=0; \
 	for t in $(TEST_BINS); do \
@@ -196,6 +202,7 @@ test: $(TEST_BINS) $(WARD) $(NATIVE) $(MODULE_WASM) $(GUEST_WASM)
 	  printf '%-14s ' "$$name"; \
 	  if WARD_BIN=$(abspath $(WARD)) \
 	     WARD_NATIVE=$(abspath $(NATIVE)) \
+	     WARD_GUI_PROBE=$(abspath $(DESKTOP_PROBE)) \
 	     WARD_MODULE_DIR=$(abspath $(BUILDDIR)) \
 	     WARD_GUEST_DIR=$(abspath $(BUILDDIR)) \
 	     timeout $(TEST_TIMEOUT) $$t >$(BUILDDIR)/$$name.log 2>&1; then \

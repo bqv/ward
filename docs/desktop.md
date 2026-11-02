@@ -46,11 +46,19 @@ and the `text.delta`/`turn.end` stream. The second covers `approval.requested`,
 `hello desktop` once, wrote through an approved tool call, and replayed the same
 turn without duplicating a row.
 
+`tests/gate_desktop.c` runs the probe against a fixture daemon and asserts the
+prompt text appears exactly once, first over the Unix socket and then over
+loopback TCP. It fork/execs the probe with `PR_SET_PDEATHSIG` and `alarm(20)`
+rather than using `popen`, so a stalled probe fails the gate and a killed gate
+does not leave a server behind. `make test` builds the probe and runs the gate.
+In a sandbox that cannot write `/sys/fs/cgroup`, run the gate directly with
+`WARD_GATE_CGROUP=off`.
+
 ## Protocol coverage
 
 | layer | adopted |
 |---|---|
-| transport | `AF_UNIX`; loopback TCP via `tcp://host:port` |
+| transport | `AF_UNIX`; loopback TCP via `tcp://host:port`; both are exercised by the gate |
 | handshake | `hello` / `welcome`, version 1, 5 s deadline |
 | frames | all six types parsed; request, response, event and control written |
 | requests | correlated by id; errors surface `name` and `message` |
@@ -90,6 +98,6 @@ proven yet. They are reported to the ward session as well.
    roster row even if nothing is sent.
 8. **Headless `--prompt`.** dsh-native's `--prompt` is ACP-only; ward-gui has no
    equivalent path in the shell. The probe is the display-free path instead.
-9. **No `make test` gate.** The probe is built and was run by hand against the
-   fixture daemon, but it is not yet a target in the top-level suite. Under this
-   repository's rule that makes the row partial, not delivered.
+
+The gate closes the "no make test gate" hole; the remaining items are client
+surfaces, one ward-side decision (`file.read`), and the QUIC transport.
