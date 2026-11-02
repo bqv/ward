@@ -66,10 +66,10 @@ CORE_SRC := \
   src/net/quic.c
 
 CORE_OBJ := $(patsubst %.c,$(BUILDDIR)/%.o,$(CORE_SRC))
+CLIENT_OBJ := $(BUILDDIR)/src/client/client.o
 NATIVE := $(BUILDDIR)/ward-native
-BIN_OBJ := $(BUILDDIR)/src/cli/main.o $(BUILDDIR)/src/client/client.o \
-           $(BUILDDIR)/src/daemon/server.o
-NATIVE_OBJ := $(BUILDDIR)/clients/native/main.o $(BUILDDIR)/src/client/client.o
+BIN_OBJ := $(BUILDDIR)/src/cli/main.o $(BUILDDIR)/src/daemon/server.o
+NATIVE_OBJ := $(BUILDDIR)/clients/native/main.o
 CORE_LIB := $(BUILDDIR)/libward-core.a
 
 WARD := $(BUILDDIR)/ward
@@ -97,17 +97,17 @@ $(CORE_LIB): $(CORE_OBJ)
 	$(AR) rcs $@ $^
 
 $(WARD): $(BIN_OBJ) $(CORE_LIB)
-	$(CC) $(CFLAGS) $(BIN_OBJ) $(CORE_LIB) $(LDFLAGS) $(PKG_LIBS) -o $@
+	$(CC) $(CFLAGS) $(BIN_OBJ) $(CLIENT_OBJ) $(CORE_LIB) $(LDFLAGS) $(PKG_LIBS) -o $@
 
 $(NATIVE): $(NATIVE_OBJ) $(CORE_LIB)
-	$(CC) $(CFLAGS) $(NATIVE_OBJ) $(CORE_LIB) $(LDFLAGS) $(PKG_LIBS) -o $@
+	$(CC) $(CFLAGS) $(NATIVE_OBJ) $(CLIENT_OBJ) $(CORE_LIB) $(LDFLAGS) $(PKG_LIBS) -o $@
 
 $(BUILDDIR)/%.o: %.c
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILDDIR)/%: tests/%.c $(CORE_LIB)
-	$(CC) $(CFLAGS) $< $(CORE_LIB) $(LDFLAGS) $(PKG_LIBS) -o $@
+$(BUILDDIR)/%: tests/%.c $(CLIENT_OBJ) $(CORE_LIB)
+	$(CC) $(CFLAGS) $< $(CLIENT_OBJ) $(CORE_LIB) $(LDFLAGS) $(PKG_LIBS) -o $@
 
 modules: $(MODULE_WASM)
 guests: $(GUEST_WASM)
@@ -164,13 +164,14 @@ $(BUILDDIR)/importer.wasm: tests/guest/importer.c
 	@mkdir -p $(@D)
 	$(WASI_CC) $(WASI_FLAGS) $< -o $@
 
-test: $(TEST_BINS) $(WARD) $(MODULE_WASM) $(GUEST_WASM)
+test: $(TEST_BINS) $(WARD) $(NATIVE) $(MODULE_WASM) $(GUEST_WASM)
 	@set -u; \
 	fail=0; \
 	for t in $(TEST_BINS); do \
 	  name=$$(basename $$t); \
 	  printf '%-14s ' "$$name"; \
 	  if WARD_BIN=$(abspath $(WARD)) \
+	     WARD_NATIVE=$(abspath $(NATIVE)) \
 	     WARD_MODULE_DIR=$(abspath $(BUILDDIR)) \
 	     WARD_GUEST_DIR=$(abspath $(BUILDDIR)) \
 	     timeout $(TEST_TIMEOUT) $$t >$(BUILDDIR)/$$name.log 2>&1; then \
@@ -187,6 +188,6 @@ install: $(WARD)
 clean:
 	rm -rf -- $(BUILDDIR)
 
--include $(CORE_OBJ:.o=.d) $(BIN_OBJ:.o=.d) $(NATIVE_OBJ:.o=.d) $(TEST_BINS:=.d)
+-include $(CORE_OBJ:.o=.d) $(CLIENT_OBJ:.o=.d) $(BIN_OBJ:.o=.d) $(NATIVE_OBJ:.o=.d) $(TEST_BINS:=.d)
 
 .DELETE_ON_ERROR:

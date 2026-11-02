@@ -1,0 +1,145 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+#include <assert.h>
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/prctl.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+#include "client/client.h"
+#include "proto/codec.h"
+#include "fake_endpoint.h"
+
+static int run_capture(const char *socket, const char *bin, char *const argv[],
+                       char *out, size_t cap) {
+  int fds[2];
+  if (pipe(fds) != 0) return -1;
+  pid_t pid = fork();
+  assert(pid >= 0);
+  if (pid == 0) {
+    prctl(PR_SET_PDEATHSIG, SIGKILL);
+    alarm(45);
+    setenv("WARD_SOCKET", socket, 1);
+    dup2(fds[1], 1);
+    dup2(fds[1], 2);
+    close(fds[0]);
+    close(fds[1]);
+    execv(bin, argv);
+    _exit(127);
+  }
+  close(fds[1]);
+  size_t used = 0;
+  while (used + 1 < cap) {
+    ssize_t got = read(fds[0], out + used, cap - 1 - used);
+    if (got <= 0) break;
+    used += got;
+  }
+  out[used] = '\0';
+  close(fds[0]);
+  int status = 0;
+  if (waitpid(pid, &status, 0) != pid) return -1;
+  return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+}
+
+int main(void) {
+  const char *modules = getenv("WARD_MODULE_DIR");
+  const char *bin = getenv("WARD_NATIVE");
+  const char *daemon = getenv("WARD_BIN");
+  assert(modules != NULL && bin != NULL && daemon != NULL);
+
+  char root[] = "/tmp/ward-native-gate-XXXXXX";
+  assert(mkdtemp(root) != NULL);
+  char state[256];
+  char sock[128];
+  snprintf(state, sizeof(state), "%s/state", root);
+  snprintf(sock, sizeof(sock), "%s/sock", root);
+  assert(mkdir(state, 0700) == 0);
+
+  sweep_test_cgroups();
+  int endpoint_port = 0;
+  pid_t endpoint = 0;
+  char *endpoint_url = fake_endpoint(&endpoint_port, &endpoint);
+
+  char models_path[512];
+  snprintf(models_path, sizeof(models_path), "%s/models.toml", state);
+  FILE *models = fopen(models_path, "w");
+  assert(models != NULL);
+  assert(fprintf(models,
+                 "[[model]]\nid = \"local:qwen\"\nprovider = \"stadi\"\n"
+                 "model = \"qwen3\"\ncontext = \"32768\"\n"
+                 "endpoint = \"%s\"\n",
+                 endpoint_url) > 0);
+  fclose(models);
+
+  int ready[2];
+  assert(pipe(ready) == 0);
+  pid_t pid = fork();
+  assert(pid >= 0);
+  if (pid == 0) {
+    close(ready[0]);
+    dup2(ready[1], 1);
+    close(ready[1]);
+    char cgroup_base[128];
+    snprintf(cgroup_base, sizeof(cgroup_base),
+             "/sys/fs/cgroup/ward/test/gate-%d", (int)getpid());
+    setenv("WARD_CGROUP", cgroup_base, 1);
+    setenv("WARD_MODULE_DIR", modules, 1);
+    setenv("WARD_TOOL_ROOT", root, 1);
+    setenv("WARD_QUIC_BIND", "off", 1);
+    prctl(PR_SET_PDEATHSIG, SIGTERM);
+    execl(daemon, "ward", "up", "--socket", sock, "--state", state,
+          (char *)NULL);
+    _exit(127);
+  }
+  close(ready[1]);
+  char line[256];
+  size_t used = 0;
+  while (used + 1 < sizeof(line)) {
+    ssize_t got = read(ready[0], line + used, 1);
+    if (got <= 0) break;
+    if (line[used++] == '\n') break;
+  }
+  line[used] = '\0';
+  close(ready[0]);
+  assert(strncmp(line, "ready ", 6) == 0);
+
+  char out[8192];
+  char *create_argv[] = {(char *)bin, "create", root, NULL};
+  assert(run_capture(sock, bin, create_argv, out, sizeof(out)) == 0);
+  char session[64];
+  size_t at = 0;
+  while (out[at] != '\0' && out[at] != '\n' && at + 1 < sizeof(session)) {
+    session[at] = out[at];
+    at++;
+  }
+  session[at] = '\0';
+  assert(at == 16);
+
+  char *prompt_argv[] = {(char *)bin, "prompt", session, "native hello", NULL};
+  int prompt_rc = run_capture(sock, bin, prompt_argv, out, sizeof(out));
+  if (prompt_rc != 0)
+    fprintf(stderr, "prompt rc=%d daemon_alive=%d\n", prompt_rc,
+            kill(pid, 0) == 0 ? 1 : 0);
+  assert(prompt_rc == 0);
+
+  char *resume_argv[] = {(char *)bin, "resume", session, NULL};
+  int resume_rc = run_capture(sock, bin, resume_argv, out, sizeof(out));
+  if (resume_rc != 0) fprintf(stderr, "resume rc=%d out=%s\n", resume_rc, out);
+  assert(resume_rc == 0);
+  assert(strstr(out, "native hello") != NULL);
+
+  kill(pid, SIGTERM);
+  int status = 0;
+  waitpid(pid, &status, 0);
+  stop_server(endpoint);
+  drop_test_cgroup(getenv("WARD_CGROUP"));
+
+  printf("native gate passed: ward-native drove a session over the socket\n");
+  return 0;
+}

@@ -2591,6 +2591,7 @@ static void handle_session_prompt(wd_server *srv, wd_conn *conn, uint64_t id,
   else
     run_park(srv, run, kind);
   conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
 }
 
 static void drain_schedules(wd_server *srv, uint64_t now) {

@@ -1892,3 +1892,20 @@ network. Two candidate causes remain and they are distinguishable in one run: ei
 The next probe is cheap: run the same turn through the CLI against the same fixture and see whether the CLI returns. If it
 does, the difference is the client; if it does not, the driver is the one to instrument, with the same byte-printing
 discipline that resolved the 2^39.
+
+Hundred-and-forty-second: the native gate passes, and it found a real daemon bug. The trace narrowed it to liveness: the
+daemon stayed responsive while the prompt never answered — a second `create` succeeded during the stall — so nothing was
+wedged, the response simply never left the queue.
+
+The cause: `handle_session_prompt` was the one handler that queued its response with `conn_send_cached` and did **not** call
+`conn_arm` afterwards. A connection that had already been armed by an earlier call — `session.resume`, as `gate_tool` does —
+flushed the queued response; a connection that had only ever connected and prompted, as `ward-native` does, never got an
+EPOLLOUT registration and waited forever. Error responses went through a different path, which is why a failing turn answered
+promptly and a succeeding one did not.
+
+One line fixes it, and the gate now drives a full session through `ward-native`: create, prompt, resume, and the echoed text
+before `turn.end`. The client workaround I tried first — subscribing before prompting — is reverted, because it papered over
+the bug rather than fixing it.
+
+The gate also needed three build changes: tests now link `src/client` (so a gate can act as a client), `WARD_NATIVE` is
+exported into the suite, and `make test` depends on the native binary so every build directory has one.
