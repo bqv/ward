@@ -36,8 +36,8 @@ it runs. A queue deeper than eight answers a busy error rather than a queued one
 `module.enable {name, enabled}` answers `{name, enabled}` and persists the switch
 beside `models.toml`; `module.list` reports each module's `enabled` flag. Disabling
 takes effect for turns **started afterwards** — a running turn keeps the instance
-it already resolved — and a session whose pins include a disabled module refuses
-`session.prompt` with `module <name> is disabled`.
+it already resolved — and `session.prompt` is refused with `module <name> is disabled`
+when any module a turn resolves — `engine`, `driver`, `provider`, `tools`, `policy`, `judge` — or any session pin is disabled.
 
 `settings.get {}` answers `{max_runs, debug}`; `settings.set {key, value}` validates
 against the known keys and persists them beside `models.toml`. Unknown keys and out

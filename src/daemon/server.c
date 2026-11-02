@@ -3019,6 +3019,24 @@ static void handle_session_prompt(wd_server *srv, wd_conn *conn, uint64_t id,
     conn_arm(srv, conn);
     return;
   }
+  static const char *const turn_modules[] = {"engine", "driver", "provider",
+                                             "tools", "policy", "judge"};
+  const char *blocked = NULL;
+  for (size_t m = 0; m < sizeof(turn_modules) / sizeof(turn_modules[0]); m++)
+    if (wd_settings_module_disabled(&srv->settings, turn_modules[m]))
+      blocked = turn_modules[m];
+  for (size_t p = 0; p < session->pins_len && blocked == NULL; p++)
+    if (wd_settings_module_disabled(&srv->settings, session->pins[p].name))
+      blocked = session->pins[p].name;
+  if (blocked != NULL) {
+    char detail[128];
+    snprintf(detail, sizeof(detail), "module %s is disabled", blocked);
+    free(session_id);
+    free(text);
+    conn_send_error(conn, id, WD_ERR_INVALID_PARAMS, detail);
+    conn_arm(srv, conn);
+    return;
+  }
   for (size_t p = 0; p < session->pins_len; p++) {
     if (wd_settings_module_disabled(&srv->settings, session->pins[p].name)) {
       char detail[128];

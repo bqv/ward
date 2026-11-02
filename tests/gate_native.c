@@ -503,6 +503,34 @@ int main(void) {
   }
   assert(saw_disabled);
   wd_free(listed);
+  cbor_item_t *off2 = wd_map(2);
+  wd_put(off2, "name", wd_text("provider"));
+  wd_put(off2, "enabled", cbor_build_bool(false));
+  cbor_item_t *off2_done = NULL;
+  assert(wd_client_call(&admin, "module.enable", off2, &off2_done) == 0);
+  wd_free(off2_done);
+  cbor_item_t *blocked_create = wd_map(1);
+  wd_put(blocked_create, "cwd", wd_text(root));
+  cbor_item_t *blocked_session = NULL;
+  assert(wd_client_call(&admin, "session.create", blocked_create,
+                        &blocked_session) == 0);
+  char *blocked_id =
+      wd_text_copy(wd_get(wd_get(blocked_session, "session"), "id"));
+  assert(blocked_id != NULL);
+  wd_free(blocked_session);
+  cbor_item_t *blocked_prompt = wd_map(2);
+  wd_put(blocked_prompt, "id", wd_text(blocked_id));
+  wd_put(blocked_prompt, "text", wd_text("must be refused"));
+  cbor_item_t *blocked_answer = NULL;
+  assert(wd_client_call(&admin, "session.prompt", blocked_prompt,
+                        &blocked_answer) != 0);
+  free(blocked_id);
+  cbor_item_t *on2 = wd_map(2);
+  wd_put(on2, "name", wd_text("provider"));
+  wd_put(on2, "enabled", cbor_build_bool(true));
+  cbor_item_t *on2_done = NULL;
+  assert(wd_client_call(&admin, "module.enable", on2, &on2_done) == 0);
+  wd_free(on2_done);
   cbor_item_t *back_on = wd_map(2);
   wd_put(back_on, "name", wd_text("skills"));
   wd_put(back_on, "enabled", cbor_build_bool(true));
