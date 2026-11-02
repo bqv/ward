@@ -9,5 +9,8 @@
 
 int wd_file_read(const char *root, const char *path, size_t max, char **out,
                  size_t *len, char **err);
+int wd_file_read_range(const char *root, const char *path, size_t offset,
+                       size_t want, size_t max_total, char **out, size_t *len,
+                       char **err);
 
 #endif

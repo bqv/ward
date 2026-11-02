@@ -58,6 +58,26 @@ int main(void) {
   assert(err != NULL && strstr(err, "exceeds the 8 byte limit") != NULL);
   free(err);
 
+  char *chunk = NULL;
+  size_t got = 0;
+  err = NULL;
+  assert(wd_file_read_range(root, "note.txt", 6, 4, 1 << 20, &chunk, &got,
+                            &err) == 0);
+  assert(got == 4 && memcmp(chunk, "from", 4) == 0);
+  free(chunk);
+
+  err = NULL;
+  assert(wd_file_read_range(root, "../escape.txt", 0, 4, 1 << 20, &chunk, &got,
+                            &err) != 0);
+  assert(err != NULL && strstr(err, "outside the session directory") != NULL);
+  free(err);
+
+  err = NULL;
+  assert(wd_file_read_range(root, "note.txt", 4000, 4096, 4096, &chunk, &got,
+                            &err) != 0);
+  assert(err != NULL && strstr(err, "exceeds the") != NULL);
+  free(err);
+
   printf("files tests passed\n");
   return 0;
 }

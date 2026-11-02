@@ -51,6 +51,10 @@ cbor_item_t *wd_text_len(const char *s, size_t len) {
   return cbor_build_stringn(s, len);
 }
 
+cbor_item_t *wd_bytes_len(const char *s, size_t len) {
+  return cbor_build_bytestring((const unsigned char *)s, len);
+}
+
 cbor_item_t *wd_text(const char *s) { return cbor_build_string(s); }
 
 cbor_item_t *wd_bool(bool v) { return cbor_build_bool(v); }

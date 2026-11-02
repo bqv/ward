@@ -46,6 +46,7 @@ cbor_item_t *wd_array(uint64_t n);
 cbor_item_t *wd_uint(uint64_t v);
 cbor_item_t *wd_text(const char *s);
 cbor_item_t *wd_text_len(const char *s, size_t len);
+cbor_item_t *wd_bytes_len(const char *s, size_t len);
 cbor_item_t *wd_bool(bool v);
 void wd_put(cbor_item_t *map, const char *key, cbor_item_t *value);
 cbor_item_t *wd_get(cbor_item_t *map, const char *key);

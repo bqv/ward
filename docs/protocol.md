@@ -27,6 +27,11 @@ Later milestones add methods without a version bump, because adding a method is 
 the session's working directory, refused rather than truncated when it exceeds
 64 KiB, and refused when the path resolves outside that directory.
 
+`session.file_read_blob {id, path, offset, len}` answers `{path, offset, size, data}`
+with `data` as a CBOR byte string — the same cwd-rooted and regular-file rules, at
+most 1 MiB per call and 4 MiB of offset in total, so a binary file is read in
+bounded chunks rather than one unbounded response.
+
 `model.probe {id}` answers `{id, n_ctx, n_slots, context_source}` — the window and slot count the
 provider reports, or the catalog's `context`, or a default, and which of the three it was.
 `module.list`, `module.reload`, `session.upgrade`, `stats.session`, `stats.global`,

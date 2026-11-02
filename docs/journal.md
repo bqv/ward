@@ -1993,3 +1993,10 @@ rather than assumed. All three builds green.
 
 The desktop client's files dock can now answer: the method returns the bytes and the size, and the refusal is a message a
 UI can show rather than an empty pane.
+
+Hundred-and-fiftieth: `session.file_read_blob` reads binary in bounded chunks — 1 MiB per call, offsets up to 4 MiB, the
+same cwd-rooted and regular-file refusals as the text method, and `data` as a CBOR byte string. The text method keeps its
+64 KiB cap untouched: a lightbox should not be the reason a text read starts returning megabytes.
+
+`files_test` covers a mid-file range, an escape by `../`, and the total cap; the JSON/byte-string helper is `wd_bytes_len`
+in the codec. All three builds green.
