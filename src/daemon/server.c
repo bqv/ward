@@ -3645,6 +3645,7 @@ static int setup_tcp_listener(const char *bind_text, int *port_out) {
 }
 
 static int setup_signals(void) {
+  signal(SIGPIPE, SIG_IGN);
   sigset_t mask;
   sigemptyset(&mask);
   sigaddset(&mask, SIGINT);
