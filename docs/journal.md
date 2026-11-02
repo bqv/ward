@@ -2032,3 +2032,12 @@ measured rather than assumed.
 Earlier, honestly, this path had **no gate of its own**. The behaviour needs a turn that is still running
 when the second prompt arrives, which means a slowed provider; `gate_tool` has the delay machinery and is where the
 assertion belongs. Recorded rather than claimed.
+
+Hundred-and-fifty-fourth: steer. `session.prompt` with `steer: true` while a turn runs appends the text to that turn s
+next provider request, in order, and answers `{session, steered: true}`. `provider_phase` is the single boundary every
+provider call passes through, so delivery lives there: pending steers are merged into the prompt before the provider sees
+it, and cleared. It is finish-then-read, never an interruption; a ninth steer for one turn answers a busy error rather than
+dropping one silently, and with no turn running the flag is ignored so the prompt just runs.
+
+`gate_native` asserts the steered answer on a session of its own — the queue test taught that lesson twice: a shared
+session makes a later assertion fail for the wrong reason.

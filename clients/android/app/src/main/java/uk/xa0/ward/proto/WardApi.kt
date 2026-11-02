@@ -114,7 +114,7 @@ class WardApi(private val connection: WardConnection) {
     // ---------------------------------------------------------------- models
 
     suspend fun modelList(): List<Cbor.Map> =
-        connection.call("model.list").map("models")?.asArray()?.items
+        connection.call("model.list").array("models")?.items
             ?.mapNotNull { it as? Cbor.Map }.orEmpty()
 
     suspend fun selectModel(id: String): Cbor =
@@ -154,7 +154,7 @@ class WardApi(private val connection: WardConnection) {
         connection.call("policy.select", cborMap("id" to id.cbor()))
 
     suspend fun listApprovals(): List<Cbor.Map> =
-        connection.call("approval.list", Cbor.Map(emptyList())).map("approvals")?.asArray()?.items
+        connection.call("approval.list", Cbor.Map(emptyList())).array("approvals")?.items
             ?.mapNotNull { it as? Cbor.Map }.orEmpty()
 
     // ---------------------------------------------------------------- files
@@ -234,7 +234,7 @@ class WardApi(private val connection: WardConnection) {
     // ---------------------------------------------------------------- jobs
 
     suspend fun listJobs(): List<Cbor.Map> =
-        connection.call("job.list", Cbor.Map(emptyList())).map("jobs")?.asArray()?.items
+        connection.call("job.list", Cbor.Map(emptyList())).array("jobs")?.items
             ?.mapNotNull { it as? Cbor.Map }.orEmpty()
 
     suspend fun killJob(job: String): Boolean =
@@ -243,7 +243,7 @@ class WardApi(private val connection: WardConnection) {
     // ---------------------------------------------------------------- schedules
 
     suspend fun listSchedules(): List<Cbor.Map> =
-        connection.call("schedule.list", Cbor.Map(emptyList())).map("schedules")?.asArray()?.items
+        connection.call("schedule.list", Cbor.Map(emptyList())).array("schedules")?.items
             ?.mapNotNull { it as? Cbor.Map }.orEmpty()
 
     suspend fun setSchedule(session: String, cron: String, text: String): Cbor =
@@ -279,7 +279,7 @@ class WardApi(private val connection: WardConnection) {
     // ---------------------------------------------------------------- modules and files
 
     suspend fun listModules(): List<Cbor.Map> =
-        connection.call("module.list", Cbor.Map(emptyList())).map("modules")?.asArray()?.items
+        connection.call("module.list", Cbor.Map(emptyList())).array("modules")?.items
             ?.mapNotNull { it as? Cbor.Map }.orEmpty()
 
     suspend fun reloadModule(name: String): Cbor =
@@ -320,7 +320,7 @@ class WardApi(private val connection: WardConnection) {
         connection.call("device.enrol", cborMap("token" to token.cbor(), "csr" to csr.cbor()))
 
     suspend fun listDevices(): List<Cbor.Map> =
-        connection.call("device.list", Cbor.Map(emptyList())).map("devices")?.asArray()?.items
+        connection.call("device.list", Cbor.Map(emptyList())).array("devices")?.items
             ?.mapNotNull { it as? Cbor.Map }.orEmpty()
 
     suspend fun revokeDevice(serial: String): Boolean =

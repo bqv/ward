@@ -2802,6 +2802,33 @@ static void handle_session_prompt(wd_server *srv, wd_conn *conn, uint64_t id,
     conn_arm(srv, conn);
     return;
   }
+  bool steer = false;
+  wd_bool_of(wd_get(params, "steer"), &steer);
+  if (steer && run_find(srv, session->id) != NULL) {
+    wd_run *running = run_find(srv, session->id);
+    if (wd_turn_steer(running->turn, text) != 0) {
+      free(session_id);
+      free(text);
+      conn_send_error(conn, id, WD_ERR_BUSY, "too many steers for this turn");
+      conn_arm(srv, conn);
+      return;
+    }
+    cbor_item_t *asked = wd_map(1);
+    wd_put(asked, "text", wd_text(text));
+    cbor_item_t *asked_event = wd_map(1);
+    wd_put(asked_event, "text", wd_text(text));
+    uint64_t asked_seq = 0;
+    if (wd_session_emit(session, "session.prompted", asked, &asked_seq) == 0)
+      conn_broadcast(srv, session, "session.prompted", asked_seq, asked_event);
+    cbor_item_t *result = wd_map(2);
+    wd_put(result, "session", wd_text(session->id));
+    wd_put(result, "steered", cbor_build_bool(true));
+    free(session_id);
+    free(text);
+    conn_send_cached(conn, id, wd_response_ok(id, result));
+    conn_arm(srv, conn);
+    return;
+  }
   if (run_find(srv, session->id) != NULL) {
     size_t ahead = 0;
     for (wd_queue *at = srv->queue; at != NULL; at = at->next)

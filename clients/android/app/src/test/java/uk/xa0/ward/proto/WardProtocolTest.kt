@@ -90,7 +90,7 @@ class WardProtocolTest {
                 ),
             ),
         )
-        val items = value.map("approvals")?.asArray()?.items
+        val items = value.array("approvals")?.items
         assertEquals(1, items?.size)
         assertEquals("fs.write", (items!!.first() as Cbor.Map).text("tool"))
     }

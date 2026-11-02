@@ -163,6 +163,32 @@ int main(void) {
   assert(wd_uint_of(wd_get(second_result, "ahead"), &ahead));
   assert(ahead == 0);
   wd_free(second_result);
+  cbor_item_t *steer_create = wd_map(1);
+  wd_put(steer_create, "cwd", wd_text(root));
+  cbor_item_t *steer_created = NULL;
+  assert(wd_client_call(&queuer, "session.create", steer_create,
+                        &steer_created) == 0);
+  char *steer_session =
+      wd_text_copy(wd_get(wd_get(steer_created, "session"), "id"));
+  assert(steer_session != NULL);
+  wd_free(steer_created);
+  cbor_item_t *third = wd_map(2);
+  wd_put(third, "id", wd_text(steer_session));
+  wd_put(third, "text", wd_text("third prompt"));
+  cbor_item_t *third_result = NULL;
+  assert(wd_client_call(&queuer, "session.prompt", third, &third_result) == 0);
+  wd_free(third_result);
+  cbor_item_t *steer = wd_map(3);
+  wd_put(steer, "id", wd_text(steer_session));
+  wd_put(steer, "text", wd_text("steer this way"));
+  wd_put(steer, "steer", cbor_build_bool(true));
+  cbor_item_t *steer_result = NULL;
+  assert(wd_client_call(&queuer, "session.prompt", steer, &steer_result) == 0);
+  bool steered = false;
+  assert(wd_bool_of(wd_get(steer_result, "steered"), &steered));
+  assert(steered);
+  wd_free(steer_result);
+  free(steer_session);
   free(queued_session);
   close(queuer.fd);
 

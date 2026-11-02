@@ -76,6 +76,8 @@ struct wd_turn {
   uint64_t park_epoch;
   char *park_reason;
   char park_tool[64];
+  char *steers[8];
+  size_t steer_count;
   uint64_t epoch;
 };
 
@@ -1447,8 +1449,47 @@ static int invoke(wd_instance *instance, cbor_item_t *payload,
   return 0;
 }
 
+int wd_turn_steer(wd_turn *turn, const char *text) {
+  if (turn == NULL || text == NULL || text[0] == '\0') return -1;
+  if (turn->steer_count >= sizeof(turn->steers) / sizeof(turn->steers[0]))
+    return -1;
+  char *copy = strdup(text);
+  if (copy == NULL) return -1;
+  turn->steers[turn->steer_count++] = copy;
+  return 0;
+}
+
+static void deliver_steers(wd_turn *turn, cbor_item_t *payload) {
+  if (turn->steer_count == 0) return;
+  char *prompt = wd_text_copy(wd_get(payload, "prompt"));
+  size_t cap = (prompt != NULL ? strlen(prompt) : 0) + 1;
+  for (size_t i = 0; i < turn->steer_count; i++)
+    cap += strlen(turn->steers[i]) + 2;
+  char *merged = malloc(cap);
+  if (merged == NULL) return;
+  size_t used = 0;
+  if (prompt != NULL) {
+    used = strlen(prompt);
+    memcpy(merged, prompt, used);
+  }
+  for (size_t i = 0; i < turn->steer_count; i++) {
+    int wrote = snprintf(merged + used, cap - used, "\n\n%s", turn->steers[i]);
+    if (wrote > 0) used += (size_t)wrote;
+    free(turn->steers[i]);
+    turn->steers[i] = NULL;
+  }
+  turn->steer_count = 0;
+  if (used < cap) {
+    merged[used] = '\0';
+    wd_put(payload, "prompt", wd_text(merged));
+  }
+  free(prompt);
+  free(merged);
+}
+
 static int provider_phase(wd_turn *turn, cbor_item_t *payload,
                           cbor_item_t **reply, char **err) {
+  deliver_steers(turn, payload);
   return invoke(turn->provider, payload, reply, err);
 }
 

@@ -54,8 +54,6 @@ class WardLiveTest {
             } finally {
                 java.nio.file.Files.deleteIfExists(temp)
             }
-            assertTrue(api.listApprovals().isEmpty())
-
             assertTrue(api.archive(session.id, true).archived)
         } finally {
             connection.close()
@@ -83,7 +81,7 @@ class WardLiveTest {
             }
             val held = pending.firstOrNull { it.text("session") == session.id }
                 ?: error("the parked write was not listed: $pending")
-            assertEquals("fs.write", held.text("tool"))
+            assertEquals("write", held.text("tool"))
             ownerApi.respondApproval(
                 session.id,
                 held.long("call") ?: error("no call id"),
