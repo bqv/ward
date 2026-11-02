@@ -284,6 +284,7 @@ int main(void) {
   setenv("WARD_FAKE_DELAY_MS", "3000", 1);
 #endif
   setenv("WARD_MAX_RUNS", "2", 1);
+  sweep_test_cgroups();
   unlink("/tmp/ward-fake-counter");
   setenv("WARD_FAKE_COUNTER", "/tmp/ward-fake-counter", 1);
   fake_endpoint(&endpoint_port, &endpoint);
@@ -345,6 +346,10 @@ int main(void) {
     close(ready[0]);
     dup2(ready[1], 1);
     close(ready[1]);
+    char cgroup_base[128];
+    snprintf(cgroup_base, sizeof(cgroup_base),
+             "/sys/fs/cgroup/ward/test/gate-%d", (int)getpid());
+    setenv("WARD_CGROUP", cgroup_base, 1);
     setenv("WARD_MODULE_DIR", modules, 1);
     setenv("WARD_TOOL_ROOT", root, 1);
     setenv("WARD_QUIC_BIND", "off", 1);
@@ -1258,6 +1263,7 @@ int main(void) {
   waitpid(pid, NULL, 0);
 
   stop_server(endpoint);
+  drop_test_cgroup(getenv("WARD_CGROUP"));
   printf("tool gate passed: a write waited for an approval and was answered\n");
   return 0;
 }

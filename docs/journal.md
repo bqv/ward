@@ -1696,3 +1696,24 @@ What is not proven: the gate for the repair path. Tracing it showed the repair r
 `tool=read`, then `judge.decision` and `turn.end` with no `tool.call` — so the dispatch after a repair is being stopped
 somewhere the ordinary path is not, and the gate assertion failed on that. The code is in, the ordinary tool gate still
 passes, and the repair path is measured only up to "the second call is parsed".
+
+Hundred-and-twenty-eighth: ward has its own cgroup, builtin. `wd_cgroup_enter` creates `/ward` and `/ward/harness`
+recursively, enables the memory and pids controllers at every level it creates, writes 2 GiB to `memory.high` and
+`memory.max`, zero to `memory.swap.max` and 256 to `pids.max`, then moves its own pid into the leaf. It checks two
+things first: that the fence holds no processes (a cgroup with children may not hold processes) and that the
+supervisor is not inside the fence — the OpenRC `supervise-daemon` stays in its session cgroup, which is what keeps
+an OOM inside the limit from taking the supervisor with it. `wd_cgroup_leave` moves back and removes the leaf on a
+clean shutdown.
+
+The interesting constraint is cgroup v2's migration rule: a process may only be moved if the writer can write the
+`cgroup.procs` of the closest common ancestor of both cgroups. A user service starts in `/dsh/svc/session-…`, whose
+common ancestor with `/ward` is the root cgroup, owned by root — so a plain write is refused with EACCES however the
+leaf is chowned. ward therefore writes directly when it can and otherwise asks root for that single write
+(`sudo -n tee`), with `WARD_CGROUP_SUDO=0` to forbid it.
+
+Verified on the running service: the daemon's cgroup is `/ward/harness`, `memory.max = memory.high = 2 GiB`,
+swap 0, pids 256, and `supervise-daemon` is in `/dsh/svc/session-…`, outside `/ward`.
+
+Tests live under `/ward/test/gate-<pid>`: each gate gets its own fence and leaf, removes it on exit, and sweeps
+leaves left by a gate that was killed. `cgroup_test` enters a temporary fence and checks the limits the kernel
+actually recorded.

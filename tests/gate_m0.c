@@ -8,6 +8,7 @@
 #include <signal.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -126,6 +127,32 @@ static double seconds_since(struct timespec *start) {
          (double)(now.tv_nsec - start->tv_nsec) / 1e9;
 }
 
+static void sweep_test_cgroups(void) {
+  const char *root = "/sys/fs/cgroup/ward/test";
+  DIR *dir = opendir(root);
+  if (dir == NULL) return;
+  struct dirent *entry = NULL;
+  while ((entry = readdir(dir)) != NULL) {
+    if (strncmp(entry->d_name, "gate-", 5) != 0) continue;
+    char leaf[1100];
+    char base[512];
+    snprintf(base, sizeof(base), "%s/%s", root, entry->d_name);
+    snprintf(leaf, sizeof(leaf), "%.1000s/harness", base);
+    rmdir(leaf);
+    rmdir(base);
+  }
+  closedir(dir);
+}
+
+static void drop_cgroup(const char *base) {
+  if (base == NULL || base[0] == '\0') return;
+  char leaf[1100];
+  snprintf(leaf, sizeof(leaf), "%.1000s/harness", base);
+  rmdir(leaf);
+  rmdir(base);
+  rmdir("/sys/fs/cgroup/ward/test");
+}
+
 int main(void) {
   alarm(120);
   const char *bin = getenv("WARD_BIN");
@@ -150,6 +177,11 @@ int main(void) {
     dup2(ready[1], 1);
     close(ready[1]);
     prctl(PR_SET_PDEATHSIG, SIGTERM);
+    sweep_test_cgroups();
+  char cgroup_base[128];
+    snprintf(cgroup_base, sizeof(cgroup_base),
+             "/sys/fs/cgroup/ward/test/gate-%d", (int)getpid());
+    setenv("WARD_CGROUP", cgroup_base, 1);
     execl(bin, "ward", "up", "--socket", sock, "--state", state,
           (char *)NULL);
     _exit(127);
@@ -291,6 +323,7 @@ int main(void) {
   int status = 0;
   waitpid(pid, &status, 0);
   assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+  drop_cgroup(getenv("WARD_CGROUP"));
   assert(access(sock, F_OK) != 0);
 
   free(id);

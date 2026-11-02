@@ -8,6 +8,7 @@
 #include <signal.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -250,6 +251,32 @@ static bool enrol(const char *host, uint16_t port, const char *pin,
   return reached;
 }
 
+static void sweep_test_cgroups(void) {
+  const char *root = "/sys/fs/cgroup/ward/test";
+  DIR *dir = opendir(root);
+  if (dir == NULL) return;
+  struct dirent *entry = NULL;
+  while ((entry = readdir(dir)) != NULL) {
+    if (strncmp(entry->d_name, "gate-", 5) != 0) continue;
+    char leaf[1024];
+    char base[1024];
+    snprintf(base, sizeof(base), "%s/%s", root, entry->d_name);
+    snprintf(leaf, sizeof(leaf), "%.1000s/harness", base);
+    rmdir(leaf);
+    rmdir(base);
+  }
+  closedir(dir);
+}
+
+static void drop_cgroup(const char *base) {
+  if (base == NULL || base[0] == '\0') return;
+  char leaf[1100];
+  snprintf(leaf, sizeof(leaf), "%.1000s/harness", base);
+  rmdir(leaf);
+  rmdir(base);
+  rmdir("/sys/fs/cgroup/ward/test");
+}
+
 int main(void) {
   alarm(180);
   const char *bin = getenv("WARD_BIN");
@@ -272,6 +299,11 @@ int main(void) {
     close(ready[0]);
     dup2(ready[1], 1);
     close(ready[1]);
+    sweep_test_cgroups();
+  char cgroup_base[128];
+    snprintf(cgroup_base, sizeof(cgroup_base),
+             "/sys/fs/cgroup/ward/test/gate-%d", (int)getpid());
+    setenv("WARD_CGROUP", cgroup_base, 1);
     setenv("WARD_QUIC_BIND", "127.0.0.1:0", 1);
     prctl(PR_SET_PDEATHSIG, SIGTERM);
     execl(bin, "ward", "up", "--socket", sock, "--state", state_dir,
@@ -491,6 +523,7 @@ int main(void) {
   close(fd);
   kill(pid, SIGKILL);
   waitpid(pid, NULL, 0);
+  drop_cgroup(getenv("WARD_CGROUP"));
   printf("gate passed: a paired device over quic created a session\n");
   return 0;
 }

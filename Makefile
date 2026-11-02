@@ -55,6 +55,7 @@ CORE_SRC := \
            src/core/registry.c \
            src/core/modstate.c \
            src/core/index.c \
+           src/core/cgroup.c \
            src/core/credentials.c \
            src/core/devlock.c \
            src/core/prompt.c \

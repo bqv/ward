@@ -154,6 +154,11 @@ static pid_t start_daemon(const char *bin, const char *sock, const char *state) 
   assert(pid >= 0);
   if (pid == 0) {
     prctl(PR_SET_PDEATHSIG, SIGTERM);
+    sweep_test_cgroups();
+  char cgroup_base[128];
+    snprintf(cgroup_base, sizeof(cgroup_base),
+             "/sys/fs/cgroup/ward/test/gate-%d", (int)getpid());
+    setenv("WARD_CGROUP", cgroup_base, 1);
     execl(bin, "ward", "up", "--socket", sock, "--state", state, (char *)NULL);
     _exit(127);
   }
@@ -343,6 +348,7 @@ int main(void) {
   kill(daemon, SIGKILL);
   waitpid(daemon, NULL, 0);
   stop_server(endpoint);
+  drop_test_cgroup(getenv("WARD_CGROUP"));
   printf("crash gate passed: %llu durable events survived kill -9\n",
          (unsigned long long)count);
   return 0;

@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <fcntl.h>
+#include <dirent.h>
 #include <signal.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
@@ -116,6 +117,32 @@ static void serve(int fd) {
     (void)written;
   }
   close(fd);
+}
+
+static void sweep_test_cgroups(void) {
+  const char *root = "/sys/fs/cgroup/ward/test";
+  DIR *dir = opendir(root);
+  if (dir == NULL) return;
+  struct dirent *entry = NULL;
+  while ((entry = readdir(dir)) != NULL) {
+    if (strncmp(entry->d_name, "gate-", 5) != 0) continue;
+    char leaf[2100];
+    char base[1024];
+    snprintf(base, sizeof(base), "%s/%s", root, entry->d_name);
+    snprintf(leaf, sizeof(leaf), "%.1000s/harness", base);
+    rmdir(leaf);
+    rmdir(base);
+  }
+  closedir(dir);
+}
+
+static void drop_test_cgroup(const char *base) {
+  if (base == NULL || base[0] == '\0') return;
+  char leaf[512];
+  snprintf(leaf, sizeof(leaf), "%.1000s/harness", base);
+  rmdir(leaf);
+  rmdir(base);
+  rmdir("/sys/fs/cgroup/ward/test");
 }
 
 static pid_t start_server(int *port_out) {

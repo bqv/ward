@@ -16,6 +16,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "core/cgroup.h"
 #include "core/util.h"
 #include "daemon/server.h"
 #include "proto/codec.h"
@@ -259,6 +260,38 @@ static void print_session_line(cbor_item_t *session) {
   free(name);
 }
 
+static long long parse_size(const char *text, long long fallback) {
+  if (text == NULL || text[0] == '\0') return fallback;
+  char *end = NULL;
+  long long value = strtoll(text, &end, 10);
+  if (end == text || value <= 0) return fallback;
+  if (*end == 'k' || *end == 'K')
+    value *= 1024;
+  else if (*end == 'm' || *end == 'M')
+    value *= 1024 * 1024;
+  else if (*end == 'g' || *end == 'G')
+    value *= 1024 * 1024 * 1024;
+  return value;
+}
+
+static int enter_cgroup(void) {
+  const char *base = getenv("WARD_CGROUP");
+  if (base == NULL) base = "/sys/fs/cgroup/ward";
+  if (strcmp(base, "off") == 0 || base[0] == '\0') return 0;
+  long long max = parse_size(getenv("WARD_CGROUP_MAX"), 2ll << 30);
+  const char *high_env = getenv("WARD_CGROUP_HIGH");
+  long long high = high_env != NULL ? parse_size(high_env, max) : max;
+  long long pids = parse_size(getenv("WARD_CGROUP_PIDS"), 256);
+  wd_cgroup_config config = {base, "harness", high, max, pids};
+  char *err = NULL;
+  if (wd_cgroup_enter(&config, &err) != 0) {
+    fprintf(stderr, "ward: cgroup: %s\n", err != NULL ? err : "cannot enter");
+    free(err);
+    return -1;
+  }
+  return 0;
+}
+
 static int do_up(int argc, char **argv) {
   const char *socket_path = NULL;
   const char *state_dir = NULL;
@@ -275,6 +308,7 @@ static int do_up(int argc, char **argv) {
       return 2;
     }
   }
+  if (enter_cgroup() != 0) return 1;
   char *socket_default = NULL;
   char *state_default = NULL;
   if (socket_path == NULL) {
@@ -287,6 +321,7 @@ static int do_up(int argc, char **argv) {
   }
   wd_up_config cfg = {.socket_path = socket_path, .state_dir = state_dir};
   int rc = wd_up_run(&cfg);
+  wd_cgroup_leave();
   free(socket_default);
   free(state_default);
   return rc == 0 ? 0 : 1;
