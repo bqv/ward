@@ -1459,6 +1459,16 @@ int wd_turn_steer(wd_turn *turn, const char *text) {
   return 0;
 }
 
+char *wd_turn_steer_pop(wd_turn *turn) {
+  if (turn == NULL || turn->steer_count == 0) return NULL;
+  char *first = turn->steers[0];
+  for (size_t i = 1; i < turn->steer_count; i++)
+    turn->steers[i - 1] = turn->steers[i];
+  turn->steers[turn->steer_count - 1] = NULL;
+  turn->steer_count--;
+  return first;
+}
+
 static void deliver_steers(wd_turn *turn, cbor_item_t *payload) {
   if (turn->steer_count == 0) return;
   char *prompt = wd_text_copy(wd_get(payload, "prompt"));

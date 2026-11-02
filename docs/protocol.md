@@ -36,7 +36,9 @@ it runs. A queue deeper than eight answers a busy error rather than a queued one
 `session.prompt {id, text, steer: true}` answers `{session, steered: true}` when a
 turn is running: the text is appended to that turn's next provider request, in
 the order it arrived, and is **not** an interruption. More than eight steers for
-one turn answer a busy error. With no turn running the flag is ignored and the
+one turn answer a busy error, and a steer the turn never delivers — because no
+further provider call came — is queued as its own prompt when the turn ends
+rather than dropped. With no turn running the flag is ignored and the
 prompt runs normally.
 
 `approval.list {}` answers `{approvals: [{session, tool, reason, call, epoch,

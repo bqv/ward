@@ -2041,3 +2041,12 @@ dropping one silently, and with no turn running the flag is ignored so the promp
 
 `gate_native` asserts the steered answer on a session of its own — the queue test taught that lesson twice: a shared
 session makes a later assertion fail for the wrong reason.
+
+Hundred-and-fifty-fifth: a late steer is not lost. If a turn ends before another provider boundary, `run_free` pops the
+undelivered steers and enqueues each as its own prompt, so the text becomes a new turn instead of dying with the old one. The
+alternative — dropping it — is the failure a user would never see: they typed it, the row appeared, and the model never read
+it.
+
+Honest limit: the carry-over has no assertion of its own yet. `gate_native` proves the steered answer and that the suite
+still passes, but nothing in the suite yet counts the extra turn that the carry-over starts. The code is four lines and the
+failure would be loud in the daemon log, but this is recorded as unmeasured rather than claimed.

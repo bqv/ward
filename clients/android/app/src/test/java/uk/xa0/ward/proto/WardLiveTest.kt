@@ -82,11 +82,11 @@ class WardLiveTest {
             val held = pending.firstOrNull { it.text("session") == session.id }
                 ?: error("the parked write was not listed: $pending")
             assertEquals("write", held.text("tool"))
-            ownerApi.respondApproval(
+            workerApi.respondApproval(
                 session.id,
                 held.long("call") ?: error("no call id"),
                 held.long("epoch") ?: error("no epoch"),
-                false,
+                true,
             )
             withTimeout(10_000) { prompt.join() }
             assertTrue(ownerApi.listApprovals().none { it.text("session") == session.id })

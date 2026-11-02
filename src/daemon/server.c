@@ -2695,6 +2695,16 @@ static void persist_state(wd_server *srv, wd_run *run) {
 }
 
 static void run_free(wd_server *srv, wd_run *run) {
+  if (run->turn != NULL) {
+    wd_session *owner = wd_session_find(&srv->store, run->session_id);
+    char *late = NULL;
+    while (owner != NULL && (late = wd_turn_steer_pop(run->turn)) != NULL) {
+      if (!enqueue_turn(srv, owner, late, NULL))
+        fprintf(stderr, "ward: a late steer was dropped for %s\n",
+                run->session_id);
+      free(late);
+    }
+  }
   run_unwatch(srv, run, 2);
   run_unwatch(srv, run, 3);
   for (wd_run **at = &srv->runs; *at != NULL; at = &(*at)->next) {
