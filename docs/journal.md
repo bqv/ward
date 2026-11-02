@@ -1879,3 +1879,16 @@ a whole turn before its prompt is acknowledged is not the behaviour the protocol
 Removed again, with the finding recorded. The next attempt should prompt from a *second* process while a first one holds a
 subscription, exactly as `gate_tool` does, and see whether the response arrives then; that distinguishes "the daemon defers
 the reply" from "the turn never ends".
+
+Hundred-and-forty-first: reading the handler settles half the question and sharpens the other half. `handle_session_prompt`
+calls `wd_turn_prompt` **synchronously** and only then sends the response, so a client waits for the turn to reach its first
+park. That is by design and matches the CLI, which returns as soon as the provider request is parked.
+
+In the gate that park never happened: the log shows one provider reply parsed, then nothing for forty-five seconds — no second
+reply, no error, no turn.end. So the turn was stuck after the provider answer, inside the driver, rather than waiting on the
+network. Two candidate causes remain and they are distinguishable in one run: either the driver guest loops on this reply
+(an empty-arguments tool result, or a text it cannot classify) or the daemon died silently while holding the socket.
+
+The next probe is cheap: run the same turn through the CLI against the same fixture and see whether the CLI returns. If it
+does, the difference is the client; if it does not, the driver is the one to instrument, with the same byte-printing
+discipline that resolved the 2^39.
