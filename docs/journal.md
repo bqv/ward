@@ -2176,3 +2176,15 @@ rather than an empty stream.
 Honest limit: no gate drives the ring past its cap through the daemon. The accounting is unit-tested and the daemon path is
 method-tested, but the two are not yet joined by a job that overflows — that needs a provider that streams more than 64 KiB,
 which the fixture does not do.
+
+Hundred-and-sixty-sixth: the carry-over trace, and what it says. The steer is present on the run when `run_free` reaches the
+carry-over block — a pop proved it — but the enqueue never produces a drain, and the carried turn never starts. With `cancel`
+the run is freed asynchronously enough that the assertion runs before the carry-over is reached at all, which is why the trace
+for the following session shows up after the assertion line.
+
+Two things are true and worth keeping: a trace that pops is not a trace, it is a change — mine consumed the steer and made the
+path look worse than it is; and the queue trace showed exactly one drain, of the earlier queued prompt, with nothing for the
+carry-over.
+
+Next session should trace the enqueue itself (a counter, not a pop) and the drain's walk, with the carry-over forced by
+cancel and the assertion replaced by a bounded read so it cannot pass before the daemon has finished.
