@@ -1,0 +1,24 @@
+# Build and run the cursor probe:
+#   gcc -o xcursor-probe xcursor-probe.c $(pkg-config --cflags --libs xcb xcb-cursor)
+#
+# Two checks, and neither needs the client running (several clients against the
+# host compete for it; a cursor does not).
+#
+# WHAT IS PACKED — what sizes and hotspots the shipped theme actually contains.
+# Every shape must be 22/24/32/48/64 with its hotspot scaled to match, because a
+# hotspot that drifts with size clicks in the wrong place:
+#
+#   ./xcursor-probe -i assets/cursors/themes/dsh/cursors/left_ptr
+#
+# WHAT RESOLVES — the same call Qt's xcb platform makes, with the environment the
+# client will set. A miss means the pointer falls through to the X core cursor
+# font, which is exactly the state this theme exists to fix:
+#
+#   XCURSOR_PATH=$PWD/assets/cursors/themes:/usr/share/icons \
+#     ./xcursor-probe left_ptr hand1 xterm
+#
+# Note what is NOT here: XCURSOR_THEME. libxcb-cursor 0.1.6 contains no
+# XCURSOR_THEME string at all (check: strings /usr/lib64/libxcb-cursor.so.0 |
+# grep XCURSOR). The theme is chosen through XCURSOR_PATH plus a directory named
+# `default` whose index.theme says `Inherits=dsh`, which is why the shipped tree
+# has themes/default/index.theme.

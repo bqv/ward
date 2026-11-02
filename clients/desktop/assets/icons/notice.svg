@@ -1,0 +1,13 @@
+<!-- A notice row with no producer of its own: an information mark. The ring is
+     what the `\u25cb` glyph already meant, drawn as a stroke rather than as a
+     font character so it lines up with the rest of the set. Per-shape
+     attributes (see shell.svg). #919190 = Theme.dim. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <circle cx="8" cy="8" r="6"
+          fill="none" stroke="#919190" stroke-width="1.5"
+          stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="8" cy="5.1" r="0.9" fill="#919190" stroke="none"/>
+  <path d="M8 7.6 V11.4"
+        fill="none" stroke="#919190" stroke-width="1.5"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

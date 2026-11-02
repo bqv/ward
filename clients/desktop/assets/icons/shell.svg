@@ -1,0 +1,19 @@
+<!-- A shell row: a terminal frame with a prompt and a caret line, not the
+     ascii `>_` pair the text glyph used. 16x16 nominal. Every shape carries
+     its own presentation attributes rather than inheriting them from <svg>:
+     the default fill is BLACK, so a renderer that does not propagate the root
+     style would draw solid blobs, and that failure is worth designing out.
+     Single colour = #919190, Theme.dim's own value: an untinted draw is
+     already legible and the tint's edge blend matches the icon rather than
+     haloing it. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <rect x="2" y="3" width="12" height="10" rx="1.5"
+        fill="none" stroke="#919190" stroke-width="1.5"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M5 6.4 L7.3 8.5 L5 10.6"
+        fill="none" stroke="#919190" stroke-width="1.5"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M8.6 10.6 H11.2"
+        fill="none" stroke="#919190" stroke-width="1.5"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

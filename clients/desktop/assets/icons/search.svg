@@ -1,0 +1,11 @@
+<!-- A search row (grep, glob, find): a magnifier. 1.5px stroke keeps the ring
+     open at 16px. Per-shape attributes (see shell.svg for why).
+     #919190 = Theme.dim. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <circle cx="7" cy="7" r="4.4"
+          fill="none" stroke="#919190" stroke-width="1.5"
+          stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M10.3 10.3 L13.6 13.6"
+        fill="none" stroke="#919190" stroke-width="1.5"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

@@ -1,0 +1,27 @@
+#!/bin/execlineb -S0
+# Regenerate the shipped Xcursor files from the SVGs in this directory:
+#
+#   ./rebuild
+#
+# Why this exists: an Xcursor file is a binary container of per-size ARGB
+# images, so the SVGs cannot ship directly — the toolkit asks libxcb-cursor for
+# a cursor NAME at a PIXEL SIZE and gets a ready-made cursor back. rsvg
+# rasterises, xcursorgen packs. The packed files are committed, so a packaged
+# build needs neither tool at install time and the ebuild only installs this
+# directory.
+#
+# Two scripts, not one: inside a `forx` body execline has already parsed the
+# remainder, so a value computed there (the shape name, its hotspot) is never
+# substituted into the commands that need it. `rebuild-one` is a separate
+# program, so it parses its own body and its `backtick … importas … use`
+# chain works. The alias names (pointer, ibeam, not-allowed, …) stay as
+# committed symlinks in themes/dsh/cursors: splitting "alias:target" would
+# need a pipeline, whose last command would eat the rest of the script.
+
+backtick -n here { dirname $0 }
+importas -u here here
+cd $here
+
+elglob -s svgs *.svg
+forx -E svg { $svgs }
+./rebuild-one $svg

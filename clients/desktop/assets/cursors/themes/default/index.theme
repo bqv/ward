@@ -1,0 +1,11 @@
+# The indirection the freedesktop cursor spec expects: a theme named "default"
+# is what libXcursor (and libxcb-cursor, which Qt 6's xcb platform actually calls)
+# resolves when no theme name is set, and its `Inherits` names the real theme.
+#
+# We ship this because nothing on this box installs /usr/share/icons/default:
+# no theme was selected at all, so every cursor fell through to the X core
+# cursor FONT - the 1980s bitmap arrows, not even Adwaita.
+[Icon Theme]
+Name=Default
+Comment=DSH Native cursor theme
+Inherits=dsh

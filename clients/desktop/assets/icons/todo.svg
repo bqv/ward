@@ -1,0 +1,19 @@
+<!-- A todo/goal row: a two-item checklist. Two rows, not three — three at 16px
+     puts 1.5px strokes a pixel apart and the list turns into a hatch. The
+     boxes stay empty on purpose: this is a list, not a completion claim, and a
+     tick at this size is a smear. Per-shape attributes (see shell.svg).
+     #919190 = Theme.dim. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <rect x="2.2" y="4.1" width="2.8" height="2.8" rx="0.6"
+        fill="none" stroke="#919190" stroke-width="1.5"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M7 5.5 H13.8"
+        fill="none" stroke="#919190" stroke-width="1.5"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="2.2" y="9.1" width="2.8" height="2.8" rx="0.6"
+        fill="none" stroke="#919190" stroke-width="1.5"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M7 10.5 H11.6"
+        fill="none" stroke="#919190" stroke-width="1.5"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

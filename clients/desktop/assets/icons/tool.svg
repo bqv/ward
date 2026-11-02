@@ -1,0 +1,12 @@
+<!-- The neutral fallback: a hex nut. For a tool this build has no family for,
+     the honest thing to draw is a part, not a guess at what the tool does — a
+     magnifier or a page here would claim a meaning the name never carried.
+     Per-shape attributes (see shell.svg for why). #919190 = Theme.dim. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <path d="M8 2.1 L13.1 5.05 V10.95 L8 13.9 L2.9 10.95 V5.05 Z"
+        fill="none" stroke="#919190" stroke-width="1.5"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="8" cy="8" r="2.2"
+          fill="none" stroke="#919190" stroke-width="1.5"
+          stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

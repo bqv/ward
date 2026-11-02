@@ -1,0 +1,32 @@
+# Build output
+build/
+build-*/
+
+# Toolchain redirection used during development (Qt caches, XDG dirs, logs).
+.toolchain/
+
+# Development scratch: probes, a sandboxed DSH home, diagnostics.
+# None of this is part of the client.
+_spike/
+_scratch/
+
+# Credentials, wherever they end up. The sandbox home under _spike/ already
+# holds a copy of the real .credentials.yaml (staged there by hand so the
+# sandboxed tests can authenticate); _spike/ is ignored, but this rule is a
+# second line of defence in case the sandbox is ever moved.
+.credentials.yaml
+.credentials.yml
+*.credentials.yaml
+secrets.json
+
+# Editor/OS noise
+*.swp
+*.user
+.DS_Store
+
+# Coordinator worktrees: one per parallel work item. Scratch, not source.
+.work/
+
+# Project-local agent instructions: on disk, never in the repository.
+# The other repos on this box all keep theirs untracked this way.
+/AGENTS.md

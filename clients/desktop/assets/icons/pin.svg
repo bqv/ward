@@ -1,0 +1,21 @@
+<!-- A pinned Session: a pushpin, not a map pin. The row is held at the top of
+     its group, it does not name a place on a map — and a map pin here would be
+     read as the session's directory, which is the one thing the id line below
+     the title deliberately is not. Cap, tapered body and needle, outlined like
+     the rest of the set so it sits at the same weight as the state marks and
+     survives the 34 px strip's badge. Per-shape attributes (see shell.svg).
+     #919190 is the same mark grey as every other icon in this directory. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <path d="M4.8 2.5 H11.2"
+        fill="none" stroke="#919190" stroke-width="1.5"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M5.9 2.5 V3.9 C5.9 4.9 7.0 5.3 7.4 6.1 H8.6 C9.0 5.3 10.1 4.9 10.1 3.9 V2.5"
+        fill="none" stroke="#919190" stroke-width="1.5"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M8 6.1 V10.3"
+        fill="none" stroke="#919190" stroke-width="1.5"
+        stroke-linecap="round"/>
+  <path d="M6.9 10.3 L8 13.5 L9.1 10.3 Z"
+        fill="none" stroke="#919190" stroke-width="1.5"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

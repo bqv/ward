@@ -1,0 +1,12 @@
+<!-- An image row: a frame with a sun and a ridge. Deliberately a frame rather
+     than a filled picture — the slot is 16px and a solid shape would read as a
+     block. Per-shape attributes (see shell.svg for why). #919190 = Theme.dim. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <rect x="2" y="3.2" width="12" height="9.6" rx="1.2"
+        fill="none" stroke="#919190" stroke-width="1.5"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="5.4" cy="6.4" r="0.9" fill="#919190" stroke="none"/>
+  <path d="M2.6 11.9 L6.1 8.4 L8.6 10.9 L10.2 9.3 L13.4 12.2"
+        fill="none" stroke="#919190" stroke-width="1.5"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

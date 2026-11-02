@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=ward-gui
+GenericName=ward agent conversation
+Comment=Native desktop client for a local ward daemon
+Exec=ward-gui
+Icon=utilities-terminal
+Terminal=false
+Categories=Development;Utility;
+Keywords=ward;agent;ai;chat;harness;conversation;
+StartupWMClass=Ward

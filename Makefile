@@ -82,7 +82,7 @@ MODULE_WASM := $(addprefix $(BUILDDIR)/,$(addsuffix .wasm,$(MODULES)))
 GUESTS := echo wasi importer trap
 GUEST_WASM := $(addprefix $(BUILDDIR)/,$(addsuffix .wasm,$(GUESTS)))
 
-.PHONY: all test guests modules clean install check-deps
+.PHONY: all test guests modules clean install check-deps desktop
 
 all: check-deps $(WARD) $(NATIVE) $(MODULE_WASM) $(GUEST_WASM) $(TEST_BINS)
 
@@ -128,6 +128,10 @@ android-test: $(ANDROID_LIB)
 	  clients/android/uk/xa0/ward/WardClient.java
 	$(JAVA_HOME)/bin/java -Djava.library.path=$(abspath $(BUILDDIR)) \
 	  -cp $(BUILDDIR)/java uk.xa0.ward.WardClient
+
+desktop:
+	cmake -S clients/desktop -B clients/desktop/build -G Ninja
+	cmake --build clients/desktop/build
 
 modules: $(MODULE_WASM)
 guests: $(GUEST_WASM)

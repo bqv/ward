@@ -1,0 +1,14 @@
+<!-- A web/fetch row: a globe, meridian and equator. Three strokes only, so it
+     still reads at 16px where a graticule of many lines would turn into a
+     smudge. Per-shape attributes (see shell.svg for why). #919190 = Theme.dim. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <circle cx="8" cy="8" r="6"
+          fill="none" stroke="#919190" stroke-width="1.5"
+          stroke-linecap="round" stroke-linejoin="round"/>
+  <ellipse cx="8" cy="8" rx="2.7" ry="6"
+           fill="none" stroke="#919190" stroke-width="1.5"
+           stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M2 8 H14"
+        fill="none" stroke="#919190" stroke-width="1.5"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

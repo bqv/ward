@@ -1,0 +1,15 @@
+<!-- An error row: a ring with an exclamation. Replaces the 8px red dot the
+     slot used to draw — the dot was there because no glyph existed for a row
+     with no tool name, and a shape says more than a dot at the same size. The
+     dot is still the fallback when this file cannot be loaded. Per-shape
+     attributes (see shell.svg); #919190 = Theme.dim, and the row tints it with
+     Theme.danger. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <circle cx="8" cy="8" r="6"
+          fill="none" stroke="#919190" stroke-width="1.5"
+          stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M8 4.8 V8.8"
+        fill="none" stroke="#919190" stroke-width="1.5"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="8" cy="11.3" r="0.9" fill="#919190" stroke="none"/>
+</svg>

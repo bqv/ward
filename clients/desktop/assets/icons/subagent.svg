@@ -1,0 +1,14 @@
+<!-- A subagent/task row: one node forking into two. Reads as delegation rather
+     than as the abstract arrow the old `\u21b3` glyph was. Per-shape
+     attributes (see shell.svg for why). #919190 = Theme.dim. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <circle cx="8" cy="3.1" r="1.6"
+          fill="none" stroke="#919190" stroke-width="1.5"/>
+  <circle cx="3.7" cy="12.9" r="1.6"
+          fill="none" stroke="#919190" stroke-width="1.5"/>
+  <circle cx="12.3" cy="12.9" r="1.6"
+          fill="none" stroke="#919190" stroke-width="1.5"/>
+  <path d="M8 4.7 V7.4 M3.7 11.3 V7.4 H12.3 V11.3"
+        fill="none" stroke="#919190" stroke-width="1.5"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

@@ -1,0 +1,8 @@
+# `Inherits=Adwaita` is the safety net: any shape this set does not draw
+# (question_arrow, zoom cursors, ...) resolves to Adwaita's artwork rather than
+# dropping through to the X core font. Adwaita is installed on this box and its
+# directory is on the search path the client passes in XCURSOR_PATH.
+[Icon Theme]
+Name=dsh
+Comment=DSH Native: flat light-on-dark cursors for the native client
+Inherits=Adwaita

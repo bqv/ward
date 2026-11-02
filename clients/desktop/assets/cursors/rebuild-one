@@ -1,0 +1,73 @@
+#!/bin/execlineb -S0
+# Pack one SVG into an Xcursor file:  ./rebuild-one left_ptr.svg
+#
+# Called by ./rebuild, one process per shape, because only a separate program
+# re-parses its own body — see the header of ./rebuild.
+#
+# The four sizes are written out rather than looped for the same reason: a
+# hotspot computed inside a block is a literal by the time the block is used.
+# Sizes are fixed anyway, and Xcursor picks the nearest nominal size.
+
+backtick -n name { basename $1 .svg }
+importas -u name name
+backtick -n hx { sed -n "s/.*data-hotspot=\"\\([0-9]*\\) [0-9]*\".*/\\1/p" $1 }
+importas -u hx hx
+backtick -n hy { sed -n "s/.*data-hotspot=\"[0-9]* \\([0-9]*\\)\".*/\\1/p" $1 }
+importas -u hy hy
+
+# `expr` rounds with +half/24, so a hotspot lands on the nearest pixel of the
+# scaled image instead of always truncating towards the origin.
+backtick -n x22 { expr \( $hx \* 22 + 11 \) / 22 }
+importas -u x22 x22
+backtick -n y22 { expr \( $hy \* 22 + 11 \) / 22 }
+importas -u y22 y22
+backtick -n x24 { expr \( $hx \* 24 + 12 \) / 24 }
+importas -u x24 x24
+backtick -n y24 { expr \( $hy \* 24 + 12 \) / 24 }
+importas -u y24 y24
+backtick -n x32 { expr \( $hx \* 32 + 12 \) / 24 }
+importas -u x32 x32
+backtick -n y32 { expr \( $hy \* 32 + 12 \) / 24 }
+importas -u y32 y32
+backtick -n x48 { expr \( $hx \* 48 + 12 \) / 24 }
+importas -u x48 x48
+backtick -n y48 { expr \( $hy \* 48 + 12 \) / 24 }
+importas -u y48 y48
+backtick -n x64 { expr \( $hx \* 64 + 12 \) / 24 }
+importas -u x64 x64
+backtick -n y64 { expr \( $hy \* 64 + 12 \) / 24 }
+importas -u y64 y64
+
+backtick -n scratch { mktemp -d }
+importas -u scratch scratch
+
+foreground { mkdir -p themes/dsh/cursors }
+foreground { rsvg-convert -w 22 -h 22 $1 -o ${scratch}/${name}-22.png }
+foreground { rsvg-convert -w 24 -h 24 $1 -o ${scratch}/${name}-24.png }
+foreground { rsvg-convert -w 32 -h 32 $1 -o ${scratch}/${name}-32.png }
+foreground { rsvg-convert -w 48 -h 48 $1 -o ${scratch}/${name}-48.png }
+foreground { rsvg-convert -w 64 -h 64 $1 -o ${scratch}/${name}-64.png }
+
+foreground {
+  redirfd -w 1 ${scratch}/${name}.cfg
+  printf "%s %s %s %s\n" 22 $x22 $y22 ${scratch}/${name}-22.png
+}
+foreground {
+  redirfd -a 1 ${scratch}/${name}.cfg
+  printf "%s %s %s %s\n" 24 $x24 $y24 ${scratch}/${name}-24.png
+}
+foreground {
+  redirfd -a 1 ${scratch}/${name}.cfg
+  printf "%s %s %s %s\n" 32 $x32 $y32 ${scratch}/${name}-32.png
+}
+foreground {
+  redirfd -a 1 ${scratch}/${name}.cfg
+  printf "%s %s %s %s\n" 48 $x48 $y48 ${scratch}/${name}-48.png
+}
+foreground {
+  redirfd -a 1 ${scratch}/${name}.cfg
+  printf "%s %s %s %s\n" 64 $x64 $y64 ${scratch}/${name}-64.png
+}
+
+foreground { xcursorgen ${scratch}/${name}.cfg themes/dsh/cursors/${name} }
+rm -rf $scratch

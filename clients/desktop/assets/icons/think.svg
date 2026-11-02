@@ -1,0 +1,8 @@
+<!-- A thought row: a four-point sparkle, the same idea as the `\u2726` glyph it
+     replaces. Filled rather than stroked — at 16px a stroked four-point star
+     has eight self-intersecting hairlines and reads as a blot. Per-shape
+     attributes (see shell.svg for why). #919190 = Theme.dim. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <path d="M8 2 C8.4 5.1 10.9 7.6 14 8 C10.9 8.4 8.4 10.9 8 14 C7.6 10.9 5.1 8.4 2 8 C5.1 7.6 7.6 5.1 8 2 Z"
+        fill="#919190" stroke="none"/>
+</svg>

@@ -1,0 +1,11 @@
+<!-- A background-job row: a clock. A job runs out of sight on its own time,
+     and the clock is the only mark in this set that says "later" without a
+     word. Per-shape attributes (see shell.svg for why). #919190 = Theme.dim. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <circle cx="8" cy="8" r="6"
+          fill="none" stroke="#919190" stroke-width="1.5"
+          stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M8 4.4 V8 L10.6 9.5"
+        fill="none" stroke="#919190" stroke-width="1.5"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

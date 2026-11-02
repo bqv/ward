@@ -1,0 +1,6 @@
+# Build and run the libvterm probe:
+#   gcc -o vterm-probe vterm-probe.c $(pkg-config --cflags --libs vterm) && ./vterm-probe
+#
+# It exists to pin down the four things a terminal panel depends on, so a future
+# libvterm upgrade that changes any of them fails loudly here rather than
+# silently in the UI.

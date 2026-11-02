@@ -1,0 +1,20 @@
+<!-- A Session a schedule delivers into: a clock. The web client's
+     `SessionScheduleMark` and the Android drawer's row both draw a clock here
+     (Material `Schedule`), and this set already has one — but job.svg is the
+     BACKGROUND-JOB clock, a different fact about a different row, and one file
+     cannot carry two meanings: a later tweak to the job mark would silently
+     restyle what "this session hosts a schedule" looks like. So the schedule
+     clock is its own file, drawn at 3:00 where the job clock's hands point
+     between 4 and 5, with a slightly tighter face (r 5.4 against 6) — same
+     circle-and-two-hands drawing, different time, so the two are told apart at
+     16 px without either growing a second shape.
+     Per-shape attributes (see shell.svg). #919190 is the same mark grey as
+     every other icon in this directory, so no colour literal enters the rail. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <circle cx="8" cy="8" r="5.4"
+          fill="none" stroke="#919190" stroke-width="1.5"
+          stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M8 4.8 V8 H11.1"
+        fill="none" stroke="#919190" stroke-width="1.5"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

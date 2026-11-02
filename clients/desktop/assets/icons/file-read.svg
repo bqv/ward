@@ -1,0 +1,18 @@
+<!-- A read row: a page with a folded corner and two lines of text. The fold
+     and the lines are what separate it from file-write's pencil at 16px; a
+     bare rectangle reads as neither. Per-shape attributes (see shell.svg for
+     why). Single colour = #919190 (Theme.dim). -->
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <path d="M4.2 1.9 H9.4 L11.8 4.3 V14.1 H4.2 Z"
+        fill="none" stroke="#919190" stroke-width="1.5"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M9.4 1.9 V4.3 H11.8"
+        fill="none" stroke="#919190" stroke-width="1.5"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M6.3 7.6 H9.7"
+        fill="none" stroke="#919190" stroke-width="1.5"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M6.3 10.2 H8.6"
+        fill="none" stroke="#919190" stroke-width="1.5"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

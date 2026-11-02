@@ -1,0 +1,11 @@
+<!-- A write/edit row: a pencil — the universal produced-or-changed mark, and
+     the one shape that cannot be mistaken for file-read's page at 16px.
+     Per-shape attributes (see shell.svg for why). #919190 = Theme.dim. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <path d="M2.9 13.1 L3 10.4 L10.2 3.2 L12.8 5.8 L5.6 13 Z"
+        fill="none" stroke="#919190" stroke-width="1.5"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M9.1 4.3 L11.7 6.9"
+        fill="none" stroke="#919190" stroke-width="1.5"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
