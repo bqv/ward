@@ -11,7 +11,8 @@ silently trimmed; the driver no longer stamps the clock and the time is a durabl
 instead of rewriting; the error taxonomy covers the provider failures a local stack produces; cancel kills the
 curl child; `turn.timings` records the router's own numbers and they are summed into stats; `turn.state` names the
 wait; the queue is FIFO with `ahead`; a model's device has a slot pool and one queued turn per session; and the
-provider reads a native `tool_calls` reply.
+provider reads a native `tool_calls` reply, and a reply asking for more than one call is refused rather than
+half-run.
 
 Still open: true streaming (deltas as they arrive), tool dispatch and the grammar-only fallback, and the
 per-daemon limits of the device pool.
