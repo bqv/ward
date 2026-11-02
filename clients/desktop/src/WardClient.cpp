@@ -679,11 +679,9 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
         }
         if (method == QLatin1String("session.resume"))
             m_openingSession = false, emit openingSessionChanged();
-        if (method == QLatin1String("session.prompt")) {
+        if (method == QLatin1String("session.prompt") && !m_turnOpen) {
             m_busy = false;
             emit busyChanged();
-            m_turnOpen = false;
-            emit turnOpenChanged();
         }
         if (method == QLatin1String("session.file_read")) {
             m_fileError = text;
@@ -754,6 +752,23 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
             doPrompt(text);
         }
     } else if (method == QLatin1String("session.prompt")) {
+        if (result.value(QStringLiteral("queued")).toBool()) {
+            const int ahead = result.value(QStringLiteral("ahead")).toInt();
+            m_queue = QVariantList{QVariantMap{
+                {QStringLiteral("id"), QStringLiteral("queued-0")},
+                {QStringLiteral("text"), m_sentPrompt},
+                {QStringLiteral("ahead"), ahead},
+                {QStringLiteral("steering"), false}}};
+            m_sentPrompt.clear();
+            emit queueChanged();
+            if (!m_pendingAttachments.isEmpty()) {
+                m_pendingAttachments.clear();
+                m_stagingName.clear();
+                emit pendingAttachmentsChanged();
+            }
+            setState(Ready, QStringLiteral("queued (%1 ahead)").arg(ahead));
+            return;
+        }
         const QVariantMap session = result.value(QStringLiteral("session")).toMap();
         applySession(session);
         const QVariantMap approval = result.value(QStringLiteral("approval")).toMap();
@@ -965,6 +980,10 @@ void WardClient::handleEvent(uint64_t sub, uint64_t seq, const QString &kind,
         m_turn = int(payload.value(QStringLiteral("turn")).toULongLong());
         m_turnOpen = true;
         emit turnOpenChanged();
+        if (!m_queue.isEmpty()) {
+            m_queue.clear();
+            emit queueChanged();
+        }
         m_transcript->noteTurn(m_turn, true, QDateTime::currentMSecsSinceEpoch());
         addTrajectory(QVariantMap{
             {QStringLiteral("id"), QStringLiteral("turn-%1").arg(m_turn)},
@@ -1315,6 +1334,10 @@ void WardClient::sendPrompt(const QString &text, const QString &mode)
         createSessionNow();
         return;
     }
+    if (!m_queue.isEmpty()) {
+        emit railNotice(QStringLiteral("a prompt is already queued for this session"), true);
+        return;
+    }
     if (m_sub == 0 || m_subscribedSession != m_sessionId
             || m_subscribing == m_sessionId) {
         m_queuedPrompt = text;
@@ -1332,6 +1355,7 @@ void WardClient::doPrompt(const QString &text)
     emit busyChanged();
     emit turnOpenChanged();
     setState(Ready, QStringLiteral("thinking…"));
+    m_sentPrompt = text;
     if (!m_pendingAttachments.isEmpty()) {
         m_pendingAttachments.clear();
         m_stagingName.clear();
@@ -1975,6 +1999,10 @@ void WardClient::appendRow(const QString &kind, const QString &text, const QStri
 
 void WardClient::clearTranscript()
 {
+    if (!m_queue.isEmpty()) {
+        m_queue.clear();
+        emit queueChanged();
+    }
     m_transcript->clear();
     m_trajectory.clear();
     emit trajectoryChanged();

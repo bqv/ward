@@ -79,6 +79,7 @@ daemon.
 | replay | `session.resume {from: 0}` and the `replay` control frame |
 | approvals | request, respond, resolved; `approval.list` marks every session with a live card and carries tool/reason, so a followed session that reconnects without replay still names the request; `requestId` is `call:epoch` |
 | permission presets | `policy.list` / `policy.select`; `id` normalised to `value`, `current` drives the access chip, `observe` stays in the description |
+| queue | `session.prompt` -> `{queued: true, ahead}` while a turn runs; one queued prompt per session; the chip shows the position |
 | attachments | `attachment.read_blob` for the image lightbox; `session.attachment.path` and `tool.result.path` supply the reference |
 | QUIC | `WARD_QUIC=ON`, `ward-pair`, `--socket quic://host:port`, `WARD_QUIC_CERT/KEY/CA/PIN` |
 | terminal | `terminal.open/write/resize/close`, `terminal.output`, eof and exit state |
@@ -103,11 +104,12 @@ proven yet. They are reported to the ward session as well.
    `device.enrol` over QUIC, then writes `device.crt`, `device.key` and
    `ca.crt`. A live run minted `DE1EE261...` and connected with the new cert.
    The only remaining part is an in-window pairing dialog.
-2. **Queue/steer.** `session.prompt` is serialised; the composer's queue/steer
-   mode stays as-is until a mid-turn steer has a defined model-visible meaning.
-   No client-side queue is invented.
+2. **Steer.** Phase 1 queue is wired (`{queued, ahead}`, one queued prompt per
+   session). Phase 2, appending a user message to the running turn at the next
+   provider boundary, is still a protocol-design decision; no client-side
+   interruption is invented.
 
 Deferred new sessions, workspaces-by-cwd, trajectory projection, the headless
 `--prompt` path, permission presets, directory and blob reads, the lightbox,
 composer attachment staging, the QUIC transport and a pairing CLI are now in.
-An in-window pairing dialog and queue/steer remain.
+An in-window pairing dialog and phase 2 steer remain; phase 1 queue is in.

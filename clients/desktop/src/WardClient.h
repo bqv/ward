@@ -415,6 +415,7 @@ private:
     int m_terminalRows = 0;
 
     QString m_queuedPrompt;
+    QString m_sentPrompt;
     QString m_pendingApproval;
     QHash<QString, QVariantMap> m_approvals;
     QHash<QString, QByteArray> m_attachments;
