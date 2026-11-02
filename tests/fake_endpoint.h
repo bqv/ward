@@ -14,6 +14,7 @@
 #include <fcntl.h>
 #include <dirent.h>
 #include <signal.h>
+#include <sys/prctl.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -163,11 +164,13 @@ static pid_t start_server(int *port_out) {
   pid_t pid = fork();
   assert(pid >= 0);
   if (pid == 0) {
+    prctl(PR_SET_PDEATHSIG, SIGKILL);
     for (int i = 0; i < 8; i++) {
       int conn = accept(fd, NULL, NULL);
       if (conn < 0) break;
       pid_t worker = fork();
       if (worker == 0) {
+        prctl(PR_SET_PDEATHSIG, SIGKILL);
         close(fd);
         serve(conn);
         _exit(0);

@@ -1833,3 +1833,22 @@ client.
 
 No gate yet, and the document says so. The gate is the next slice: a daemon on the fake endpoint, the three commands run
 as subprocesses, and an assertion that `resume` prints the echoed prompt before `turn.end`.
+
+Hundred-and-thirty-eighth: the gate litter is fixed at its source. Two faults compounded.
+
+First, the fake endpoint's forked server and its per-connection workers carried no `PR_SET_PDEATHSIG`, so when a gate was
+killed mid-run — by an assertion, a timeout or me — they survived, were reparented to init, and kept the gate's argv. That
+is why `ps` showed seven `./out/gate_tool` processes: they were fixture servers wearing the gate's name, with their own
+zombie workers underneath. Both forks now set PDEATHSIG, so they die with the gate.
+
+Second, and this is the one that hid the first: **the test binaries were never rebuilt when a header changed**, because the
+Makefile's `-include` line listed the core, CLI and native dependency files but not the tests'. `tests/fake_endpoint.h` had
+been edited at 13:32 while `out/gate_tool` still dated from 13:25, so every verification I ran against the "fix" was
+running the old binary. The tests' `.d` files are included now.
+
+Verified the way the leak was found: start `gate_tool`, `kill -9` it after three seconds, then enumerate every process
+whose executable name starts with `gate_` — zero remain. Before the fix the same check found seven.
+
+A hanging gate is the same class of problem: `gate_native` blocked for its whole timeout while it was being written, so the
+file is removed rather than committed. Its next attempt needs a hard `alarm()` so a stall fails instead of occupying a
+slot for five minutes.

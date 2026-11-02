@@ -187,6 +187,6 @@ install: $(WARD)
 clean:
 	rm -rf -- $(BUILDDIR)
 
--include $(CORE_OBJ:.o=.d) $(BIN_OBJ:.o=.d) $(NATIVE_OBJ:.o=.d)
+-include $(CORE_OBJ:.o=.d) $(BIN_OBJ:.o=.d) $(NATIVE_OBJ:.o=.d) $(TEST_BINS:=.d)
 
 .DELETE_ON_ERROR:
