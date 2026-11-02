@@ -14,10 +14,6 @@
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QImage>
-#include <QFile>
-#include <QFileInfo>
-#include <QGuiApplication>
-#include <QImage>
 #include <QSettings>
 #include <QSocketNotifier>
 #include <QTimer>
@@ -259,6 +255,14 @@ WardClient::WardClient(const QString &socketPath, QObject *parent)
 
 WardClient::~WardClient()
 {
+#ifdef WARD_HAVE_QUIC
+    delete m_quicTimer;
+    m_quicTimer = nullptr;
+    wd_quic_client_free(m_quic);
+    m_quic = nullptr;
+    if (m_quicMode)
+        m_fd = -1;
+#endif
     if (m_fd >= 0)
         close(m_fd);
 }
@@ -285,6 +289,16 @@ void WardClient::fail(const QString &message)
         m_notifier->deleteLater();
         m_notifier = nullptr;
     }
+#ifdef WARD_HAVE_QUIC
+    delete m_quicTimer;
+    m_quicTimer = nullptr;
+    wd_quic_client_free(m_quic);
+    m_quic = nullptr;
+    if (m_quicMode) {
+        m_fd = -1;
+        m_quicMode = false;
+    }
+#endif
     if (m_fd >= 0) {
         close(m_fd);
         m_fd = -1;
@@ -301,6 +315,16 @@ void WardClient::sendFrame(uint16_t type, uint64_t sub, uint64_t seq, cbor_item_
     }
     uint8_t header[WD_FRAME_HEADER];
     wd_frame_header(header, type, sub, seq, uint32_t(len));
+#ifdef WARD_HAVE_QUIC
+    if (m_quicMode) {
+        if (wd_quic_client_write(m_quic, header, sizeof(header)) != 0 ||
+            wd_quic_client_write(m_quic, bytes, len) != 0 ||
+            wd_quic_client_flush(m_quic) != 0)
+            fail(QStringLiteral("the quic stream closed"));
+        free(bytes);
+        return;
+    }
+#endif
     if (writeAll(m_fd, header, sizeof(header)) != 0 || writeAll(m_fd, bytes, len) != 0)
         fail(QStringLiteral("the daemon closed the connection"));
     free(bytes);
@@ -328,6 +352,17 @@ void WardClient::connectToDaemon()
         fail(QStringLiteral("no socket path; set WARD_SOCKET or pass --socket"));
         return;
     }
+#ifdef WARD_HAVE_QUIC
+    if (m_socketPath.startsWith(QLatin1String("quic://"))) {
+        connectQuic();
+        return;
+    }
+#else
+    if (m_socketPath.startsWith(QLatin1String("quic://"))) {
+        fail(QStringLiteral("quic:// needs a build with WARD_QUIC=ON"));
+        return;
+    }
+#endif
     setState(Connecting, QStringLiteral("connecting to %1").arg(m_socketPath));
     QString error;
     m_fd = connectTarget(m_socketPath, &error);
@@ -396,8 +431,149 @@ void WardClient::connectToDaemon()
     refreshPermissionPresets();
 }
 
+
+#ifdef WARD_HAVE_QUIC
+void WardClient::quicFrame(void *ctx, const wd_frame *frame)
+{
+    WardClient *self = static_cast<WardClient *>(ctx);
+    if (self == nullptr)
+        return;
+    if (frame->type == WD_FRAME_WELCOME) {
+        cbor_item_t *root = wd_decode(frame->body, frame->len);
+        unsigned version = 0;
+        uint64_t uid = 0;
+        const bool ok = root != nullptr && wd_read_welcome(root, &version, &uid)
+                     && version == WD_PROTOCOL_VERSION;
+        wd_free(root);
+        self->m_quicWelcome = ok;
+        return;
+    }
+    const QByteArray body(reinterpret_cast<const char *>(frame->body), int(frame->len));
+    self->handleFrame(frame->type, frame->sub, frame->seq, body);
+}
+
+void WardClient::serviceQuic()
+{
+    if (m_quic == nullptr)
+        return;
+    if (wd_quic_client_state(m_quic) == WD_QUIC_CLOSED) {
+        fail(QStringLiteral("the quic connection closed"));
+        return;
+    }
+    (void)wd_quic_client_service(m_quic, wd_now_ms());
+    (void)wd_quic_client_flush(m_quic);
+    scheduleQuic();
+}
+
+void WardClient::scheduleQuic()
+{
+    if (m_quicTimer == nullptr || m_quic == nullptr)
+        return;
+    int wait = wd_quic_client_next_timeout(m_quic, wd_now_ms());
+    if (wait < 0)
+        wait = 20;
+    if (wait > 1000)
+        wait = 1000;
+    m_quicTimer->start(wait);
+}
+
+void WardClient::connectQuic()
+{
+    const QString target = m_socketPath.mid(7);
+    const int colon = target.lastIndexOf(QLatin1Char(':'));
+    if (colon <= 0) {
+        fail(QStringLiteral("quic target must be host:port"));
+        return;
+    }
+    const QByteArray host = target.left(colon).toUtf8();
+    const uint16_t port = uint16_t(target.mid(colon + 1).toUInt());
+    const QByteArray cert = qgetenv("WARD_QUIC_CERT");
+    const QByteArray key = qgetenv("WARD_QUIC_KEY");
+    const QByteArray ca = qgetenv("WARD_QUIC_CA");
+    const QByteArray pin = qgetenv("WARD_QUIC_PIN");
+    if (cert.isEmpty() || key.isEmpty()) {
+        fail(QStringLiteral("quic needs a paired device: set WARD_QUIC_CERT and WARD_QUIC_KEY"));
+        return;
+    }
+    setState(Connecting, QStringLiteral("connecting to %1").arg(m_socketPath));
+    wd_quic_client_config cfg = {};
+    cfg.cert_pem = cert.constData();
+    cfg.key_pem = key.constData();
+    cfg.ca_pem = ca.isEmpty() ? nullptr : ca.constData();
+    cfg.pin_sha256 = pin.isEmpty() ? nullptr : pin.constData();
+    cfg.server_name = "ward";
+    cfg.frame = &WardClient::quicFrame;
+    cfg.ctx = this;
+    char *err = nullptr;
+    m_quic = wd_quic_client_new(&cfg, &err);
+    if (m_quic == nullptr) {
+        fail(QString::fromLocal8Bit(err != nullptr ? err : "cannot create the quic client"));
+        free(err);
+        return;
+    }
+    free(err);
+    m_quicMode = true;
+    if (wd_quic_client_start(m_quic, host.constData(), port, wd_now_ms()) != 0) {
+        fail(QStringLiteral("cannot start the quic handshake"));
+        return;
+    }
+    uint64_t deadline = wd_now_ms() + 5000;
+    while (wd_quic_client_state(m_quic) != WD_QUIC_ESTABLISHED) {
+        if (wd_quic_client_state(m_quic) == WD_QUIC_CLOSED) {
+            fail(QStringLiteral("the quic handshake failed"));
+            return;
+        }
+        (void)wd_quic_client_service(m_quic, wd_now_ms());
+        (void)wd_quic_client_flush(m_quic);
+        if (wd_now_ms() > deadline) {
+            fail(QStringLiteral("the quic handshake timed out"));
+            return;
+        }
+        struct pollfd pfd = {wd_quic_client_fd(m_quic), POLLIN, 0};
+        (void)poll(&pfd, 1, 50);
+    }
+    sendFrame(WD_FRAME_HELLO, 0, 0, wd_hello());
+    deadline = wd_now_ms() + 5000;
+    while (!m_quicWelcome) {
+        if (wd_quic_client_state(m_quic) == WD_QUIC_CLOSED) {
+            fail(QStringLiteral("the quic welcome failed"));
+            return;
+        }
+        (void)wd_quic_client_service(m_quic, wd_now_ms());
+        (void)wd_quic_client_flush(m_quic);
+        if (wd_now_ms() > deadline) {
+            fail(QStringLiteral("the quic welcome timed out"));
+            return;
+        }
+        struct pollfd pfd = {wd_quic_client_fd(m_quic), POLLIN, 0};
+        (void)poll(&pfd, 1, 50);
+    }
+    m_fd = wd_quic_client_fd(m_quic);
+    m_notifier = new QSocketNotifier(m_fd, QSocketNotifier::Read, this);
+    connect(m_notifier, &QSocketNotifier::activated, this, &WardClient::onReadable);
+    m_quicTimer = new QTimer(this);
+    m_quicTimer->setSingleShot(true);
+    connect(m_quicTimer, &QTimer::timeout, this, [this]() { serviceQuic(); });
+    scheduleQuic();
+    m_handshaken = true;
+    setState(Ready, QStringLiteral("ready"));
+    m_sessionsLoading = true;
+    emit sessionsLoadingChanged();
+    sendRequest(QStringLiteral("session.list"), {{QStringLiteral("limit"), 1000}});
+    refreshConfigOptions();
+    refreshApprovals();
+    refreshPermissionPresets();
+}
+#endif
+
 void WardClient::onReadable()
 {
+#ifdef WARD_HAVE_QUIC
+    if (m_quicMode) {
+        serviceQuic();
+        return;
+    }
+#endif
     for (;;) {
         char buffer[65536];
         const ssize_t n = read(m_fd, buffer, sizeof(buffer));
@@ -1351,6 +1527,16 @@ void WardClient::renameSession(const QString &name)
 
 void WardClient::restartSelf()
 {
+#ifdef WARD_HAVE_QUIC
+    delete m_quicTimer;
+    m_quicTimer = nullptr;
+    wd_quic_client_free(m_quic);
+    m_quic = nullptr;
+    if (m_quicMode) {
+        m_fd = -1;
+        m_quicMode = false;
+    }
+#endif
     if (m_fd >= 0) {
         close(m_fd);
         m_fd = -1;

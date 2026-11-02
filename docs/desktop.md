@@ -97,15 +97,16 @@ Unknown events are not dropped by the wire layer: every event reaches
 These are the things the desktop client had and ward-gui does not, or has not
 proven yet. They are reported to the ward session as well.
 
-1. **QUIC.** The client uses Unix sockets and loopback TCP. ward's QUIC
-   transport, device certificates, pairing and `device.*` are not in the client;
-   `src/net/quic.h` is the code to reuse, but it pulls ngtcp2 and OpenSSL into a
-   Qt client that currently links neither.
+1. **QUIC pairing.** The transport exists behind `WARD_QUIC=ON` (ngtcp2 and
+   OpenSSL through pkg-config, `WARD_HAVE_QUIC`), and `--socket quic://host:port`
+   takes `WARD_QUIC_CERT/KEY/CA/PIN`. Generating a CSR, calling
+   `device.pair`/`enrol` and storing the returned certificate is the remaining
+   UX slice.
 2. **Queue/steer.** `session.prompt` is serialised; the composer's queue/steer
    mode stays as-is until a mid-turn steer has a defined model-visible meaning.
    No client-side queue is invented.
 
 Deferred new sessions, workspaces-by-cwd, trajectory projection, the headless
-`--prompt` path, permission presets, directory and blob reads, the lightbox and
-composer attachment staging are now in. QUIC remains a dependency/UX problem;
-queue/steer remains a protocol-design decision.
+`--prompt` path, permission presets, directory and blob reads, the lightbox,
+composer attachment staging and the QUIC transport are now in. QUIC pairing
+remains a UX slice; queue/steer remains a protocol-design decision.

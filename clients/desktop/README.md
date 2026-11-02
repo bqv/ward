@@ -26,7 +26,19 @@ libvterm and libcbor found through `pkg-config`.
 
 ```sh
 cmake -S . -B build -G Ninja && cmake --build build
+cmake -S . -B build-quic -G Ninja -DWARD_QUIC=ON && cmake --build build-quic
 ```
+
+`WARD_QUIC=ON` links ngtcp2 and OpenSSL through pkg-config and defines
+`WARD_HAVE_QUIC`; the default build never touches either. A QUIC connection
+needs a paired device certificate:
+
+```sh
+WARD_QUIC_CERT=device.crt WARD_QUIC_KEY=device.key WARD_QUIC_CA=ca.crt     ./build-quic/ward-gui --socket quic://127.0.0.1:4433
+```
+
+Without `WARD_QUIC=ON`, `quic://` is refused with that build message; with it but
+no certificate, it is refused as an unpaired client.
 
 This builds three binaries:
 
@@ -97,9 +109,9 @@ and are never silently dropped by the wire layer.
 
 ## Not adopted yet
 
-- **QUIC.** Unix sockets and loopback TCP only. ward's QUIC client, device
-  certificates and the pairing flow are not in this client; `src/net/quic.h`
-  is the code to reuse.
+- **QUIC pairing.** The QUIC transport is behind `WARD_QUIC=ON` and accepts an
+  already-paired cert/key/CA; generating a CSR, `device.pair`/`enrol` and storing
+  the returned certificate is not in the client yet.
 - **Queue/steer.** `session.prompt` is serialised; the composer's mode chip
   stays as-is until a mid-turn steer has a model-visible meaning.
 

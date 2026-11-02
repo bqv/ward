@@ -20,6 +20,8 @@ pkg_check_modules(CBOR REQUIRED IMPORTED_TARGET libcbor)
 # daemon and the CLI use, so this client cannot drift from the protocol by
 # re-implementing it. Only the three translation units the client needs are
 # built; nothing from the daemon, store, wasm or net layers comes with them.
+option(WARD_QUIC "Build the QUIC client transport (requires ngtcp2 and OpenSSL)" OFF)
+
 set(WARD_SRC "${CMAKE_CURRENT_SOURCE_DIR}/../../src")
 add_library(wardwire STATIC
     "${WARD_SRC}/proto/frame.c"
@@ -29,6 +31,21 @@ add_library(wardwire STATIC
 target_include_directories(wardwire PUBLIC "${WARD_SRC}")
 target_compile_definitions(wardwire PRIVATE _GNU_SOURCE)
 target_link_libraries(wardwire PUBLIC PkgConfig::CBOR)
+
+if(WARD_QUIC)
+    pkg_check_modules(WARD_QUIC_DEPS REQUIRED IMPORTED_TARGET
+        libngtcp2 libngtcp2_crypto_ossl openssl)
+    add_library(wardquic OBJECT
+        "${WARD_SRC}/net/quic.c"
+        "${WARD_SRC}/net/pki.c"
+    )
+    target_include_directories(wardquic PUBLIC "${WARD_SRC}")
+    target_compile_definitions(wardquic PRIVATE _GNU_SOURCE)
+    target_link_libraries(wardquic PUBLIC wardwire PkgConfig::WARD_QUIC_DEPS)
+    message(STATUS "quic transport: ENABLED")
+else()
+    message(STATUS "quic transport: disabled (WARD_QUIC=OFF)")
+endif()
 
 # ---- the shell --------------------------------------------------------------
 #
@@ -174,6 +191,11 @@ add_executable(ward-gui-probe
 )
 target_link_libraries(ward-gui-probe PRIVATE wardwire Qt6::Core Qt6::Gui Qt6::Network)
 target_include_directories(ward-gui-probe PRIVATE src)
+if(WARD_QUIC)
+    target_sources(ward-gui-probe PRIVATE $<TARGET_OBJECTS:wardquic>)
+    target_link_libraries(ward-gui-probe PRIVATE wardquic)
+    target_compile_definitions(ward-gui-probe PRIVATE WARD_HAVE_QUIC=1)
+endif()
 
 # Where the installed data lives: the icon set the rail and the transcript load,
 # and the cursor themes main.cpp prepends to XCURSOR_PATH. Resolved at run time
@@ -181,6 +203,12 @@ target_include_directories(ward-gui-probe PRIVATE src)
 target_compile_definitions(ward-gui PRIVATE
     DSH_NATIVE_DATA_SUBDIR="/usr/share/ward-gui"
 )
+
+if(WARD_QUIC)
+    target_sources(ward-gui PRIVATE $<TARGET_OBJECTS:wardquic>)
+    target_link_libraries(ward-gui PRIVATE wardquic)
+    target_compile_definitions(ward-gui PRIVATE WARD_HAVE_QUIC=1)
+endif()
 
 # The trapdoor's link-time half. `-l:` rather than the absolute path on purpose:
 # given the absolute path, the linker records the WHOLE build-tree path as

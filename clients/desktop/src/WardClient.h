@@ -18,6 +18,12 @@
 
 class AcpTranscript;
 class QSocketNotifier;
+class QTimer;
+#ifdef WARD_HAVE_QUIC
+extern "C" {
+#include "net/quic.h"
+}
+#endif
 
 class WardClient : public QObject
 {
@@ -282,8 +288,16 @@ signals:
 
 private slots:
     void onReadable();
+#ifdef WARD_HAVE_QUIC
+    void connectQuic();
+#endif
 
 private:
+#ifdef WARD_HAVE_QUIC
+    static void quicFrame(void *ctx, const wd_frame *frame);
+    void serviceQuic();
+    void scheduleQuic();
+#endif
     struct Pending {
         QString method;
     };
@@ -314,6 +328,12 @@ private:
     QString m_socketPath;
     int m_fd = -1;
     QSocketNotifier *m_notifier = nullptr;
+    bool m_quicMode = false;
+#ifdef WARD_HAVE_QUIC
+    wd_quic_client *m_quic = nullptr;
+    QTimer *m_quicTimer = nullptr;
+    bool m_quicWelcome = false;
+#endif
     QByteArray m_in;
     quint64 m_nextId = 1;
     QHash<quint64, Pending> m_pending;
