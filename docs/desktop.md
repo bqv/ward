@@ -78,6 +78,7 @@ daemon.
 | events | routed by kind and subscription; `eventReceived(kind, payload)` is the generic door |
 | replay | `session.resume {from: 0}` and the `replay` control frame |
 | approvals | request, respond, resolved; `approval.list` marks every session with a live card and carries tool/reason, so a followed session that reconnects without replay still names the request; `requestId` is `call:epoch` |
+| permission presets | `policy.list` / `policy.select`; `id` normalised to `value`, `current` drives the access chip, `observe` stays in the description |
 | terminal | `terminal.open/write/resize/close`, `terminal.output`, eof and exit state |
 | session lifecycle | create (client-side lazy), list, resume, prompt, cancel, rename, pin, archive, compact, set_model |
 | catalog | `model.list`, `session.set_model` |
@@ -103,11 +104,10 @@ proven yet. They are reported to the ward session as well.
    surfaces are wired. The image lightbox still needs an image reference in
    ward's tool-result or attachment event before `attachmentUrl` can resolve
    one, and the composer's staging surface is not wired to `attachment.add/list`.
-3. **Permission presets.** ward's policy is a server-side rule table, not a
-   preset catalog; the access chip is absent and `/permission` answers why. A
-   ward-served preset list is the honest first step.
+3. **Queue/steer.** `session.prompt` is serialised; the composer's queue/steer
+   mode stays as-is until a mid-turn steer has a defined model-visible meaning.
+   No client-side queue is invented.
 
-Deferred new sessions, workspaces-by-cwd, trajectory projection and the
-headless `--prompt` path are now in the client; the gate covers the last of
-those. QUIC and presets need ward-side or dependency decisions rather than more
-client wiring.
+Deferred new sessions, workspaces-by-cwd, trajectory projection, the headless
+`--prompt` path and permission presets are now in. QUIC remains a dependency
+problem; queue/steer remains a protocol-design decision.

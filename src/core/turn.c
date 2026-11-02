@@ -18,6 +18,7 @@
 #include "core/prompt.h"
 #include "core/judge.h"
 #include "core/proc.h"
+#include "core/presets.h"
 #include "core/worker.h"
 #include "core/util.h"
 
@@ -1101,7 +1102,6 @@ static int policy_check(wd_turn *turn, const uint8_t *in, size_t in_len,
                         uint8_t **out, size_t *out_len, char **err) {
   if (wd_instance_call(turn->policy, in, in_len, out, out_len, err) != 0)
     return -1;
-  if (turn->judge == NULL) return 0;
   cbor_item_t *request = wd_decode(in, in_len);
   cbor_item_t *reply = wd_decode(*out, *out_len);
   if (request == NULL || reply == NULL) {
@@ -1112,7 +1112,8 @@ static int policy_check(wd_turn *turn, const uint8_t *in, size_t in_len,
   char *tool = wd_text_copy(wd_get(request, "tool"));
   char *payload = wd_text_copy(wd_get(request, "payload"));
   char *decision = wd_text_copy(wd_get(reply, "decision"));
-  if (tool != NULL && decision != NULL && strcmp(decision, "allow") == 0) {
+  if (turn->judge != NULL && tool != NULL && decision != NULL &&
+      strcmp(decision, "allow") == 0) {
     judge_ctx jc = {turn, payload != NULL ? payload : ""};
     bool consulted = false;
     wd_verdict merged =
@@ -1144,11 +1145,33 @@ static int policy_check(wd_turn *turn, const uint8_t *in, size_t in_len,
       }
     }
   }
-  free(tool);
   free(payload);
   free(decision);
   wd_free(request);
   wd_free(reply);
+  const wd_preset *preset = wd_preset_current(wd_engine_state_dir(turn->engine));
+  if (preset != NULL && *out != NULL) {
+    cbor_item_t *answer = wd_decode(*out, *out_len);
+    if (answer != NULL) {
+      char *verdict = wd_text_copy(wd_get(answer, "decision"));
+      const char *clamped = wd_preset_clamp(preset, tool, verdict);
+      if (verdict != NULL && clamped != NULL && strcmp(clamped, verdict) != 0) {
+        wd_free(answer);
+        cbor_item_t *fixed = wd_map(1);
+        wd_put(fixed, "decision", wd_text(clamped));
+        uint8_t *bytes = encode_keep(fixed, out_len);
+        wd_free(fixed);
+        if (bytes != NULL) {
+          free(*out);
+          *out = bytes;
+        }
+      } else {
+        wd_free(answer);
+      }
+      free(verdict);
+    }
+  }
+  free(tool);
   return 0;
 }
 

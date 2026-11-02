@@ -37,6 +37,7 @@
 #include "core/prompt.h"
 #include "core/devlock.h"
 #include "core/files.h"
+#include "core/presets.h"
 #include "core/probe.h"
 #include "net/http.h"
 #include "core/pty.h"
@@ -2030,6 +2031,62 @@ static void handle_session_file_read(wd_server *srv, wd_conn *conn, uint64_t id,
   conn_arm(srv, conn);
 }
 
+static cbor_item_t *preset_to_cbor(const wd_preset *preset) {
+  cbor_item_t *rules = wd_map(5);
+  wd_put(rules, "read", wd_text(preset->read));
+  wd_put(rules, "write", wd_text(preset->write));
+  wd_put(rules, "edit", wd_text(preset->edit));
+  wd_put(rules, "exec", wd_text(preset->exec));
+  wd_put(rules, "grep", wd_text(preset->grep));
+  cbor_item_t *item = wd_map(5);
+  wd_put(item, "id", wd_text(preset->id));
+  wd_put(item, "name", wd_text(preset->name));
+  wd_put(item, "description", wd_text(preset->description));
+  wd_put(item, "observe", wd_text(preset->observe));
+  wd_put(item, "rules", rules);
+  return item;
+}
+
+static void handle_policy_list(wd_server *srv, wd_conn *conn, uint64_t id) {
+  const wd_preset *current = wd_preset_current(srv->state_dir);
+  cbor_item_t *list = wd_array(wd_preset_count());
+  for (size_t i = 0; i < wd_preset_count(); i++) {
+    cbor_item_t *item = preset_to_cbor(wd_preset_at(i));
+    bool pushed = cbor_array_push(list, item);
+    cbor_decref(&item);
+    if (!pushed) break;
+  }
+  cbor_item_t *result = wd_map(2);
+  wd_put(result, "presets", list);
+  wd_put(result, "current", wd_text(current->id));
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
+static void handle_policy_select(wd_server *srv, wd_conn *conn, uint64_t id,
+                                 cbor_item_t *params) {
+  char *choice = wd_text_copy(wd_get(params, "id"));
+  if (choice == NULL) {
+    conn_send_error(conn, id, WD_ERR_INVALID_PARAMS, "id is required");
+    conn_arm(srv, conn);
+    return;
+  }
+  char *err = NULL;
+  if (wd_preset_select(srv->state_dir, choice, &err) != 0) {
+    conn_send_error(conn, id, WD_ERR_INVALID_PARAMS,
+                    err != NULL ? err : "cannot select the preset");
+    free(err);
+    free(choice);
+    conn_arm(srv, conn);
+    return;
+  }
+  cbor_item_t *result = wd_map(1);
+  wd_put(result, "id", wd_text(choice));
+  free(choice);
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
 static void handle_approval_list(wd_server *srv, wd_conn *conn, uint64_t id) {
   wd_approval_info pending[WD_MAX_APPROVALS];
   size_t count = wd_approval_list(srv->approvals, wd_now_ms(), pending,
@@ -3349,6 +3406,10 @@ static void handle_request(wd_server *srv, wd_conn *conn, uint64_t id,
     handle_model_list(srv, conn, id);
   } else if (strcmp(method, "model.select") == 0) {
     handle_model_select(srv, conn, id, params);
+  } else if (strcmp(method, "policy.list") == 0) {
+    handle_policy_list(srv, conn, id);
+  } else if (strcmp(method, "policy.select") == 0) {
+    handle_policy_select(srv, conn, id, params);
   } else if (strcmp(method, "approval.list") == 0) {
     handle_approval_list(srv, conn, id);
   } else if (strcmp(method, "session.file_read_blob") == 0) {

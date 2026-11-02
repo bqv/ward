@@ -46,6 +46,9 @@ int main(int argc, char **argv)
     QCommandLineOption listOption(QStringList{QStringLiteral("list")},
                                   QStringLiteral("list one directory through session.file_list"),
                                   QStringLiteral("path"));
+    QCommandLineOption presetOption(QStringList{QStringLiteral("preset")},
+                                    QStringLiteral("select a policy preset and print the current one"),
+                                    QStringLiteral("id"));
     parser.addOption(socketOption);
     parser.addOption(cwdOption);
     parser.addOption(promptOption);
@@ -57,6 +60,7 @@ int main(int argc, char **argv)
     parser.addOption(blobOffsetOption);
     parser.addOption(blobLenOption);
     parser.addOption(listOption);
+    parser.addOption(presetOption);
     parser.process(app);
 
     WardClient client(parser.value(socketOption));
@@ -71,15 +75,18 @@ int main(int argc, char **argv)
     QString readResult;
     QByteArray blobResult;
     QStringList listResult;
+    QString presetResult;
+    bool presetStarted = false;
     QByteArray terminalText;
     const bool approve = parser.isSet(approveOption);
     const bool terminal = parser.isSet(terminalOption);
     const bool read = parser.isSet(readOption);
     const bool blob = parser.isSet(blobOption);
     const bool list = parser.isSet(listOption);
+    const bool preset = parser.isSet(presetOption);
 
     QObject::connect(&client, &WardClient::lastErrorChanged, &app, [&]() {
-        if (read || blob || list)
+        if (read || blob || list || preset)
             return;
         if (!client.lastError().isEmpty()) {
             QTextStream(stderr) << "probe: " << client.lastError() << "\n";
@@ -94,9 +101,21 @@ int main(int argc, char **argv)
         if (kind == QLatin1String("turn.end"))
             app.quit();
         if (kind == QLatin1String("replay.end") && !parser.isSet(promptOption)
-                && !terminal && !read && !blob && !list
+                && !terminal && !read && !blob && !list && !preset
                 && !parser.isSet(sessionOption))
             app.quit();
+    });
+    QObject::connect(&client, &WardClient::permissionPresetChanged, &app, [&]() {
+        if (!preset || client.permissionPreset().isEmpty())
+            return;
+        presetResult = client.permissionPreset();
+        app.quit();
+    });
+    QObject::connect(&client, &WardClient::accessNoticeChanged, &app, [&]() {
+        if (!preset || client.accessNotice().isEmpty())
+            return;
+        presetResult = QStringLiteral("error: ") + client.accessNotice();
+        app.quit();
     });
     QObject::connect(&client, &WardClient::fileEntriesChanged, &app, [&]() {
         if (!list || client.fileEntries().isEmpty())
@@ -167,6 +186,12 @@ int main(int argc, char **argv)
         }
         if (client.state() != WardClient::Ready || prompted)
             return;
+        if (preset) {
+            prompted = true;
+            presetStarted = true;
+            client.setPermissionPreset(parser.value(presetOption));
+            return;
+        }
         if (terminal || read || blob || list) {
             prompted = true;
             client.createSessionNow();
@@ -187,7 +212,7 @@ int main(int argc, char **argv)
     });
     QObject::connect(&client, &WardClient::sessionsLoadingChanged, &app, [&]() {
         if (client.state() == WardClient::Ready && !parser.isSet(promptOption)
-                && !terminal && !read && !blob && !list
+                && !terminal && !read && !blob && !list && !preset
                 && !parser.isSet(sessionOption) && !client.sessionsLoading())
             app.quit();
     });
@@ -248,6 +273,10 @@ int main(int argc, char **argv)
     } else if (list) {
         out << listResult.join(QLatin1Char('\n'));
         if (!listResult.isEmpty())
+            out << '\n';
+    } else if (preset) {
+        out << presetResult;
+        if (!presetResult.isEmpty())
             out << '\n';
     } else {
         out << text;

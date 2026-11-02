@@ -215,12 +215,17 @@ int main(void) {
                      sizeof(list_escape_out)) == 0);
   assert(strstr(list_escape_out, "outside the session directory") != NULL);
 
+  char preset_out[8192];
+  char *preset_argv[] = {(char *)probe, (char *)"--preset", (char *)"reads-only", NULL};
+  assert(run_capture(sock, probe, preset_argv, preset_out, sizeof(preset_out)) == 0);
+  assert(strstr(preset_out, "reads-only") != NULL);
+
   kill(pid, SIGTERM);
   int status = 0;
   waitpid(pid, &status, 0);
   stop_server(endpoint);
   if (strcmp(cgroup_base, "off") != 0) drop_test_cgroup(cgroup_base);
 
-  printf("desktop gate passed: ward-gui drove a session over UDS, TCP, a terminal, reads, a directory list and a headless prompt\n");
+  printf("desktop gate passed: ward-gui drove a session over UDS, TCP, a terminal, reads, a directory list, a preset and a headless prompt\n");
   return 0;
 }

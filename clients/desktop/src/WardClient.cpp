@@ -374,6 +374,7 @@ void WardClient::connectToDaemon()
     sendRequest(QStringLiteral("session.list"), {{QStringLiteral("limit"), 1000}});
     refreshConfigOptions();
     refreshApprovals();
+    refreshPermissionPresets();
 }
 
 void WardClient::onReadable()
@@ -500,6 +501,11 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
         }
         if (method == QLatin1String("session.file_read_blob"))
             emit blobRead(m_blobPath, m_blobOffset, QByteArray(), text);
+        if (method == QLatin1String("policy.list")
+            || method == QLatin1String("policy.select")) {
+            m_accessNotice = text;
+            emit accessNoticeChanged();
+        }
         if (method == QLatin1String("session.file_list")) {
             m_fileError = text;
             m_fileEntries.clear();
@@ -553,6 +559,28 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
             m_busy = false;
             emit busyChanged();
         }
+    } else if (method == QLatin1String("policy.list")) {
+        const QVariantList presets = result.value(QStringLiteral("presets")).toList();
+        QVariantList mapped;
+        for (const QVariant &value : presets) {
+            const QVariantMap preset = value.toMap();
+            QVariantMap row;
+            row.insert(QStringLiteral("value"), preset.value(QStringLiteral("id")));
+            row.insert(QStringLiteral("name"), preset.value(QStringLiteral("name")));
+            row.insert(QStringLiteral("description"),
+                       preset.value(QStringLiteral("description")));
+            row.insert(QStringLiteral("rules"), preset.value(QStringLiteral("rules")));
+            row.insert(QStringLiteral("observe"), preset.value(QStringLiteral("observe")));
+            mapped.append(row);
+        }
+        m_permissionPresets = mapped;
+        m_permissionPreset = result.value(QStringLiteral("current")).toString();
+        m_accessNotice.clear();
+        emit permissionPresetsChanged();
+        emit permissionPresetChanged();
+        emit accessNoticeChanged();
+    } else if (method == QLatin1String("policy.select")) {
+        refreshPermissionPresets();
     } else if (method == QLatin1String("model.list")) {
         const QVariantList models = result.value(QStringLiteral("models")).toList();
         QVariantList choices;
@@ -1110,8 +1138,11 @@ void WardClient::runCommand(const QString &line)
         return;
     }
     if (line.startsWith(QLatin1String("/permission"))) {
-        m_accessNotice = QStringLiteral("ward has no permission presets; its policy is server-side");
-        emit accessNoticeChanged();
+        const QStringList parts = line.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+        if (parts.size() >= 2)
+            setPermissionPreset(parts.at(1));
+        else
+            refreshPermissionPresets();
         return;
     }
     sendPrompt(line);
@@ -1203,10 +1234,9 @@ void WardClient::refreshConfigOptions()
 
 void WardClient::refreshPermissionPresets()
 {
-    m_permissionPresets.clear();
-    m_accessNotice = QStringLiteral("ward decides policy in its policy module; no presets");
-    emit permissionPresetsChanged();
-    emit accessNoticeChanged();
+    if (m_fd < 0)
+        return;
+    sendRequest(QStringLiteral("policy.list"));
 }
 
 void WardClient::refreshModelCatalog()
@@ -1216,8 +1246,9 @@ void WardClient::refreshModelCatalog()
 
 void WardClient::setPermissionPreset(const QString &value)
 {
-    Q_UNUSED(value);
-    refreshPermissionPresets();
+    if (value.isEmpty())
+        return;
+    sendRequest(QStringLiteral("policy.select"), {{QStringLiteral("id"), value}});
 }
 
 void WardClient::setConfigOption(const QString &configId, const QString &value)
@@ -1578,6 +1609,7 @@ QStringList WardClient::protocolMethods() const
             QStringLiteral("session.undo"), QStringLiteral("session.search"),
             QStringLiteral("session.checkpoint"),
             QStringLiteral("model.list"), QStringLiteral("model.select"),
+            QStringLiteral("policy.list"), QStringLiteral("policy.select"),
             QStringLiteral("model.probe"), QStringLiteral("approval.list"),
             QStringLiteral("approval.respond"),
             QStringLiteral("subagent.prompt"), QStringLiteral("subagent.interrupt"),
