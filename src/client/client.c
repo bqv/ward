@@ -33,6 +33,11 @@ static int write_full(int fd, const void *buf, size_t len) {
   return wd_write_all(fd, buf, len);
 }
 
+static void set_read_timeout(int fd, int seconds) {
+  struct timeval timeout = {seconds, 0};
+  setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+}
+
 int wd_client_connect(wd_client *client, const char *path) {
   struct sockaddr_un addr;
   memset(&addr, 0, sizeof(addr));
@@ -49,6 +54,7 @@ int wd_client_connect(wd_client *client, const char *path) {
     close(fd);
     return -1;
   }
+  set_read_timeout(fd, 120);
   client->fd = fd;
   client->next_id = 1;
   return 0;
@@ -127,7 +133,10 @@ int wd_client_call(wd_client *client, const char *method,
   for (;;) {
     wd_frame frame;
     uint8_t *body = wd_client_read_frame(client->fd, &frame);
-    if (body == NULL) return -1;
+    if (body == NULL) {
+      fprintf(stderr, "ward: no answer from the daemon\n");
+      return -1;
+    }
     cbor_item_t *root = wd_decode(body, frame.len);
     free(body);
     if (root == NULL) return -1;
