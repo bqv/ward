@@ -42,6 +42,13 @@ if(WARD_QUIC)
     target_include_directories(wardquic PUBLIC "${WARD_SRC}")
     target_compile_definitions(wardquic PRIVATE _GNU_SOURCE)
     target_link_libraries(wardquic PUBLIC wardwire PkgConfig::WARD_QUIC_DEPS)
+    add_executable(ward-pair
+        tools/ward_pair.cpp
+        "${WARD_SRC}/client/client.c"
+    )
+    target_include_directories(ward-pair PRIVATE src "${WARD_SRC}")
+    target_compile_definitions(ward-pair PRIVATE _GNU_SOURCE WARD_HAVE_QUIC=1)
+    target_link_libraries(ward-pair PRIVATE wardwire wardquic PkgConfig::WARD_QUIC_DEPS)
     message(STATUS "quic transport: ENABLED")
 else()
     message(STATUS "quic transport: disabled (WARD_QUIC=OFF)")

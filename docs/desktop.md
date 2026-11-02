@@ -80,6 +80,7 @@ daemon.
 | approvals | request, respond, resolved; `approval.list` marks every session with a live card and carries tool/reason, so a followed session that reconnects without replay still names the request; `requestId` is `call:epoch` |
 | permission presets | `policy.list` / `policy.select`; `id` normalised to `value`, `current` drives the access chip, `observe` stays in the description |
 | attachments | `attachment.read_blob` for the image lightbox; `session.attachment.path` and `tool.result.path` supply the reference |
+| QUIC | `WARD_QUIC=ON`, `ward-pair`, `--socket quic://host:port`, `WARD_QUIC_CERT/KEY/CA/PIN` |
 | terminal | `terminal.open/write/resize/close`, `terminal.output`, eof and exit state |
 | session lifecycle | create (client-side lazy), list, resume, prompt, cancel, rename, pin, archive, compact, set_model |
 | catalog | `model.list`, `session.set_model` |
@@ -97,16 +98,16 @@ Unknown events are not dropped by the wire layer: every event reaches
 These are the things the desktop client had and ward-gui does not, or has not
 proven yet. They are reported to the ward session as well.
 
-1. **QUIC pairing.** The transport exists behind `WARD_QUIC=ON` (ngtcp2 and
-   OpenSSL through pkg-config, `WARD_HAVE_QUIC`), and `--socket quic://host:port`
-   takes `WARD_QUIC_CERT/KEY/CA/PIN`. Generating a CSR, calling
-   `device.pair`/`enrol` and storing the returned certificate is the remaining
-   UX slice.
+1. **QUIC pairing UI.** `WARD_QUIC=ON` builds the transport and `ward-pair`;
+   `ward-pair` generates a CSR, calls `device.pair` over the local socket and
+   `device.enrol` over QUIC, then writes `device.crt`, `device.key` and
+   `ca.crt`. A live run minted `DE1EE261...` and connected with the new cert.
+   The only remaining part is an in-window pairing dialog.
 2. **Queue/steer.** `session.prompt` is serialised; the composer's queue/steer
    mode stays as-is until a mid-turn steer has a defined model-visible meaning.
    No client-side queue is invented.
 
 Deferred new sessions, workspaces-by-cwd, trajectory projection, the headless
 `--prompt` path, permission presets, directory and blob reads, the lightbox,
-composer attachment staging and the QUIC transport are now in. QUIC pairing
-remains a UX slice; queue/steer remains a protocol-design decision.
+composer attachment staging, the QUIC transport and a pairing CLI are now in.
+An in-window pairing dialog and queue/steer remain.

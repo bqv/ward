@@ -30,8 +30,15 @@ cmake -S . -B build-quic -G Ninja -DWARD_QUIC=ON && cmake --build build-quic
 ```
 
 `WARD_QUIC=ON` links ngtcp2 and OpenSSL through pkg-config and defines
-`WARD_HAVE_QUIC`; the default build never touches either. A QUIC connection
-needs a paired device certificate:
+`WARD_HAVE_QUIC`; the default build never touches either. It also builds
+`ward-pair`, which mints a pairing token over the local Unix socket and enrols a
+fresh CSR over QUIC:
+
+```sh
+./build-quic/ward-pair --socket /run/user/1000/ward.sock --out ~/.local/share/ward-gui/quic
+```
+
+A QUIC connection then uses the files it wrote:
 
 ```sh
 WARD_QUIC_CERT=device.crt WARD_QUIC_KEY=device.key WARD_QUIC_CA=ca.crt     ./build-quic/ward-gui --socket quic://127.0.0.1:4433
@@ -45,7 +52,8 @@ This builds three binaries:
 | binary | purpose |
 |---|---|
 | `ward-gui` | the shell |
-| `ward-gui-probe` | a headless protocol probe: handshake, `session.list`, create, prompt, approvals and replay, with no display |
+| `ward-gui-probe` | a headless protocol probe: handshake, `session.list`, create, prompt, approvals, terminal, files, presets and replay, with no display |
+| `ward-pair` | `WARD_QUIC=ON` only: CSR, `device.pair`/`enrol`, writes `device.crt`, `device.key`, `ca.crt` |
 | `libwardwire.a` | ward's `frame.c`, `codec.c` and `util.c`, compiled for the client |
 
 ## Run
@@ -109,9 +117,8 @@ and are never silently dropped by the wire layer.
 
 ## Not adopted yet
 
-- **QUIC pairing.** The QUIC transport is behind `WARD_QUIC=ON` and accepts an
-  already-paired cert/key/CA; generating a CSR, `device.pair`/`enrol` and storing
-  the returned certificate is not in the client yet.
+- **QUIC pairing UI.** `ward-pair` does CSR, `device.pair`/`enrol` and stores the
+  credentials, but there is no in-window pairing dialog yet.
 - **Queue/steer.** `session.prompt` is serialised; the composer's mode chip
   stays as-is until a mid-turn steer has a model-visible meaning.
 
