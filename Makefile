@@ -122,6 +122,13 @@ $(ANDROID_LIB): clients/android/ward_jni.c src/client/client.c
 	  src/proto/codec.c src/proto/frame.c src/core/util.c \
 	  $(LDFLAGS) $(PKG_LIBS) -o $@
 
+android-test: $(ANDROID_LIB)
+	@mkdir -p $(BUILDDIR)/java
+	$(JAVA_HOME)/bin/javac -d $(BUILDDIR)/java \
+	  clients/android/uk/xa0/ward/WardClient.java
+	$(JAVA_HOME)/bin/java -Djava.library.path=$(abspath $(BUILDDIR)) \
+	  -cp $(BUILDDIR)/java uk.xa0.ward.WardClient
+
 modules: $(MODULE_WASM)
 guests: $(GUEST_WASM)
 

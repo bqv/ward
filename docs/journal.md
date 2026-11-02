@@ -1941,3 +1941,14 @@ cross-compiled for the target ABI — the one dependency the client does not alr
 
 The row stays `missing` under the repository's rule, and `docs/m6.md` says exactly what remains: an APK, a device, and the
 conformance fixture replayed from Kotlin.
+
+Hundred-and-forty-sixth: the JNI layer does real work. `clients/android/uk/xa0/ward/WardClient.java` wraps it, and
+`make android-test` compiles the class, loads `out/libwardclient.so` and creates a session against the running daemon —
+`session 796c33b14a79b8ed`. That is the interface behaving on a JVM, which is the environment Android's JNI uses.
+
+Getting there cost one SELinux lesson: `javac -d ~/tmp/...` fails with "could not create parent directories" while `touch`
+in the same directory succeeds, because `java_t` may not write `user_tmp_t`. `ausearch` showed the denial in one command.
+Building into `out/` inside the repository works, and the Makefile target does that.
+
+The row is still not `delivered`: what remains is libcbor for the Android ABI, an APK, and the conformance fixture replayed
+from a device. What changed is that the interface is no longer unexercised code.
