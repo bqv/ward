@@ -396,4 +396,5 @@ private:
     QString m_queuedPrompt;
     QString m_pendingApproval;
     QHash<QString, QVariantMap> m_approvals;
+    QSet<QString> m_announcedApprovals;
 };

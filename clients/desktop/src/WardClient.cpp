@@ -798,8 +798,11 @@ void WardClient::handleEvent(uint64_t sub, uint64_t seq, const QString &kind,
         m_busy = false;
         emit busyChanged();
         setState(Ready, QStringLiteral("waiting for approval"));
-        emit permissionRequested(requestId, QStringLiteral("tool"),
-                                 payload.value(QStringLiteral("reason")).toString());
+        if (!m_announcedApprovals.contains(requestId)) {
+            emit permissionRequested(requestId, QStringLiteral("tool"),
+                                     payload.value(QStringLiteral("reason")).toString());
+            m_announcedApprovals.insert(requestId);
+        }
         refreshApprovals();
     } else if (kind == QLatin1String("approval.resolved")) {
         const QString requestId = QStringLiteral("%1:%2")
@@ -808,6 +811,7 @@ void WardClient::handleEvent(uint64_t sub, uint64_t seq, const QString &kind,
         emit permissionWithdrawn(requestId);
         m_pendingApproval.clear();
         m_approvals.remove(requestId);
+        m_announcedApprovals.remove(requestId);
         bool stillPending = false;
         for (auto it = m_approvals.constBegin(); it != m_approvals.constEnd(); ++it) {
             if (it.value().value(QStringLiteral("session")).toString() == m_sessionId) {
@@ -1026,6 +1030,13 @@ void WardClient::followSession(const QString &sessionId)
 {
     if (sessionId.isEmpty())
         return;
+    const QStringList announced = m_announcedApprovals.values();
+    for (const QString &key : announced) {
+        if (m_approvals.value(key).value(QStringLiteral("session")).toString() == sessionId)
+            continue;
+        emit permissionWithdrawn(key);
+        m_announcedApprovals.remove(key);
+    }
     m_sessionId = sessionId;
     subscribe(sessionId);
     emit sessionChanged();
@@ -1139,8 +1150,8 @@ void WardClient::refreshApprovals()
 
 void WardClient::applyApprovals(const QVariantList &entries)
 {
+    QHash<QString, QVariantMap> next;
     QVariantList sessions;
-    m_approvals.clear();
     for (const QVariant &value : entries) {
         const QVariantMap entry = value.toMap();
         const QString session = entry.value(QStringLiteral("session")).toString();
@@ -1149,10 +1160,34 @@ void WardClient::applyApprovals(const QVariantList &entries)
                                 .arg(entry.value(QStringLiteral("epoch")).toULongLong());
         if (session.isEmpty())
             continue;
-        m_approvals.insert(key, entry);
+        next.insert(key, entry);
         if (!sessions.contains(session))
             sessions.append(session);
     }
+
+    const QStringList announced = m_announcedApprovals.values();
+    for (const QString &key : announced) {
+        if (next.contains(key) && next.value(key).value(QStringLiteral("session")).toString() == m_sessionId)
+            continue;
+        emit permissionWithdrawn(key);
+        m_announcedApprovals.remove(key);
+    }
+
+    m_approvals = next;
+    for (auto it = next.constBegin(); it != next.constEnd(); ++it) {
+        const QVariantMap entry = it.value();
+        if (entry.value(QStringLiteral("session")).toString() != m_sessionId)
+            continue;
+        if (m_announcedApprovals.contains(it.key()))
+            continue;
+        const QString tool = entry.value(QStringLiteral("tool")).toString();
+        const QString reason = entry.value(QStringLiteral("reason")).toString();
+        emit permissionRequested(it.key(),
+                                 tool.isEmpty() ? QStringLiteral("tool") : tool,
+                                 reason.isEmpty() ? QStringLiteral("approval required") : reason);
+        m_announcedApprovals.insert(it.key());
+    }
+
     if (sessions != m_pendingInteractionSessions) {
         m_pendingInteractionSessions = sessions;
         emit sessionMarksChanged();

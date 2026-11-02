@@ -76,7 +76,7 @@ The client speaks ward's method names and event kinds, not an adapter vocabulary
 | new session | `session.create` |
 | open and replay | `session.resume` with `from: 0`, ending at `replay.end` |
 | prompt | `session.prompt`; `session.prompted`, `text.delta`, `turn.start`, `turn.end` |
-| approval | `approval.list` for global marks; `approval.requested` -> `approval.respond` -> `approval.resolved` for the card |
+| approval | `approval.list` for global marks and tool/reason; `approval.requested` -> `approval.respond` -> `approval.resolved` for the card |
 | cancel | `session.cancel` |
 | rename, pin, archive | `session.rename`, `session.pin`, `session.archive` |
 | compact | `session.compact` |

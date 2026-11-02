@@ -77,7 +77,7 @@ daemon.
 | requests | correlated by id; errors surface `name` and `message` |
 | events | routed by kind and subscription; `eventReceived(kind, payload)` is the generic door |
 | replay | `session.resume {from: 0}` and the `replay` control frame |
-| approvals | request, respond, resolved; `approval.list` marks every session with a live card; `requestId` is `call:epoch` |
+| approvals | request, respond, resolved; `approval.list` marks every session with a live card and carries tool/reason, so a followed session that reconnects without replay still names the request; `requestId` is `call:epoch` |
 | terminal | `terminal.open/write/resize/close`, `terminal.output`, eof and exit state |
 | session lifecycle | create (client-side lazy), list, resume, prompt, cancel, rename, pin, archive, compact, set_model |
 | catalog | `model.list`, `session.set_model` |
