@@ -1,6 +1,12 @@
 # The Android client
 
-The code lives in **`clients/android-ward`**: the JNI layer (`ward_jni.c`), the
+There are two clients. **`clients/android`** is the real one: project
+ward-android, application Ward, a Kotlin implementation of the frozen protocol
+behind the copied dsh-android screens. Its own notes and its list of missing
+parity live in `clients/android/README.md`; the JNI client below is kept as the
+reference for the C library path.
+
+The JNI client lives in **`clients/android-ward`**: the JNI layer (`ward_jni.c`), the
 Java wrapper (`uk/xa0/ward/WardClient.java`), and a minimal app
 (`app/AndroidManifest.xml`, `app/src/uk/xa0/ward/MainActivity.java`).
 

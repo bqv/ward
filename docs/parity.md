@@ -32,7 +32,7 @@ behaviour, is marked `partial`.
 | attachments and uploads | M4 | delivered | `gate_tool` asserts `[attach]`; `attachment.add`/`list` |
 | module reload and migration | M5 | delivered | `modstate_test`, `gate_tool` reload assertions |
 | native client | M6 | delivered | `gate_native` — `ward-native` drives create, prompt and resume over the socket |
-| Android client | M6 | delivered | `clients/android` builds as an APK; on the disposable handset `adb logcat -s ward` printed `session dd8ae525d9994557`, and `gate_native` covers the loopback TCP transport it uses |
+| Android client | M6 | delivered | `clients/android` (project ward-android, app Ward) speaks the frozen protocol in Kotlin: an APK on the disposable handset created and listed a session over `adb reverse`, painted a `/read` turn, answered an approval, and replayed the transcript after force-stop and relaunch; its 1,308-test JVM suite passes. Known gaps (QUIC/pairing, workspaces, terminal routing, jobs/schedules/goals UI, subagent lineage, stubs, background approvals, queue/steer) are named in `clients/android/README.md`. `gate_native` covers the loopback TCP transport it uses |
 | python eval | M4 | **substituted** | named as a substitution in the journal; no embedded CPython |
 | recall | M4 | delivered | `recall` module with a stubbed binary in `gate_tool` |
 | judge | M4 | **partial** | rules decide; the model backend is the substitution named in the journal |
