@@ -152,12 +152,30 @@ int main(void) {
   assert(run_capture(sock, probe, terminal_argv, terminal_out, sizeof(terminal_out)) == 0);
   assert(count_text(terminal_out, "ward-terminal-ok") >= 1);
 
+  char note[512];
+  snprintf(note, sizeof(note), "%s/note.txt", root);
+  FILE *note_file = fopen(note, "w");
+  assert(note_file != NULL);
+  assert(fputs("ward file read\n", note_file) >= 0);
+  fclose(note_file);
+  assert(chdir(root) == 0);
+
+  char read_out[8192];
+  char *read_argv[] = {(char *)probe, (char *)"--read", (char *)"note.txt", NULL};
+  assert(run_capture(sock, probe, read_argv, read_out, sizeof(read_out)) == 0);
+  assert(strstr(read_out, "ward file read") != NULL);
+
+  char escape_out[8192];
+  char *escape_argv[] = {(char *)probe, (char *)"--read", (char *)"../escape.txt", NULL};
+  assert(run_capture(sock, probe, escape_argv, escape_out, sizeof(escape_out)) == 0);
+  assert(strstr(escape_out, "outside the session directory") != NULL);
+
   kill(pid, SIGTERM);
   int status = 0;
   waitpid(pid, &status, 0);
   stop_server(endpoint);
   if (strcmp(cgroup_base, "off") != 0) drop_test_cgroup(cgroup_base);
 
-  printf("desktop gate passed: ward-gui drove a session over UDS, TCP and a terminal\n");
+  printf("desktop gate passed: ward-gui drove a session over UDS, TCP, a terminal and file reads\n");
   return 0;
 }

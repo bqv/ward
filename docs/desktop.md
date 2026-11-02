@@ -38,6 +38,7 @@ and `WardClient.cpp` includes the same headers the daemon does.
 ./build/ward-gui-probe --socket <path> --approve --prompt "/write note.txt hi"
 ./build/ward-gui-probe --socket <path> --session <id>
 ./build/ward-gui-probe --socket <path> --terminal
+./build/ward-gui-probe --socket <path> --read note.txt
 ```
 
 The first covers handshake, `session.create`, `session.resume`, `session.prompt`
@@ -50,7 +51,8 @@ turn without duplicating a row.
 
 `tests/gate_desktop.c` runs the probe against a fixture daemon and asserts the
 prompt text appears exactly once, first over the Unix socket and then over
-loopback TCP. It fork/execs the probe with `PR_SET_PDEATHSIG` and `alarm(20)`
+loopback TCP, then drives a terminal and a file read (success and an escape
+refusal). It fork/execs the probe with `PR_SET_PDEATHSIG` and `alarm(20)`
 rather than using `popen`, so a stalled probe fails the gate and a killed gate
 does not leave a server behind. `make test` builds the probe and runs the gate.
 In a sandbox that cannot write `/sys/fs/cgroup`, run the gate directly with
@@ -76,6 +78,7 @@ daemon.
 | terminal | `terminal.open/write/resize/close`, `terminal.output`, eof and exit state |
 | session lifecycle | create, list, resume, prompt, cancel, rename, pin, archive, compact, set_model |
 | catalog | `model.list`, `session.set_model` |
+| file read | `session.file_read`; cwd-rooted, 64 KiB cap, refusal message surfaced in the dock |
 | goals, jobs, schedules | `goal.set/clear`, `job.list/kill`, `schedule.list/delete` |
 | everything else | `wardCall(method, params)` plus `protocolMethods()` |
 
@@ -90,8 +93,10 @@ proven yet. They are reported to the ward session as well.
 1. **QUIC.** The client uses Unix sockets and loopback TCP. ward's QUIC
    transport, device certificates, pairing and `device.*` are not in the client;
    `src/net/quic.h` is the code to reuse.
-2. **Files and attachments.** ward has no `file.read`; the files dock and image
-   lightbox therefore answer empty until the ward-side method lands.
+2. **Files and attachments.** Text reads go through `session.file_read` and
+   surface the daemon's refusal message. Directory listing has no ward method,
+   so the tree still starts empty, and an image lightbox needs a separate
+   binary/chunked read rather than loosening the 64 KiB text cap.
    `attachment.add/list` exists in ward, but the composer's staging surface is
    not wired to it.
 3. **Workspaces.** ward has no workspace registry; the rail groups by nothing

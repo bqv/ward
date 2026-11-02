@@ -478,6 +478,15 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
             m_turnOpen = false;
             emit turnOpenChanged();
         }
+        if (method == QLatin1String("session.file_read")) {
+            m_fileError = text;
+            m_fileText.clear();
+            m_fileBytes = 0;
+            m_fileTruncated = false;
+            emit fileErrorChanged();
+            emit fileTextChanged();
+            emit fileBytesChanged();
+        }
         return;
     }
 
@@ -565,6 +574,17 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
     } else if (method == QLatin1String("goal.set")) {
         m_goal = result.value(QStringLiteral("goal")).toMap();
         emit goalChanged();
+    } else if (method == QLatin1String("session.file_read")) {
+        m_fileSelectedPath = result.value(QStringLiteral("path")).toString();
+        m_fileText = result.value(QStringLiteral("text")).toString();
+        m_fileBytes = int(result.value(QStringLiteral("size")).toULongLong());
+        m_fileTruncated = false;
+        m_fileError.clear();
+        emit fileSelectedPathChanged();
+        emit fileTextChanged();
+        emit fileBytesChanged();
+        emit fileTruncatedChanged();
+        emit fileErrorChanged();
     } else if (method == QLatin1String("approval.respond")) {
         if (!m_pendingApproval.isEmpty()) {
             emit permissionWithdrawn(m_pendingApproval);
@@ -1100,8 +1120,25 @@ void WardClient::toggleDirectory(const QString &path)
 
 void WardClient::readFile(const QString &path)
 {
-    Q_UNUSED(path);
-    emit railNotice(QStringLiteral("ward has no file.read method"), true);
+    if (m_sessionId.isEmpty()) {
+        m_fileError = QStringLiteral("no session to read a file in");
+        emit fileErrorChanged();
+        return;
+    }
+    if (path.isEmpty())
+        return;
+    m_fileSelectedPath = path;
+    m_fileError.clear();
+    m_fileText.clear();
+    m_fileBytes = 0;
+    m_fileTruncated = false;
+    emit fileSelectedPathChanged();
+    emit fileErrorChanged();
+    emit fileTextChanged();
+    emit fileBytesChanged();
+    sendRequest(QStringLiteral("session.file_read"),
+                {{QStringLiteral("id"), m_sessionId},
+                 {QStringLiteral("path"), path}});
 }
 
 void WardClient::goUpDirectory()
@@ -1234,7 +1271,8 @@ QStringList WardClient::protocolMethods() const
 {
     return {QStringLiteral("session.create"), QStringLiteral("session.list"),
             QStringLiteral("session.get"), QStringLiteral("session.resume"),
-            QStringLiteral("session.fork"), QStringLiteral("session.rename"),
+            QStringLiteral("session.file_read"), QStringLiteral("session.fork"),
+            QStringLiteral("session.rename"),
             QStringLiteral("session.archive"), QStringLiteral("session.pin"),
             QStringLiteral("session.search"), QStringLiteral("session.prompt"),
             QStringLiteral("session.cancel"), QStringLiteral("session.compact"),

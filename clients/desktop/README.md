@@ -56,6 +56,7 @@ The probe is the display-free path and the client's gate:
 ./build/ward-gui-probe --socket /run/user/1000/ward.sock --approve --prompt "/write note.txt hi"
 ./build/ward-gui-probe --socket /run/user/1000/ward.sock --session <id>
 ./build/ward-gui-probe --socket /run/user/1000/ward.sock --terminal
+./build/ward-gui-probe --socket /run/user/1000/ward.sock --read note.txt
 ```
 
 It prints the assistant text on stdout and every event kind on stderr; `--approve`
@@ -80,6 +81,7 @@ The client speaks ward's method names and event kinds, not an adapter vocabulary
 | goal | `goal.set`, `goal.clear` |
 | models | `model.list`, `session.set_model` |
 | terminal | `terminal.open/write/resize/close`, `terminal.output`, eof |
+| files | `session.file_read` (text, cwd-rooted, 64 KiB) |
 | jobs, schedules | `job.list`, `job.kill`, `schedule.list`, `schedule.delete` |
 | any other method | `wardCall(method, params)` is the generic door; `protocolMethods()` lists the frozen table |
 
@@ -93,8 +95,9 @@ and are never silently dropped by the wire layer.
   transport, device certificates and pairing are not in this client yet; the
   daemon's own QUIC client (`src/net/quic.c`) is the code to reuse.
 - **Files, attachments, workspaces, plugin inventory, permission presets.**
-  ward has no matching client surface or no matching method in this tree; the
-  properties exist and answer empty so the widgets degrade honestly.
+  Text files read through `session.file_read`; the directory tree and image
+  lightbox still need a ward method (a chunked/binary read in the image case).
+  The other properties exist and answer empty so the widgets degrade honestly.
 - **Deferred new-session seats.** A new session is created immediately rather
   than on the first send.
 

@@ -31,12 +31,16 @@ int main(int argc, char **argv)
                                      QStringLiteral("allow every approval the turn asks for"));
     QCommandLineOption terminalOption(QStringList{QStringLiteral("terminal")},
                                       QStringLiteral("open a terminal and write a marker through it"));
+    QCommandLineOption readOption(QStringList{QStringLiteral("read")},
+                                  QStringLiteral("read one file through session.file_read"),
+                                  QStringLiteral("path"));
     parser.addOption(socketOption);
     parser.addOption(cwdOption);
     parser.addOption(promptOption);
     parser.addOption(sessionOption);
     parser.addOption(approveOption);
     parser.addOption(terminalOption);
+    parser.addOption(readOption);
     parser.process(app);
 
     WardClient client(parser.value(socketOption));
@@ -45,11 +49,16 @@ int main(int argc, char **argv)
     bool failed = false;
     bool terminalOpened = false;
     bool terminalWritten = false;
+    bool readStarted = false;
+    QString readResult;
     QByteArray terminalText;
     const bool approve = parser.isSet(approveOption);
     const bool terminal = parser.isSet(terminalOption);
+    const bool read = parser.isSet(readOption);
 
     QObject::connect(&client, &WardClient::lastErrorChanged, &app, [&]() {
+        if (read)
+            return;
         if (!client.lastError().isEmpty()) {
             QTextStream(stderr) << "probe: " << client.lastError() << "\n";
             failed = true;
@@ -63,8 +72,20 @@ int main(int argc, char **argv)
         if (kind == QLatin1String("turn.end"))
             app.quit();
         if (kind == QLatin1String("replay.end") && !parser.isSet(promptOption)
-                && !terminal && !parser.isSet(sessionOption))
+                && !terminal && !read && !parser.isSet(sessionOption))
             app.quit();
+    });
+    QObject::connect(&client, &WardClient::fileTextChanged, &app, [&]() {
+        if (!read || client.fileText().isEmpty())
+            return;
+        readResult = client.fileText();
+        app.quit();
+    });
+    QObject::connect(&client, &WardClient::fileErrorChanged, &app, [&]() {
+        if (!read || client.fileError().isEmpty())
+            return;
+        readResult = QStringLiteral("error: ") + client.fileError();
+        app.quit();
     });
     QObject::connect(&client, &WardClient::terminalChanged, &app, [&]() {
         if (!terminal || !client.terminalOpen() || terminalWritten)
@@ -96,7 +117,7 @@ int main(int argc, char **argv)
         }
         if (client.state() != WardClient::Ready || prompted)
             return;
-        if (terminal) {
+        if (terminal || read) {
             prompted = true;
             client.createSession();
             return;
@@ -115,7 +136,7 @@ int main(int argc, char **argv)
     });
     QObject::connect(&client, &WardClient::sessionsLoadingChanged, &app, [&]() {
         if (client.state() == WardClient::Ready && !parser.isSet(promptOption)
-                && !terminal && !parser.isSet(sessionOption)
+                && !terminal && !read && !parser.isSet(sessionOption)
                 && !client.sessionsLoading())
             app.quit();
     });
@@ -126,6 +147,12 @@ int main(int argc, char **argv)
             terminalOpened = true;
             QTextStream(stderr) << "session " << client.sessionId() << "\n";
             client.openTerminal(80, 24);
+            return;
+        }
+        if (read && !readStarted) {
+            readStarted = true;
+            QTextStream(stderr) << "session " << client.sessionId() << "\n";
+            client.readFile(parser.value(readOption));
             return;
         }
         if (prompted || !parser.isSet(promptOption))
@@ -146,6 +173,10 @@ int main(int argc, char **argv)
     QTextStream out(stdout);
     if (terminal) {
         out << QString::fromUtf8(terminalText);
+    } else if (read) {
+        out << readResult;
+        if (!readResult.isEmpty() && !readResult.endsWith(QLatin1Char('\n')))
+            out << '\n';
     } else {
         out << text;
         if (!text.isEmpty() && !text.endsWith(QLatin1Char('\n')))
