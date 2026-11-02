@@ -1517,3 +1517,27 @@ deeper. Same shape as the multi-call refusal, and the test asserts both halves.
 It is the same principle as the error taxonomy: a failure a client can read is worth more than a failure buried two
 layers down. Still open is the one *repair* — re-asking the model once when the parse fails — which needs a second
 provider phase rather than a better parse.
+
+Hundred-and-fifteenth: the streaming plan, with the anchors found rather than guessed. The helper already frames its
+answer: `wd_http_start` (src/net/http.c:133) forks curl, and `wd_http_job_finish` (:200) reads an eight-byte header
+— four bytes of status, four of length — then exactly that many body bytes. So the wire between the helper and the
+daemon is a length-prefixed message, which is why a whole completion arrives at once.
+
+The five edits, in order, each of which keeps the tree green on its own:
+
+1. `write_cb` (src/net/http.c:21) writes each chunk to the pipe as it arrives instead of appending to a buffer, and
+   the child writes the four status bytes from a `HEADERFUNCTION` before the first chunk. Length is not known in
+   advance, so the frame becomes "status, then bytes until EOF"; the parent learns completion from EOF instead of a
+   length.
+2. `wd_http_job_finish` reads the status, then everything to EOF, so the daemon still gets the full body and every
+   existing path behaves exactly as before. This step alone is invisible and safe; it is the one that proves the
+   framing change without touching the daemon.
+3. `run_watch` for the http fd (src/daemon/server.c:2195) gains an incremental read: append to a per-run buffer,
+   leave the fd registered, and call `http_done` only on EOF.
+4. On each read, feed the new bytes to a small SSE scanner that emits a `text.delta` per complete `content` fragment,
+   carrying a partial UTF-8 sequence and a partial `data:` line across reads. `[DONE]` closes the stream early.
+5. The driver must not repeat the text: core marks the turn as streamed and sends `{kind:"result", payload:{text:""}}`
+   so the driver's own delta is empty, or the provider reply gains a `streamed` flag the driver honours.
+
+Step 4 is the one a gate can measure: with `WARD_FAKE_DELAY_MS` the fixture already spaces its two content chunks by
+seconds, so a turn test can assert that the first `text.delta` arrives before `turn.end` rather than after it.
