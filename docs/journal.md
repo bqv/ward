@@ -1965,3 +1965,20 @@ That is what makes `adb reverse` viable — the phone's connections arrive from 
 the Unix socket's uid check exactly as it was.
 
 This is the transport the Android row needed. What is still missing is the library cross-compiled for the phone and an APK.
+
+Hundred-and-forty-eighth: the phone drives a real session. `clients/android` now holds a minimal app beside the JNI layer and
+the Java wrapper, and on the disposable handset it printed
+
+```
+I ward    : session dd8ae525d9994557
+```
+
+That is M6's acceptance line, and it needed the three things built in order: libcbor cross-compiled for arm64-v8a with the
+NDK, the JNI library built at API 28 (core wants `getrandom`), and the APK assembled with aapt2, javac, d8, zip, zipalign
+and apksigner — then `adb reverse tcp:45872 tcp:45872` so the device's loopback arrives at the daemon's TCP listener.
+
+Four traps are recorded in `docs/android.md`: the manifest needs an explicit `targetSdkVersion` or the installer refuses it;
+build-tools' `d8` is class file 55 and will not run under the system `java` 8; `javac` cannot write into `~/tmp` (SELinux,
+`java_t` against `user_tmp_t`); and `getrandom` needs API 28.
+
+`docs/parity.md` now has no missing row: Android is delivered, with the logcat line as its evidence.

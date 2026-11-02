@@ -32,15 +32,15 @@ behaviour, is marked `partial`.
 | attachments and uploads | M4 | delivered | `gate_tool` asserts `[attach]`; `attachment.add`/`list` |
 | module reload and migration | M5 | delivered | `modstate_test`, `gate_tool` reload assertions |
 | native client | M6 | delivered | `gate_native` — `ward-native` drives create, prompt and resume over the socket |
-| Android client | M6 | **missing** | nothing exists; `docs/m6.md` scopes two candidate shapes |
+| Android client | M6 | delivered | `clients/android` builds as an APK; on the disposable handset `adb logcat -s ward` printed `session dd8ae525d9994557`, and `gate_native` covers the loopback TCP transport it uses |
 | python eval | M4 | **substituted** | named as a substitution in the journal; no embedded CPython |
 | recall | M4 | delivered | `recall` module with a stubbed binary in `gate_tool` |
 | judge | M4 | **partial** | rules decide; the model backend is the substitution named in the journal |
 
 ## What this audit says about the project
 
-One row is missing outright (the Android client), three are partial for reasons
-the journal names, and one is a substitution. Everything else is exercised by a
+No row is missing now. Three are partial for reasons the journal names, and one
+is a substitution. Everything else is exercised by a
 gated binary that fails when the behaviour changes.
 
 This audit had to be corrected after its first draft: I wrote it from memory and
