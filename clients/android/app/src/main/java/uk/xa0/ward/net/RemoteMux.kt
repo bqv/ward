@@ -498,11 +498,46 @@ class RemoteMux(
         args: JSONObject,
         out: kotlinx.coroutines.channels.ProducerScope<StreamEvent>,
     ) {
+        val request = args.optJSONObject("request") ?: args
+        val id = request.optString("id").ifEmpty { request.optString("terminalId") }
+            .ifEmpty { args.optString("id") }.ifEmpty { args.optString("terminalId") }
+        if (id.isEmpty()) {
+            out.trySend(StreamEvent.Failure("invalid_params", "terminal/follow has no terminal id"))
+            delay(5_000)
+            return
+        }
+        Log.d(TAG, "terminal/follow id=$id")
         out.trySend(StreamEvent.Item(JSONObject()
-            .put("type", "baseline")
-            .put("value", JSONObject())))
-        delay(Long.MAX_VALUE)
+            .put("type", "snapshot")
+            .put("sequence", 0)
+            .put("screen", "")
+            .put("info", terminalInfo(id, "running"))))
+        terminalFrames.collect { frame ->
+            if (frame.optString("terminal") != id) return@collect
+            lastFrameAt.set(System.currentTimeMillis())
+            when (frame.optString("type")) {
+                "output" -> out.trySend(StreamEvent.Item(JSONObject()
+                    .put("type", "output")
+                    .put("sequence", frame.optLong("sequence"))
+                    .put("data", frame.optString("data"))))
+                "eof" -> {
+                    out.trySend(StreamEvent.Item(JSONObject()
+                        .put("type", "state")
+                        .put("info", terminalInfo(id, "exited"))))
+                    return@collect
+                }
+            }
+        }
     }
+
+    private fun terminalInfo(id: String, state: String): JSONObject = JSONObject()
+        .put("id", id)
+        .put("title", "Shell")
+        .put("shell", JSONObject().put("path", "sh"))
+        .put("cwd", "")
+        .put("cols", 80)
+        .put("rows", 24)
+        .put("state", state)
 
     private companion object {
         const val TAG = "WardMux"

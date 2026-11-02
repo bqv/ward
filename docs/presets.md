@@ -21,7 +21,15 @@ Descriptions, verbatim as the chip shows them:
   file must be read before it is overwritten."
 
 `observe` is never a chip, toggle or row of its own; it is part of the
-description. The chip is two runs — a dim `access` label and the preset name —
+description.
+
+There is **no fourth "full access" preset**, and that is a deliberate
+difference from DSH rather than an omission. The clamp below only tightens, so a
+preset whose rules all say `allow` could not turn the policy module's
+`write → ask` into `allow`: the chip would change its own label and nothing
+else. Making presets authoritative instead would let one turn a module `deny`
+into `allow`, which is a fail-open. If the owner ever wants that mode it is its
+own explicit switch with its own gate, not a row in this catalogue. The chip is two runs — a dim `access` label and the preset name —
 and it changes only after `policy.select` answers. A refusal leaves the old name
 and shows the daemon's message.
 
