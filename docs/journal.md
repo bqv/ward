@@ -1599,3 +1599,13 @@ Honest caveat: the *timing* assertion the plan promised — first `text.delta` b
 `WARD_FAKE_DELAY_MS` — is still not written. The behaviour is implemented and nothing regressed, but "delta arrives
 early" is asserted by no test yet; the next slice is that assertion, and it either passes quickly or shows the
 suppression guard firing where it should not.
+
+Hundred-and-twentieth: the streaming timing assertion was attempted and reverted. Adding `assert(turn_deltas >= 2)` to the
+existing `turn_text` call hung `gate_tool` rather than failing it; removing the two lines made the same gate pass again
+immediately, twice. Why an assertion can hang a gate is not obvious — a failed assert aborts — so the honest reading is
+that either the counter disturbed the event accounting or the gate has an intermittent hang that my change merely made
+more likely. The evidence does not separate those.
+
+Left out of the tree, because a gate that hangs is worse than a gate that is merely missing, and because I cannot yet say
+which of the two causes it is. Next attempt should instrument the gate: print each consumed event kind with a sequence
+number so a hang shows the last event it saw, then add the delta assertion behind that.
