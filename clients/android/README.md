@@ -85,19 +85,43 @@ indefinite forms are refused on decode.
 - turns: prompt, streaming text deltas, turn start/end, tool calls and results,
   errors, durable replay after a relaunch;
 - approvals: `approval.requested` parks the turn, the existing card answers
-  through `approval.respond`, and `approval.resolved` withdraws it;
+  through `approval.respond`, `approval.resolved` withdraws it, and an
+  `approval.list` poll raises a card for a session this client is not following;
 - models: the ward catalog is grouped by provider and `session.set_model` moves
-  the chip;
+  the chip; `model.list` is read through the array key the daemon actually sends;
 - attachments: the picker's uploads become `attachment.add`, and image parts in
   a prompt are staged the same way;
+- files: the Files panel lists through `session.file_list`, reads text through
+  `session.file_read`, and windows binary reads through `session.file_read_blob`;
+  the byte windows are reassembled into the multipart shape the copied panel
+  already parses;
+- workspaces: ward has no registry, so the drawer groups the roster by each
+  session's `cwd` — one client-owned Workspace per directory, refreshed as the
+  roster changes;
+- jobs: `job.list` is polled into the copied roster and `job.kill` addresses the
+  turn; output streaming is not part of ward's job surface;
+- schedules: `schedule.list` becomes the Automation catalogue, with the cron
+  expression and next fire time; `schedule.delete` removes one;
+- goals: durable `goal.set`/`goal.cleared` events become the goal projection the
+  copied composure already draws;
+- modules and plugins: `module.list` is the bundle list, with a read-only switch
+  because ward reloads the registry as one set; `module.reload` is available;
+- policy and access: `policy.list`/`policy.select` drive the access chip through
+  the DSH permission names; ward's three presets are offered, not DSH's
+  full-access one;
+- stats: `stats.session` becomes the session and token projections behind the
+  stat pills; the provider's wall-time fields do not exist on ward's wire and are
+  left at zero rather than invented;
+- subagents: `subagent.updated` records the parent link and publishes the child
+  row before the next roster pull;
 - live status: turn boundaries publish the same `api-session/status` fact the
   copied drawer and composer already consume.
 
 ## Parity gaps, named rather than hidden
 
-These are the differences a reader will notice against the DSH client. They are
-the report sent to the coordinating session, kept here so the repository and the
-message cannot drift.
+These are the differences a reader will still notice against the DSH client.
+They are the report sent to the coordinating session, kept here so the
+repository and the message cannot drift.
 
 - **QUIC and device pairing are not in the app.** `device.pair`/`enrol` are
   wrapped, but the phone has no QUIC client, no CSR generation, no client
@@ -105,23 +129,24 @@ message cannot drift.
   supported path.
 - **A Unix socket cannot be opened from an Android app.** The daemon's strongest
   `SO_PEERCRED` door is a desktop/local path; the phone uses TCP.
-- **No Workspace registry.** Ward has no workspaces, so `workspace/follow`
-  answers an empty baseline and the drawer is one flat list.
-- **Terminal output is not subscribed.** The method wrappers and the copied
-  terminal screen exist, but `terminal.output` is not routed into
-  `terminal/follow`.
-- **Jobs, schedules and goals are wrappers, not screens.** `job.*`,
-  `schedule.*` and `goal.*` are in `WardApi`; the copied management sheets
-  answer their empty shapes.
-- **Subagents are wrappers only.** `subagent.prompt`/`interrupt` exist; no
-  lineage UI is wired to ward's ordinary child sessions.
-- **Modules, settings, plugins, file browser and stats are stubs.** Ward either
-  does not serve the DSH method or the copied screen has no ward projection.
-- **Approvals from a background session are not discovered.** A card appears
-  only for a session this app is following; there is no ward "list pending
-  approvals" method to replay the ones raised while the app was away.
-- **Queue/steer semantics are absent.** Ward serialises `session.prompt`; the
-  composer's queue and steer modes do not exist in the protocol.
+- **No host Workspace registry.** The drawer's groups are derived from `cwd`, so
+  membership and manual ordering are client-owned rather than host state.
+- **Queue and steer do not exist on ward's wire.** A second prompt while a turn
+  is running is a protocol-level serialisation, not a dock row.
+- **The host shell seat is DSH-only.** The session seat (`This session`) is the
+  one wired for ward; the host-shell bootstrap still asks for DSH commands and
+  an archived session that ward does not model.
+- **Job output is not streamed.** `job.list` and `job.kill` work; there is no
+  equivalent of `job/follow`'s output ring.
+- **Ward has no settings document, plugin bundle switch or command catalogue.**
+  `settings/describe`, `commands/list` and the writable plugin switch answer
+  empty/read-only shapes; module reload is the one management action offered.
+- **The full-access preset has no ward equivalent.** Ward's presets are
+  `default`, `reads-only` and `workspace`; the DSH `danger-full-access` chip is
+  not offered.
+- **Binary reads are bounded.** `session.file_read_blob` caps one call at 1 MiB
+  and 4 MiB total; the app reassembles multiple windows, but a larger file is
+  refused by the daemon rather than truncated.
 
 ## Device evidence
 
@@ -135,6 +160,11 @@ Built and installed on the disposable handset `91e25acb`, with
 - a `/write` prompt raised **Approval required**; **Allow once** answered
   `approval.respond`, and the transcript then showed the tool call, the grant
   and the tool result;
+- the Files panel listed `/tmp` through `session.file_list` and read file text
+  and byte windows through the file methods;
+- the drawer grouped four sessions under one `tmp` Workspace, derived from the
+  roster's cwd;
+- the composer's stat pills read `2 turns · 2 steps` from `stats.session`;
 - force-stopping and relaunching the app replayed the same transcript from
   `session.resume`, which is the durable-event proof.
 

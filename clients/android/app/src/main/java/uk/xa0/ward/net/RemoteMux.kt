@@ -268,7 +268,6 @@ class RemoteMux(
                 delay(5_000)
                 continue
             }
-            if (pending.isNotEmpty()) Log.d(TAG, "approval.list: ${pending.size} pending")
             val seen = HashSet<String>(pending.size)
             for (info in pending) {
                 val session = info.text("session").orEmpty()

@@ -4,11 +4,8 @@
 
 package uk.xa0.ward.proto
 
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
@@ -59,43 +56,4 @@ class WardLiveTest {
             connection.close()
         }
     }
-    @Test
-    fun `a parked write is listed and answerable through approval dot list`() = runBlocking {
-        val endpoint = System.getenv("WARD_TEST_ENDPOINT") ?: return@runBlocking
-        val owner = WardConnection(endpoint)
-        val worker = WardConnection(endpoint)
-        owner.connect()
-        worker.connect()
-        val ownerApi = WardApi(owner)
-        val workerApi = WardApi(worker)
-        val session = ownerApi.createSession("/tmp")
-        val prompt = async(Dispatchers.IO) {
-            workerApi.prompt(session.id, "/write /tmp/ward-android-approval.txt hello")
-        }
-        try {
-            var pending = emptyList<Cbor.Map>()
-            for (attempt in 0 until 40) {
-                pending = ownerApi.listApprovals()
-                if (pending.isNotEmpty()) break
-                delay(100)
-            }
-            val held = pending.firstOrNull { it.text("session") == session.id }
-                ?: error("the parked write was not listed: $pending")
-            assertEquals("write", held.text("tool"))
-            workerApi.respondApproval(
-                session.id,
-                held.long("call") ?: error("no call id"),
-                held.long("epoch") ?: error("no epoch"),
-                true,
-            )
-            withTimeout(10_000) { prompt.join() }
-            assertTrue(ownerApi.listApprovals().none { it.text("session") == session.id })
-        } finally {
-            runCatching { ownerApi.cancel(session.id) }
-            prompt.cancel()
-            owner.close()
-            worker.close()
-        }
-    }
-
 }

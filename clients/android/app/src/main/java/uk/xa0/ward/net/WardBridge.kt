@@ -497,7 +497,7 @@ class WardBridge(private val connection: WardConnection) {
         val shell = request.optString("shellPath").takeIf { it.isNotBlank() } ?: "sh"
         val opened = api.openTerminal(sessionId, shell, rows, cols)
         val id = opened.text("terminal").orEmpty()
-        android.util.Log.d("WardBridge", "terminal/open session=$sessionId shell=$shell id=$id")
+        android.util.Log.d("WardBridge", "terminal/open session=$sessionId id=$id")
         val info = JSONObject()
             .put("id", id)
             .put("title", "Shell")

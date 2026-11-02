@@ -2047,6 +2047,10 @@ undelivered steers and enqueues each as its own prompt, so the text becomes a ne
 alternative — dropping it — is the failure a user would never see: they typed it, the row appeared, and the model never read
 it.
 
-Honest limit: the carry-over has no assertion of its own yet. `gate_native` proves the steered answer and that the suite
+Honest limit: the carry-over has no assertion of its own yet. The shape it needs is a subscriber: resume the steer
+session (which subscribes), prompt, steer, then wait for **two** `turn.start` events on that subscription — the first is
+the prompt, the second can only come from the carried-over steer. `gate_tool` already has the machinery (`next_event`,
+`wait_event`, a slowed provider); `gate_native` would need the frame-reading loop and the subscribe path. Written down so
+the next session does not have to rediscover the design. `gate_native` proves the steered answer and that the suite
 still passes, but nothing in the suite yet counts the extra turn that the carry-over starts. The code is four lines and the
 failure would be loud in the daemon log, but this is recorded as unmeasured rather than claimed.
