@@ -2421,7 +2421,10 @@ static void handle_session_cancel(wd_server *srv, wd_conn *conn, uint64_t id,
       cancelled =
           wd_turn_abort(run->turn, "cancelled", turn_emit, &tc, &err) == 0;
       free(err);
-      if (cancelled) run_free(srv, run);
+      if (cancelled) {
+        run_free(srv, run);
+        drain_queue(srv);
+      }
     }
   }
   free(session_id);

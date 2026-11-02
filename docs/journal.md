@@ -2188,3 +2188,15 @@ carry-over.
 
 Next session should trace the enqueue itself (a counter, not a pop) and the drain's walk, with the carry-over forced by
 cancel and the assertion replaced by a bounded read so it cannot pass before the daemon has finished.
+
+Hundred-and-sixty-seventh: the carry-over works; the assertion did not. With `drain_queue` called after a cancelled run, the trace
+shows `enqueue ... text=carried text` and then `start ... announced=0 text=carried text` — the late steer is re-queued and its
+turn runs. So the defect was the cancel path freeing a run without draining, and it is fixed.
+
+The assertion that kept failing was measuring the wrong socket. `wd_client_call` reads frames until its response and **discards
+the events in between**, so a client that sends prompt, steer and cancel consumes exactly the `session.prompted` events the
+test wanted to count. A separate subscriber sees them, which is what the watch connection in the experiment was for; that
+version segfaulted in the test process before it could report, so it is not committed.
+
+Next session: a watcher connection that never sends a request, a bounded read, and the assertion is three lines. The parity note
+stays as it is until that lands.
