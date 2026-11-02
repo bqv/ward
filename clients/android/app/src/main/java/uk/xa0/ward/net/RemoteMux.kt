@@ -356,6 +356,21 @@ class RemoteMux(
             out.trySend(StreamEvent.Item(snapshot))
         }
         val translator = FollowTranslator(sessionId, client)
+        val queuePolls = scope.launch {
+            var previous = ""
+            while (scope.isActive && !closed) {
+                val inbox = client.hostQueueInbox(sessionId)
+                if (inbox == null) {
+                    delay(2_000)
+                    continue
+                }
+                if (inbox.toString() != previous) {
+                    previous = inbox.toString()
+                    client.mux?.publishProjection(sessionId, "inbox", inbox)
+                }
+                delay(2_000)
+            }
+        }
         var replaying = true
         try {
             subscription.events.collect { event ->
@@ -377,6 +392,7 @@ class RemoteMux(
                 }
             }
         } finally {
+            queuePolls.cancel()
             subscription.close()
         }
     }
@@ -411,7 +427,7 @@ class RemoteMux(
                 .put("cacheWriteTokens", 0)
                 .put("outputTokens", output))
         if (!permission.isNullOrEmpty()) projection.put("permission", permission)
-        client.queueProjection(sessionId)?.let { projection.put("inbox", it) }
+        client.hostQueueInbox(sessionId)?.let { projection.put("inbox", it) }
         return projection
     }
 

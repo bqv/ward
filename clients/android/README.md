@@ -111,6 +111,9 @@ indefinite forms are refused on decode.
   copied composure already draws;
 - modules and plugins: `module.list` is the bundle list, with a read-only switch
   because ward reloads the registry as one set; `module.reload` is available;
+- queue: the dock reads `session.queue {id}` from the daemon, so a queued prompt
+  sent by another client is visible here too. The client keeps only its own
+  submit ids to retire optimistic echoes; it no longer mirrors queue content;
 - policy and access: `policy.list`/`policy.select` drive the access chip through
   the DSH permission names. The daemon now serves four presets. The list remains
   the authority, and the all-allow preset maps to the chip's
@@ -143,10 +146,6 @@ repository and the message cannot drift.
   `SO_PEERCRED` door is a desktop/local path; the phone uses TCP.
 - **No host Workspace registry.** The drawer's groups are derived from `cwd`, so
   membership and manual ordering are client-owned rather than host state.
-- **The queue is client-derived.** Ward answers `{queued, ahead}` but exposes no
-  queue snapshot, so the dock mirrors this client's own queued prompts until the
-  daemon's `session.prompted` retires them. A prompt queued by another client is
-  invisible here.
 - **There is no Host shell seat.** Ward has no archived, unconfined host-shell
   session to bootstrap; the session seat is the only terminal seat offered.
 - **Job output is not streamed.** `job.list` and `job.kill` work; there is no
@@ -188,5 +187,5 @@ The protocol gates live in
 `app/src/test/java/uk/xa0/ward/proto/WardProtocolTest.kt` (captured golden
 bytes, frame round-trip, CBOR subset and refusals) and
 `app/src/test/java/uk/xa0/ward/proto/WardLiveTest.kt` (create, list, resume,
-rename, archive, file read/list/blob and the four-preset `policy.list` against a
-live daemon).
+rename, archive, file read/list/blob, the four-preset `policy.list` and the
+daemon-owned `session.queue` against a live daemon).

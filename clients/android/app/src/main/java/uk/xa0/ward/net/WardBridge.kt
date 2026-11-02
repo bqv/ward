@@ -34,12 +34,9 @@ class WardBridge(private val connection: WardConnection) {
     private val approvals = ConcurrentHashMap<String, ApprovalRef>()
     private val terminals = ConcurrentHashMap<String, JSONObject>()
     private val subagentParents = ConcurrentHashMap<String, String>()
-    private val queueEntries = ConcurrentHashMap<String, MutableList<QueueEntry>>()
     private val presetIds = ConcurrentHashMap<String, String>()
-    private data class QueueEntry(val id: String, val text: String, val rpcId: String)
-
-    /** Told when this client's view of a session's pending queue changes. */
-    var onQueueChanged: ((sessionId: String, inbox: JSONObject) -> Unit)? = null
+    /** Our own submit ids, kept only to retire a local echo against a host row. */
+    private val queuedRpcIds = ConcurrentHashMap<String, MutableList<Pair<String, String>>>()
 
     fun rememberApproval(eventId: String, session: String, call: Long, epoch: Long) {
         approvals[eventId] = ApprovalRef(session, call, epoch)
@@ -54,39 +51,47 @@ class WardBridge(private val connection: WardConnection) {
     }
 
     /**
-     * Ward has no queue projection; the dock's rows are what this client queued.
-     * A queued prompt is tracked until the daemon writes its `session.prompted`.
+     * The daemon's own pending queue, in the `inbox` projection the dock reads.
+     *
+     * The host is the only source of truth. The local list is not a mirror; it
+     * holds just the submit ids this client minted, so the optimistic echo can be
+     * retired when the matching host row appears. An `rpcId` the host did not
+     * carry is attached only to the row with the same text.
      */
-    fun queueProjection(sessionId: String): JSONObject {
-        val entries = queueEntries[sessionId].orEmpty()
-        val next = JSONArray()
-        entries.forEach { entry ->
-            next.put(JSONObject()
-                .put("id", entry.id)
-                .put("content", JSONArray().put(JSONObject()
+    suspend fun hostQueueInbox(sessionId: String): JSONObject? {
+        val result = runCatching { api.sessionQueue(sessionId) }.getOrNull() ?: return null
+        val pending = queuedRpcIds[sessionId]?.toMutableList() ?: mutableListOf()
+        val items = JSONArray()
+        result.array("items")?.items?.forEachIndexed { index, item ->
+            val row = item as? Cbor.Map ?: return@forEachIndexed
+            val text = row.text("text").orEmpty()
+            val ahead = row.long("ahead") ?: index.toLong()
+            val matched = pending.indexOfFirst { it.first == text }
+            val rpcId = if (matched >= 0) pending.removeAt(matched).second else ""
+            val message = JSONObject()
+                .put("id", "ward-queue-$ahead")
+                .put("placement", "queued")
+                .put("message", JSONObject().put("content", JSONArray().put(JSONObject()
                     .put("type", "text")
-                    .put("text", entry.text)))
-                .put("source", JSONObject()
-                    .put("kind", "user")
-                    .put("rpcId", entry.rpcId)))
+                    .put("text", text))))
+            if (rpcId.isNotEmpty()) message.put("rpcId", rpcId)
+            items.put(message)
         }
-        return JSONObject().put("next-turn", next).put("next-step", JSONArray())
+        if (pending.isEmpty()) queuedRpcIds.remove(sessionId) else queuedRpcIds[sessionId] = pending
+        return JSONObject().put("next-turn", items).put("next-step", JSONArray())
     }
 
     fun notePromptStarted(sessionId: String, text: String) {
-        val entries = queueEntries[sessionId] ?: return
-        val at = entries.indexOfFirst { it.text == text }
+        val pending = queuedRpcIds[sessionId] ?: return
+        val at = pending.indexOfFirst { it.first == text }
         if (at < 0) return
-        entries.removeAt(at)
-        if (entries.isEmpty()) queueEntries.remove(sessionId)
-        onQueueChanged?.invoke(sessionId, queueProjection(sessionId))
+        pending.removeAt(at)
+        if (pending.isEmpty()) queuedRpcIds.remove(sessionId)
     }
 
     private fun queuePrompt(sessionId: String, request: JSONObject, text: String) {
         val rpcId = request.optString("requestId").ifEmpty { java.util.UUID.randomUUID().toString() }
-        val entry = QueueEntry(id = "ward-queue-$rpcId", text = text, rpcId = rpcId)
-        queueEntries.getOrPut(sessionId) { mutableListOf() } += entry
-        onQueueChanged?.invoke(sessionId, queueProjection(sessionId))
+        queuedRpcIds.getOrPut(sessionId) { mutableListOf() } += text to rpcId
     }
 
     suspend fun call(method: String, args: JSONObject): Any? {

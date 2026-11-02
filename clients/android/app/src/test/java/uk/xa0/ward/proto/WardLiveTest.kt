@@ -79,4 +79,28 @@ class WardLiveTest {
     }
 
 
+    @Test
+    fun `session queue is served by the daemon`() = runBlocking {
+        val endpoint = System.getenv("WARD_TEST_ENDPOINT") ?: return@runBlocking
+        val connection = WardConnection(endpoint)
+        connection.connect()
+        val api = WardApi(connection)
+        val session = api.createSession("/tmp")
+        try {
+            // The first scripted write parks on approval; the second prompt is
+            // therefore a daemon-owned queue row, not a client mirror.
+            api.prompt(session.id, "/write ward-queue-test.txt hello")
+            val second = api.prompt(session.id, "queued text from the test")
+            assertEquals(true, second.bool("queued"))
+            val queue = api.sessionQueue(session.id)
+            assertEquals(session.id, queue.text("session"))
+            val items = queue.array("items")?.items.orEmpty().mapNotNull { it as? Cbor.Map }
+            assertTrue(items.any { it.text("text") == "queued text from the test" && it.long("ahead") == 0L })
+        } finally {
+            runCatching { api.cancel(session.id) }
+            connection.close()
+        }
+    }
+
+
 }

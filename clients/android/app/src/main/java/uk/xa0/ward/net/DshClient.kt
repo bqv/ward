@@ -132,11 +132,7 @@ class DshClient(context: Context) {
         if (target.isEmpty()) throw DshUnreachableException("No ward address is configured")
         val current = connection ?: WardConnection(target).also {
             connection = it
-            bridge = WardBridge(it).also { created ->
-                created.onQueueChanged = { session, inbox ->
-                    muxInstance?.publishProjection(session, "inbox", inbox)
-                }
-            }
+            bridge = WardBridge(it)
         }
         current.connect()
         return current
@@ -244,7 +240,7 @@ class DshClient(context: Context) {
         bridge?.notePromptStarted(session, text)
     }
 
-    fun queueProjection(session: String): JSONObject? = bridge?.queueProjection(session)
+    suspend fun hostQueueInbox(session: String): JSONObject? = bridge?.hostQueueInbox(session)
 
     companion object {
         private const val TAG = "WardRoute"
