@@ -492,7 +492,31 @@ int main(int argc, char *argv[])
     //
     // ACP only: the WebSocket transport has no prompt path yet, and silently
     // ignoring the flag would look like a hang.
-    if (parser.isSet(promptOption) && !useDsh) {
+    if (parser.isSet(promptOption) && useWard) {
+        const QString text = parser.value(promptOption);
+        auto sent = std::make_shared<bool>(false);
+        auto answer = std::make_shared<QString>();
+        QObject::connect(&ward, &WardClient::stateChanged, &ward,
+                         [&ward, text, sent]() {
+            if (ward.state() != WardClient::Ready || *sent)
+                return;
+            *sent = true;
+            ward.sendPrompt(text);
+        });
+        QObject::connect(&ward, &WardClient::eventReceived, &ward,
+                         [&app, answer](const QString &kind, const QVariantMap &payload) {
+            if (kind == QLatin1String("text.delta"))
+                answer->append(payload.value(QStringLiteral("text")).toString());
+            if (kind == QLatin1String("turn.end")) {
+                printf("%s", qPrintable(*answer));
+                if (!answer->isEmpty() && !answer->endsWith(QLatin1Char('\n')))
+                    printf("\n");
+                fflush(stdout);
+                app.exit(0);
+            }
+        });
+        QTimer::singleShot(180000, &app, [&app]() { app.exit(4); });
+    } else if (parser.isSet(promptOption) && !useDsh) {
         const QString text = parser.value(promptOption);
 
         // Guard against a false settle: createSession() reports not-busy before

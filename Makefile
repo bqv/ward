@@ -71,6 +71,7 @@ CLIENT_OBJ := $(BUILDDIR)/src/client/client.o
 NATIVE := $(BUILDDIR)/ward-native
 DESKTOP_BUILD ?= clients/desktop/build
 DESKTOP_PROBE := $(DESKTOP_BUILD)/ward-gui-probe
+DESKTOP_GUI := $(DESKTOP_BUILD)/ward-gui
 BIN_OBJ := $(BUILDDIR)/src/cli/main.o $(BUILDDIR)/src/daemon/server.o
 NATIVE_OBJ := $(BUILDDIR)/clients/native/main.o
 CORE_LIB := $(BUILDDIR)/libward-core.a
@@ -138,6 +139,8 @@ $(DESKTOP_PROBE): FORCE
 	cmake -S clients/desktop -B $(DESKTOP_BUILD) -G Ninja
 	cmake --build $(DESKTOP_BUILD)
 
+$(DESKTOP_GUI): $(DESKTOP_PROBE)
+
 FORCE:
 
 modules: $(MODULE_WASM)
@@ -204,6 +207,7 @@ test: $(TEST_BINS) $(WARD) $(NATIVE) $(DESKTOP_PROBE) $(MODULE_WASM) $(GUEST_WAS
 	  if WARD_BIN=$(abspath $(WARD)) \
 	     WARD_NATIVE=$(abspath $(NATIVE)) \
 	     WARD_GUI_PROBE=$(abspath $(DESKTOP_PROBE)) \
+	     WARD_GUI=$(abspath $(DESKTOP_GUI)) \
 	     WARD_MODULE_DIR=$(abspath $(BUILDDIR)) \
 	     WARD_GUEST_DIR=$(abspath $(BUILDDIR)) \
 	     timeout $(TEST_TIMEOUT) $$t >$(BUILDDIR)/$$name.log 2>&1; then \

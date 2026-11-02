@@ -161,7 +161,8 @@ ClientFacade::ClientFacade(QObject *transport, QObject *parent)
     const bool roster = m_transportName == QLatin1String("dsh")
                      || m_transportName == QLatin1String("ward");
     m_hasSessionList = roster;
-    m_hasWorkspaces = m_transportName == QLatin1String("dsh");
+    m_hasWorkspaces = m_transportName == QLatin1String("dsh")
+                   || m_transportName == QLatin1String("ward");
     m_hasPermissionCatalog = m_transportName == QLatin1String("dsh");
     m_hasAttachmentStaging = m_transportName == QLatin1String("dsh");
     m_hasFileSurface = m_transportName == QLatin1String("dsh");

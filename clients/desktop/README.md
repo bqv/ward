@@ -85,6 +85,8 @@ The client speaks ward's method names and event kinds, not an adapter vocabulary
 | terminal | `terminal.open/write/resize/close`, `terminal.output`, eof |
 | files | `session.file_read` (text), `session.file_read_blob` (CBOR bytes), `session.file_list` |
 | jobs, schedules | `job.list`, `job.kill`, `schedule.list`, `schedule.delete` |
+| trajectory | `turn.*`, `session.prompted`, `text.delta`, `tool.call/result` |
+| workspaces | synthetic groups by session cwd |
 | any other method | `wardCall(method, params)` is the generic door; `protocolMethods()` lists the frozen table |
 
 Events the shell has no control for (`turn.timings`, `job.updated`,
@@ -96,11 +98,15 @@ and are never silently dropped by the wire layer.
 - **QUIC.** `WardClient` connects over `AF_UNIX` and loopback TCP. ward's QUIC
   transport, device certificates and pairing are not in this client yet; the
   daemon's own QUIC client (`src/net/quic.c`) is the code to reuse.
-- **Files, attachments, workspaces, plugin inventory, permission presets.**
-  Text files read through `session.file_read`, binary ranges through
-  `session.file_read_blob`, and the tree through `session.file_list`. The image
-  lightbox needs an image reference in ward's events before it can resolve one.
-  The other properties exist and answer empty so the widgets degrade honestly.
+- **Image lightbox and attachments.** Text files read through
+  `session.file_read`, binary ranges through `session.file_read_blob`, and the
+  tree through `session.file_list`. The image lightbox needs an image reference
+  in ward's events before it can resolve one; the composer does not stage
+  `attachment.add/list`.
+- **Permission presets.** ward has no preset catalog; the access chip is absent
+  and `/permission` answers why.
+- **QUIC.** Unix sockets and loopback TCP only; device pairing and certificates
+  are not in this client.
 - **Deferred new-session seats.** A new session is created immediately rather
   than on the first send.
 

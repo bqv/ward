@@ -169,7 +169,7 @@ int main(int argc, char **argv)
             return;
         if (terminal || read || blob || list) {
             prompted = true;
-            client.createSession();
+            client.createSessionNow();
             return;
         }
         if (parser.isSet(sessionOption)) {
@@ -182,7 +182,8 @@ int main(int argc, char **argv)
                 app.quit();
             return;
         }
-        client.createSession();
+        prompted = true;
+        client.sendPrompt(parser.value(promptOption));
     });
     QObject::connect(&client, &WardClient::sessionsLoadingChanged, &app, [&]() {
         if (client.state() == WardClient::Ready && !parser.isSet(promptOption)

@@ -147,6 +147,16 @@ int main(void) {
   assert(run_capture(tcp_url, probe, tcp_argv, tcp_out, sizeof(tcp_out)) == 0);
   assert(count_text(tcp_out, "hello tcp") == 1);
 
+  const char *gui = getenv("WARD_GUI");
+  if (gui != NULL) {
+    setenv("QT_QPA_PLATFORM", "offscreen", 1);
+    char gui_out[8192];
+    char *gui_argv[] = {(char *)gui, (char *)"--transport", (char *)"ward",
+                        (char *)"--prompt", (char *)"hello gui", NULL};
+    assert(run_capture(sock, gui, gui_argv, gui_out, sizeof(gui_out)) == 0);
+    assert(count_text(gui_out, "hello gui") == 1);
+  }
+
   char terminal_out[8192];
   char *terminal_argv[] = {(char *)probe, (char *)"--terminal", NULL};
   assert(run_capture(sock, probe, terminal_argv, terminal_out, sizeof(terminal_out)) == 0);
@@ -211,6 +221,6 @@ int main(void) {
   stop_server(endpoint);
   if (strcmp(cgroup_base, "off") != 0) drop_test_cgroup(cgroup_base);
 
-  printf("desktop gate passed: ward-gui drove a session over UDS, TCP, a terminal, reads and a directory list\n");
+  printf("desktop gate passed: ward-gui drove a session over UDS, TCP, a terminal, reads, a directory list and a headless prompt\n");
   return 0;
 }

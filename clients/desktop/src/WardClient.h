@@ -166,6 +166,7 @@ public:
 
     Q_INVOKABLE void connectToDaemon();
     Q_INVOKABLE void createSession();
+    Q_INVOKABLE void createSessionNow();
     Q_INVOKABLE void createSessionInWorkspace(const QString &workspaceId);
     Q_INVOKABLE void followSession(const QString &sessionId);
     Q_INVOKABLE void sendPrompt(const QString &text);
@@ -297,11 +298,14 @@ private:
                      const QVariantMap &payload);
     void applySession(const QVariantMap &session);
     void setSessions(const QVariantList &sessions);
+    void rebuildWorkspaces();
     void subscribe(const QString &sessionId);
     void doPrompt(const QString &text);
     void appendRow(const QString &kind, const QString &text, const QString &title = {},
                    const QString &status = {}, const QString &detail = {},
                    const QString &key = {}, int turn = -1);
+    void addTrajectory(const QVariantMap &cell);
+    void updateTrajectory(const QString &id, const QVariantMap &patch);
     void clearTranscript();
 
     QString m_socketPath;
@@ -378,6 +382,7 @@ private:
     QStringList m_railExpanded;
     QStringList m_railCollapsed;
 
+    QString m_createCwd;
     QString m_blobPath;
     qint64 m_blobOffset = 0;
     qint64 m_blobLen = 0;

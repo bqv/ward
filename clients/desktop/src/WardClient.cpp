@@ -9,6 +9,7 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFileInfo>
+#include <QFileInfo>
 #include <QSettings>
 #include <QSocketNotifier>
 #include <QTimer>
@@ -517,6 +518,8 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
         applySession(session);
         const QString id = session.value(QStringLiteral("id")).toString();
         if (!id.isEmpty()) {
+            m_pendingSession = false;
+            emit pendingSessionChanged();
             m_sessionId = id;
             subscribe(id);
             emit sessionChanged();
@@ -673,17 +676,70 @@ void WardClient::handleEvent(uint64_t sub, uint64_t seq, const QString &kind,
     if (kind == QLatin1String("session.updated")) {
         applySession(payload.value(QStringLiteral("session")).toMap());
     } else if (kind == QLatin1String("session.prompted")) {
-        appendRow(QStringLiteral("user"), payload.value(QStringLiteral("text")).toString());
+        const QString text = payload.value(QStringLiteral("text")).toString();
+        appendRow(QStringLiteral("user"), text);
+        addTrajectory(QVariantMap{
+            {QStringLiteral("id"), QStringLiteral("prompt-%1-%2").arg(m_turn).arg(seq)},
+            {QStringLiteral("turn"), m_turn},
+            {QStringLiteral("step"), 1},
+            {QStringLiteral("kind"), QStringLiteral("input")},
+            {QStringLiteral("lane"), 0},
+            {QStringLiteral("status"), QStringLiteral("done")},
+            {QStringLiteral("text"), text},
+            {QStringLiteral("input"), text},
+            {QStringLiteral("summary"), QStringLiteral("prompt")},
+            {QStringLiteral("seq"), QVariant::fromValue<qulonglong>(seq)}});
     } else if (kind == QLatin1String("text.delta")) {
-        m_transcript->appendOrExtend(QStringLiteral("agent"),
-                                     payload.value(QStringLiteral("text")).toString(),
+        const QString piece = payload.value(QStringLiteral("text")).toString();
+        m_transcript->appendOrExtend(QStringLiteral("agent"), piece,
                                      QDateTime::currentMSecsSinceEpoch(), m_turn);
+        const QString id = QStringLiteral("agent-%1").arg(m_turn);
+        bool found = false;
+        for (int i = 0; i < m_trajectory.size(); ++i) {
+            QVariantMap cell = m_trajectory.at(i).toMap();
+            if (cell.value(QStringLiteral("id")).toString() != id)
+                continue;
+            cell[QStringLiteral("text")] = cell.value(QStringLiteral("text")).toString() + piece;
+            cell[QStringLiteral("output")] = cell.value(QStringLiteral("output")).toString() + piece;
+            m_trajectory[i] = cell;
+            found = true;
+            break;
+        }
+        if (!found) {
+            addTrajectory(QVariantMap{
+                {QStringLiteral("id"), id},
+                {QStringLiteral("turn"), m_turn},
+                {QStringLiteral("step"), 1},
+                {QStringLiteral("kind"), QStringLiteral("output")},
+                {QStringLiteral("lane"), 0},
+                {QStringLiteral("status"), QStringLiteral("running")},
+                {QStringLiteral("text"), piece},
+                {QStringLiteral("output"), piece},
+                {QStringLiteral("summary"), QStringLiteral("assistant")},
+                {QStringLiteral("seq"), QVariant::fromValue<qulonglong>(seq)}});
+        } else {
+            emit trajectoryChanged();
+        }
     } else if (kind == QLatin1String("turn.start")) {
         m_turn = int(payload.value(QStringLiteral("turn")).toULongLong());
         m_turnOpen = true;
         emit turnOpenChanged();
         m_transcript->noteTurn(m_turn, true, QDateTime::currentMSecsSinceEpoch());
+        addTrajectory(QVariantMap{
+            {QStringLiteral("id"), QStringLiteral("turn-%1").arg(m_turn)},
+            {QStringLiteral("turn"), m_turn},
+            {QStringLiteral("step"), 0},
+            {QStringLiteral("kind"), QStringLiteral("turn")},
+            {QStringLiteral("lane"), 0},
+            {QStringLiteral("status"), QStringLiteral("running")},
+            {QStringLiteral("text"), QStringLiteral("turn %1").arg(m_turn)},
+            {QStringLiteral("summary"), QString()},
+            {QStringLiteral("seq"), QVariant::fromValue<qulonglong>(seq)}});
     } else if (kind == QLatin1String("turn.end")) {
+        updateTrajectory(QStringLiteral("turn-%1").arg(m_turn),
+                         {{QStringLiteral("status"), QStringLiteral("done")}});
+        updateTrajectory(QStringLiteral("agent-%1").arg(m_turn),
+                         {{QStringLiteral("status"), QStringLiteral("done")}});
         m_transcript->noteTurn(m_turn, false);
         m_turnOpen = false;
         m_busy = false;
@@ -697,14 +753,30 @@ void WardClient::handleEvent(uint64_t sub, uint64_t seq, const QString &kind,
         const QString call = QString::number(payload.value(QStringLiteral("call")).toULongLong());
         appendRow(QStringLiteral("tool"), tool, tool, QStringLiteral("pending"), tool, call,
                   m_turn);
-        m_trajectory.append(QVariantMap{{QStringLiteral("kind"), QStringLiteral("tool")},
-                                        {QStringLiteral("title"), tool},
-                                        {QStringLiteral("text"), tool}});
-        emit trajectoryChanged();
+        addTrajectory(QVariantMap{
+            {QStringLiteral("id"), QStringLiteral("tool-%1").arg(call)},
+            {QStringLiteral("turn"), m_turn},
+            {QStringLiteral("step"), 1},
+            {QStringLiteral("kind"), QStringLiteral("tool")},
+            {QStringLiteral("lane"), 0},
+            {QStringLiteral("status"), QStringLiteral("pending")},
+            {QStringLiteral("toolName"), tool},
+            {QStringLiteral("text"), tool},
+            {QStringLiteral("summary"), tool},
+            {QStringLiteral("seq"), QVariant::fromValue<qulonglong>(seq)}});
     } else if (kind == QLatin1String("tool.result")) {
         const QString tool = payload.value(QStringLiteral("tool")).toString();
         appendRow(QStringLiteral("tool"), tool, tool, QStringLiteral("completed"), tool, {},
                   m_turn);
+        for (int i = m_trajectory.size() - 1; i >= 0; --i) {
+            QVariantMap cell = m_trajectory.at(i).toMap();
+            if (cell.value(QStringLiteral("kind")).toString() != QLatin1String("tool"))
+                continue;
+            cell[QStringLiteral("status")] = QStringLiteral("done");
+            m_trajectory[i] = cell;
+            emit trajectoryChanged();
+            break;
+        }
     } else if (kind == QLatin1String("approval.requested")) {
         const QString requestId = QStringLiteral("%1:%2")
             .arg(payload.value(QStringLiteral("call")).toULongLong())
@@ -748,6 +820,9 @@ void WardClient::handleEvent(uint64_t sub, uint64_t seq, const QString &kind,
     } else if (kind == QLatin1String("turn.timings")) {
         const int prompt = int(payload.value(QStringLiteral("prompt_n")).toULongLong());
         const int predicted = int(payload.value(QStringLiteral("predicted_n")).toULongLong());
+        updateTrajectory(QStringLiteral("turn-%1").arg(m_turn),
+                         {{QStringLiteral("summary"),
+                           QStringLiteral("%1 in, %2 out").arg(prompt).arg(predicted)}});
         if (prompt + predicted > 0) {
             m_contextUsed = prompt + predicted;
             emit contextChanged();
@@ -814,6 +889,7 @@ void WardClient::applySession(const QVariantMap &session)
     }
     if (!replaced)
         m_sessions.prepend(row);
+    rebuildWorkspaces();
     emit sessionsChanged();
 
     if (id == m_sessionId) {
@@ -846,7 +922,34 @@ void WardClient::setSessions(const QVariantList &sessions)
             {QStringLiteral("waiting"), false}});
     }
     m_sessions = rows;
+    rebuildWorkspaces();
     emit sessionsChanged();
+}
+
+
+void WardClient::rebuildWorkspaces()
+{
+    QMap<QString, QStringList> groups;
+    for (const QVariant &entry : m_sessions) {
+        const QVariantMap row = entry.toMap();
+        const QString cwd = row.value(QStringLiteral("cwd")).toString();
+        groups[cwd].append(row.value(QStringLiteral("sessionId")).toString());
+    }
+    QVariantList list;
+    for (auto it = groups.constBegin(); it != groups.constEnd(); ++it) {
+        const QString cwd = it.key();
+        const QString title = cwd.isEmpty() ? QStringLiteral("sessions")
+                                           : QFileInfo(cwd).fileName();
+        list.append(QVariantMap{
+            {QStringLiteral("workspaceId"), QStringLiteral("cwd:") + cwd},
+            {QStringLiteral("path"), cwd},
+            {QStringLiteral("title"), title.isEmpty() ? cwd : title},
+            {QStringLiteral("sessionIds"), it.value()}});
+    }
+    if (list == m_workspaces)
+        return;
+    m_workspaces = list;
+    emit workspacesChanged();
 }
 
 void WardClient::subscribe(const QString &sessionId)
@@ -869,16 +972,33 @@ void WardClient::subscribe(const QString &sessionId)
 
 void WardClient::createSession()
 {
-    m_pendingSession = false;
+    if (!m_terminalId.isEmpty())
+        closeTerminal();
+    m_pendingSession = true;
+    m_queuedPrompt.clear();
+    m_sessionId.clear();
+    clearTranscript();
+    emit pendingSessionChanged();
+    emit sessionChanged();
+    setState(Ready, QStringLiteral("new session"));
+}
+
+void WardClient::createSessionNow()
+{
+    const QString cwd = m_createCwd.isEmpty() ? QDir::currentPath() : m_createCwd;
+    m_createCwd.clear();
+    m_pendingSession = true;
     emit pendingSessionChanged();
     sendRequest(QStringLiteral("session.create"),
-                {{QStringLiteral("cwd"), QDir::currentPath()}});
+                {{QStringLiteral("cwd"), cwd}});
 }
 
 void WardClient::createSessionInWorkspace(const QString &workspaceId)
 {
-    Q_UNUSED(workspaceId);
     createSession();
+    m_createCwd = workspaceId.startsWith(QLatin1String("cwd:"))
+                      ? workspaceId.mid(4)
+                      : workspaceId;
 }
 
 void WardClient::followSession(const QString &sessionId)
@@ -904,9 +1024,9 @@ void WardClient::sendPrompt(const QString &text, const QString &mode)
     Q_UNUSED(mode);
     if (text.isEmpty())
         return;
-    if (m_sessionId.isEmpty()) {
+    if (m_sessionId.isEmpty() || m_pendingSession) {
         m_queuedPrompt = text;
-        createSession();
+        createSessionNow();
         return;
     }
     if (m_sub == 0 || m_subscribedSession != m_sessionId
@@ -1384,6 +1504,26 @@ QStringList WardClient::protocolMethods() const
             QStringLiteral("stats.global"), QStringLiteral("device.pair"),
             QStringLiteral("device.enrol"), QStringLiteral("device.list"),
             QStringLiteral("device.revoke")};
+}
+
+void WardClient::addTrajectory(const QVariantMap &cell)
+{
+    m_trajectory.append(cell);
+    emit trajectoryChanged();
+}
+
+void WardClient::updateTrajectory(const QString &id, const QVariantMap &patch)
+{
+    for (int i = 0; i < m_trajectory.size(); ++i) {
+        QVariantMap cell = m_trajectory.at(i).toMap();
+        if (cell.value(QStringLiteral("id")).toString() != id)
+            continue;
+        for (auto it = patch.constBegin(); it != patch.constEnd(); ++it)
+            cell.insert(it.key(), it.value());
+        m_trajectory[i] = cell;
+        emit trajectoryChanged();
+        return;
+    }
 }
 
 void WardClient::appendRow(const QString &kind, const QString &text, const QString &title,

@@ -54,7 +54,8 @@ turn without duplicating a row.
 `tests/gate_desktop.c` runs the probe against a fixture daemon and asserts the
 prompt text appears exactly once, first over the Unix socket and then over
 loopback TCP, then drives a terminal, a text read, a blob read and a directory
-list (success and an escape refusal for each). It fork/execs the probe with `PR_SET_PDEATHSIG` and `alarm(20)`
+list (success and an escape refusal for each), then starts ward-gui offscreen with
+`--prompt` and asserts the answer. It fork/execs the probe with `PR_SET_PDEATHSIG` and `alarm(20)`
 rather than using `popen`, so a stalled probe fails the gate and a killed gate
 does not leave a server behind. `make test` builds the probe and runs the gate.
 In a sandbox that cannot write `/sys/fs/cgroup`, run the gate directly with
@@ -78,10 +79,12 @@ daemon.
 | replay | `session.resume {from: 0}` and the `replay` control frame |
 | approvals | request, respond, resolved; `requestId` is `call:epoch` |
 | terminal | `terminal.open/write/resize/close`, `terminal.output`, eof and exit state |
-| session lifecycle | create, list, resume, prompt, cancel, rename, pin, archive, compact, set_model |
+| session lifecycle | create (client-side lazy), list, resume, prompt, cancel, rename, pin, archive, compact, set_model |
 | catalog | `model.list`, `session.set_model` |
 | files | `session.file_read` (text, 64 KiB), `session.file_read_blob` (CBOR bytes, 1 MiB per call, 4 MiB total) and `session.file_list`; all cwd-rooted |
 | goals, jobs, schedules | `goal.set/clear`, `job.list/kill`, `schedule.list/delete` |
+| trajectory | `turn.start`, `turn.end`, `turn.timings`, `session.prompted`, `text.delta`, `tool.call/result` projected into the page |
+| workspaces | synthetic groups by session cwd; ward has no registry |
 | everything else | `wardCall(method, params)` plus `protocolMethods()` |
 
 Unknown events are not dropped by the wire layer: every event reaches
@@ -94,25 +97,17 @@ proven yet. They are reported to the ward session as well.
 
 1. **QUIC.** The client uses Unix sockets and loopback TCP. ward's QUIC
    transport, device certificates, pairing and `device.*` are not in the client;
-   `src/net/quic.h` is the code to reuse.
-2. **Files and attachments.** Text reads go through `session.file_read`, blob
-   reads through `session.file_read_blob`, and the dock browses with
-   `session.file_list`. The image lightbox is still not wired because ward's
-   events do not carry an image reference for `attachmentUrl`/`loadAttachment`
-   to resolve. `attachment.add/list` exists in ward, but the composer's staging
-   surface is not wired to it.
-3. **Workspaces.** ward has no workspace registry; the rail groups by nothing
-   and the facade reports `hasWorkspaces = false`.
-4. **Permission presets.** ward's policy is a server-side rule table, not a
-   preset catalog; the access chip is absent and `/permission` answers why.
-5. **Trajectory page.** A tool call produces a minimal ledger entry; ward's
-   richer journal has no equivalent projection in this client yet.
-6. **Deferred new sessions.** dsh-native defers `session.create` until the
-   first send. `WardClient` creates immediately, so a New Session press leaves a
-   roster row even if nothing is sent.
-7. **Headless `--prompt`.** dsh-native's `--prompt` is ACP-only; ward-gui has no
-   equivalent path in the shell. The probe is the display-free path instead.
+   `src/net/quic.h` is the code to reuse, but it pulls ngtcp2 and OpenSSL into a
+   Qt client that currently links neither.
+2. **Image lightbox and uploaded attachments.** Text, blob and directory
+   surfaces are wired. The image lightbox still needs an image reference in
+   ward's tool-result or attachment event before `attachmentUrl` can resolve
+   one, and the composer's staging surface is not wired to `attachment.add/list`.
+3. **Permission presets.** ward's policy is a server-side rule table, not a
+   preset catalog; the access chip is absent and `/permission` answers why. A
+   ward-served preset list is the honest first step.
 
-The gate closes the "no make test gate" hole and the terminal surface is wired;
-the remaining items are client surfaces, one ward-side decision (`file.read`),
-and the QUIC transport.
+Deferred new sessions, workspaces-by-cwd, trajectory projection and the
+headless `--prompt` path are now in the client; the gate covers the last of
+those. QUIC and presets need ward-side or dependency decisions rather than more
+client wiring.
