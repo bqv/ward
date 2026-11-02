@@ -103,4 +103,27 @@ class WardLiveTest {
     }
 
 
+    @Test
+    fun `job follow answers while the run exists and is gone after cancel`() = runBlocking {
+        val endpoint = System.getenv("WARD_TEST_ENDPOINT") ?: return@runBlocking
+        val connection = WardConnection(endpoint)
+        connection.connect()
+        val api = WardApi(connection)
+        val session = api.createSession("/tmp")
+        try {
+            // The scripted write parks the run, which is enough for the ring
+            // method to exist; the text itself needs a provider turn to fill.
+            api.prompt(session.id, "/write ward-job-follow.txt hello")
+            val page = api.jobFollow(session.id, 0)
+            assertEquals(session.id, page.text("job"))
+            assertTrue((page.long("next") ?: -1) >= 0)
+        } finally {
+            runCatching { api.cancel(session.id) }
+        }
+        val gone = runCatching { api.jobFollow(session.id, 0) }
+        assertTrue("a freed run must be an error, not an empty stream", gone.isFailure)
+        connection.close()
+    }
+
+
 }

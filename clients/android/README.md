@@ -104,7 +104,10 @@ indefinite forms are refused on decode.
   session's `cwd` — one client-owned Workspace per directory, refreshed as the
   roster changes;
 - jobs: `job.list` is polled into the copied roster and `job.kill` addresses the
-  turn; output streaming is not part of ward's job surface;
+  turn. Expanding a row calls `job.follow {id, from}`: the client advances from
+  the returned `next`, treats `dropped` and a cursor behind the first chunk as a
+  visible prefix gap, and turns the freed-run error into a settled status so the
+  panel falls back to the transcript;
 - schedules: `schedule.list` becomes the Automation catalogue, with the cron
   expression and next fire time; `schedule.delete` removes one;
 - goals: durable `goal.set`/`goal.cleared` events become the goal projection the
@@ -148,8 +151,11 @@ repository and the message cannot drift.
   membership and manual ordering are client-owned rather than host state.
 - **There is no Host shell seat.** Ward has no archived, unconfined host-shell
   session to bootstrap; the session seat is the only terminal seat offered.
-- **Job output is not streamed.** `job.list` and `job.kill` work; there is no
-  equivalent of `job/follow`'s output ring.
+- **Job overflow through a real turn is unmeasured.** `job.follow` is wired and
+  its ring accounting is unit-tested, and the live method is gated on a parked
+  job and on the freed-run error. No gate drives the ring past 64 KiB through the
+  daemon because the fixture provider does not stream that much, so the client
+  treats `dropped` as a gap rather than claiming the overflow path is proven.
 - **Ward has no settings document or writable plugin switch.** `settings/describe`
   answers an empty document and the plugin switch is read-only; module reload is
   the one management action offered. The slash-command catalogue is supplied by
@@ -187,5 +193,6 @@ The protocol gates live in
 `app/src/test/java/uk/xa0/ward/proto/WardProtocolTest.kt` (captured golden
 bytes, frame round-trip, CBOR subset and refusals) and
 `app/src/test/java/uk/xa0/ward/proto/WardLiveTest.kt` (create, list, resume,
-rename, archive, file read/list/blob, the four-preset `policy.list` and the
-daemon-owned `session.queue` against a live daemon).
+rename, archive, file read/list/blob, the four-preset `policy.list`, the
+daemon-owned `session.queue` and `job.follow` on a parked job and a freed run
+against a live daemon).

@@ -179,7 +179,8 @@ class RemoteMux(
                         "session/follow" -> collectFollow(args, producer)
                         "session/control" -> collectControl(producer)
                         "workspace/follow" -> collectWorkspaces(producer)
-                        "job/list", "job/follow" -> collectJobs(args, producer)
+                        "job/list" -> collectJobs(args, producer)
+                        "job/follow" -> collectJobFollow(args, producer)
                         "terminal/follow" -> collectTerminal(args, producer)
                         else -> {
                             producer.trySend(StreamEvent.Failure("not_supported", "ward has no $endpoint stream"))
@@ -509,6 +510,67 @@ class RemoteMux(
                 }
             }
             delay(5_000)
+        }
+    }
+
+    /**
+     * Ward's job ring is a snapshot per call, not a push stream. One `opened`
+     * frame anchors the DSH observation, each later call appends whatever the ring
+     * has grown by, and a not-found answer is the job being gone: emit the terminal
+     * status and let the copied panel fall back to the transcript.
+     */
+    private suspend fun collectJobFollow(
+        args: JSONObject,
+        out: kotlinx.coroutines.channels.ProducerScope<StreamEvent>,
+    ) {
+        val request = args.optJSONObject("request") ?: args
+        val jobId = request.optString("jobId").ifEmpty { request.optString("id") }
+            .ifEmpty { args.optString("jobId") }
+        if (jobId.isEmpty()) {
+            out.trySend(StreamEvent.Failure("invalid_params", "job/follow has no job id"))
+            return
+        }
+        val active = connection ?: connect().also { connection = it }
+        val api = WardApi(active)
+        var cursor = request.optLong("from", 0L).coerceAtLeast(0L)
+        var opened = false
+        while (scope.isActive && !closed) {
+            val page = runCatching { api.jobFollow(jobId, cursor) }.getOrElse { error ->
+                if (!opened) {
+                    out.trySend(StreamEvent.Failure("not_found", error.message ?: "job is gone"))
+                } else {
+                    out.trySend(StreamEvent.Item(JSONObject().put("type", "status")))
+                    out.trySend(StreamEvent.End)
+                }
+                return
+            }
+            val next = page.long("next") ?: cursor
+            val chunks = page.array("chunks")?.items.orEmpty().mapNotNull { it as? Cbor.Map }
+            val text = chunks.mapNotNull { it.text("text") }.joinToString("")
+            val earliest = chunks.firstOrNull()?.long("from") ?: cursor
+            if (!opened) {
+                opened = true
+                out.trySend(StreamEvent.Item(JSONObject()
+                    .put("type", "opened")
+                    .put("from", cursor)
+                    .put("job", JSONObject()
+                        .put("id", jobId)
+                        .put("output", JSONObject().put("earliest", earliest)))))
+            }
+            if (text.isNotEmpty()) {
+                out.trySend(StreamEvent.Item(JSONObject()
+                    .put("type", "output")
+                    .put("chunks", JSONArray().put(JSONObject()
+                        .put("text", text)
+                        .put("gapBefore", cursor < earliest)))
+                    .put("next", next)
+                    .put("lossy", false)))
+            }
+            if (next <= cursor) {
+                delay(1_000)
+            } else {
+                cursor = next
+            }
         }
     }
 

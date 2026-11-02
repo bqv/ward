@@ -258,6 +258,12 @@ class WardApi(private val connection: WardConnection) {
         connection.call("job.list", Cbor.Map(emptyList())).array("jobs")?.items
             ?.mapNotNull { it as? Cbor.Map }.orEmpty()
 
+    suspend fun jobFollow(id: String, from: Long = 0L): Cbor.Map =
+        connection.call(
+            "job.follow",
+            cborMap("id" to id.cbor(), "from" to from.cbor()),
+        ).asMap()
+
     suspend fun killJob(job: String): Boolean =
         connection.call("job.kill", cborMap("job" to job.cbor())).bool("killed") ?: false
 
