@@ -1799,3 +1799,17 @@ error rather than leaving "module returned invalid CBOR" anonymous — and that 
 because the message has cost me two round trips tonight.
 
 Reverted the gate and fixture; tree green.
+
+Hundred-and-thirty-fifth: the byte count paid for itself immediately and the repair bug is now located to a single call:
+the turn dies on a guest that receives **1673 bytes and writes nothing**. That size matches the provider payload after the
+tool result — prompt plus history plus the repair instruction — so the silent guest is almost certainly the provider, and
+the guard added in entry 132 does not cover that path, because the payload *does* carry a prompt.
+
+Which means the provider is returning early somewhere else: most plausibly its key loop rejects a value it cannot name
+(the history array, or a key whose value type it does not expect) and returns without writing, exactly as it did for the
+oversized body. The next step is the same treatment as the guard: every `return` in the guest's parse loop should leave a
+well-formed error reply behind, and the guest needs a test that feeds it a payload with a history array and an unexpected
+key.
+
+Stopping on the repair for now. It is an extra beyond the note's list, it has now cost four rounds, and the same effort
+spent on M6 buys far more of the objective. Reverted; tree green.
