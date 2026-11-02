@@ -2268,7 +2268,6 @@ static void run_watch(wd_server *srv, wd_run *run, int kind) {
     run_unwatch(srv, run, kind);
     return;
   }
-  if (*slot == fd) return;
   run_unwatch(srv, run, kind);
   for (int i = 0; i < WD_MAX_RUNS; i++) {
     if (run_tokens[i].run != NULL) continue;
@@ -2770,11 +2769,23 @@ static void http_done(wd_server *srv, wd_run *run) {
                     ((uint32_t)run->http_body[2] << 16) |
                     ((uint32_t)run->http_body[3] << 24));
   }
+  size_t had = run->http_len;
   int rc = wd_turn_resume_http_body(
       run->turn, status,
       run->http_len > 4 ? (const char *)run->http_body + 4 : "", 
       run->http_len > 4 ? run->http_len - 4 : 0, turn_emit, &tc, &err);
-  if (rc != WD_TURN_PENDING) emit_state(srv, run, "idle");
+  if (rc == WD_TURN_PENDING) {
+    run->http_len = 0;
+    run->http_status_seen = 0;
+    if (run->sse != NULL) {
+      wd_sse_destroy(run->sse);
+      stream_ctx *sc = run->sse_ctx;
+      run->sse = wd_sse_create(stream_event, sc);
+    }
+  } else {
+    emit_state(srv, run, "idle");
+  }
+  (void)had;
   run_after(srv, run, rc, err);
 }
 

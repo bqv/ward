@@ -365,7 +365,6 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
           }
           arguments[used] = '\0';
         } else if (tool[0] != '\0') {
-          tool[0] = '\0';
           static const char incomplete[] =
               "the model asked for a tool without a path; refusing rather than "
               "guessing";

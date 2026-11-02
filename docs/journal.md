@@ -1680,3 +1680,19 @@ teardown that runs *after* the run is linked. At that point the run is not yet o
 Still unmeasured: two daemons actually contending for one device. The lock test proves the mechanism at library level
 and the daemon now uses it, but nothing yet starts a second daemon against the same state directory and asserts the
 second turn waits.
+
+Hundred-and-twenty-seventh: one repair. When the provider reports a tool with empty arguments — a call the model wrote
+without its path — core now asks once more, with a strict instruction and the model's own previous text appended, and
+uses that answer if it carries a usable call. `repair_tried` bounds it to one attempt; a second failure passes the
+provider's refusal through and the turn ends normally.
+
+Two bugs surfaced on the way, both in the daemon's provider watching. `run_watch` returned early when the run's recorded
+fd equalled the new job's fd, which happens constantly because the old child's fd number is reused — but closing the old
+fd had already removed it from epoll, so the early return left the new fd unwatched and the repair request's answer was
+never read. That early return is gone; the watch is always re-armed. And the per-run stream state is reset when a repair
+request starts, so the second body is not appended to the first.
+
+What is not proven: the gate for the repair path. Tracing it showed the repair request submitted and its answer parsed as
+`tool=read`, then `judge.decision` and `turn.end` with no `tool.call` — so the dispatch after a repair is being stopped
+somewhere the ordinary path is not, and the gate assertion failed on that. The code is in, the ordinary tool gate still
+passes, and the repair path is measured only up to "the second call is parsed".

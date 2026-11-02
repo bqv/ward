@@ -69,6 +69,7 @@ struct wd_turn {
   wd_instance *policy;
   wd_instance *skills;
   int pending_kind;
+  int repair_tried;
   cbor_item_t *parked;
   uint64_t park_call;
   uint64_t park_epoch;
@@ -1423,6 +1424,38 @@ static int provider_phase(wd_turn *turn, cbor_item_t *payload,
   return invoke(turn->provider, payload, reply, err);
 }
 
+static int net_submit(wd_turn *turn, cbor_item_t *reply, char **err);
+
+static bool tool_attempt(const char *text) {
+  if (text == NULL) return false;
+  return strstr(text, "\"tool\"") != NULL || strstr(text, "tool_calls") != NULL;
+}
+
+static int request_repair(wd_turn *turn, const char *previous, char **err) {
+  char ask[2048];
+  snprintf(ask, sizeof(ask),
+           "Your previous reply could not be read as a tool call. Reply with "
+           "exactly one JSON object and nothing else, of the form "
+           "{\"tool\":\"read\",\"path\":\"<path>\"}. The reply you gave was: %.900s",
+           previous != NULL ? previous : "");
+  bool named = turn->model_name[0] != '\0';
+  cbor_item_t *payload = wd_map(2 + (named ? 1 : 0));
+  wd_put(payload, "prompt", wd_text(ask));
+  wd_put(payload, "max_tokens", wd_text("200"));
+  if (named) wd_put(payload, "model", wd_text(turn->model_name));
+  cbor_item_t *request = NULL;
+  int rc = provider_phase(turn, payload, &request, err);
+  wd_free(payload);
+  if (rc != 0) return -1;
+  rc = net_submit(turn, request, err);
+  wd_free(request);
+  if (getenv("WARD_DEBUG") != NULL)
+    fprintf(stderr, "ward: repair submit rc=%d err=%s\n", rc,
+            err != NULL && *err != NULL ? *err : "(none)");
+  if (rc != 0 && rc != 1) return -1;
+  return 1;
+}
+
 static int net_submit(wd_turn *turn, cbor_item_t *reply, char **err) {
   cbor_item_t *request = wd_get(reply, "request");
   char *path = wd_text_copy(wd_get(request, "path"));
@@ -1850,6 +1883,29 @@ int wd_turn_resume_tool(wd_turn *turn, wd_turn_emit emit, void *ctx,
     }
   }
   char *tool = wd_text_copy(wd_get(reply, "tool"));
+  char *tool_args = tool != NULL ? wd_text_copy(wd_get(reply, "arguments")) : NULL;
+  bool incomplete_call =
+      tool != NULL && tool[0] != '\0' &&
+      (tool_args == NULL || tool_args[0] == '\0');
+  free(tool_args);
+  if (getenv("WARD_DEBUG") != NULL)
+    fprintf(stderr, "ward: reply tool=%s incomplete=%d repaired=%d\n",
+            tool != NULL ? tool : "(none)", incomplete_call ? 1 : 0,
+            turn->repair_tried);
+  if (incomplete_call && !turn->repair_tried) {
+    turn->repair_tried = 1;
+    char *previous = wd_text_copy(wd_get(reply, "text"));
+    int repaired = request_repair(turn, previous, err);
+    free(previous);
+    free(tool);
+    wd_free(reply);
+    wd_free(message);
+    return repaired == 1 ? WD_TURN_PENDING : -1;
+  }
+  if (incomplete_call) {
+    free(tool);
+    tool = NULL;
+  }
   if (tool != NULL && tool[0] != '\0') {
     char *arguments = wd_text_copy(wd_get(reply, "arguments"));
     wd_free(message);
@@ -1865,6 +1921,18 @@ int wd_turn_resume_tool(wd_turn *turn, wd_turn_emit emit, void *ctx,
     return drive(turn, message, emit, ctx, err);
   }
   free(tool);
+  if (!turn->repair_tried) {
+    char *answer_text = wd_text_copy(wd_get(reply, "text"));
+    if (tool_attempt(answer_text)) {
+      turn->repair_tried = 1;
+      int repaired = request_repair(turn, answer_text, err);
+      free(answer_text);
+      wd_free(reply);
+      wd_free(message);
+      return repaired == 1 ? WD_TURN_PENDING : -1;
+    }
+    free(answer_text);
+  }
   wd_put(message, "payload", reply);
   return drive(turn, message, emit, ctx, err);
 }
@@ -1978,6 +2046,29 @@ int wd_turn_resume_http_body(wd_turn *turn, long status, const char *body,
     }
   }
   char *tool = wd_text_copy(wd_get(reply, "tool"));
+  char *tool_args = tool != NULL ? wd_text_copy(wd_get(reply, "arguments")) : NULL;
+  bool incomplete_call =
+      tool != NULL && tool[0] != '\0' &&
+      (tool_args == NULL || tool_args[0] == '\0');
+  free(tool_args);
+  if (getenv("WARD_DEBUG") != NULL)
+    fprintf(stderr, "ward: reply tool=%s incomplete=%d repaired=%d\n",
+            tool != NULL ? tool : "(none)", incomplete_call ? 1 : 0,
+            turn->repair_tried);
+  if (incomplete_call && !turn->repair_tried) {
+    turn->repair_tried = 1;
+    char *previous = wd_text_copy(wd_get(reply, "text"));
+    int repaired = request_repair(turn, previous, err);
+    free(previous);
+    free(tool);
+    wd_free(reply);
+    wd_free(message);
+    return repaired == 1 ? WD_TURN_PENDING : -1;
+  }
+  if (incomplete_call) {
+    free(tool);
+    tool = NULL;
+  }
   if (tool != NULL && tool[0] != '\0') {
     char *arguments = wd_text_copy(wd_get(reply, "arguments"));
     wd_free(message);

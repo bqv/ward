@@ -212,8 +212,11 @@ int main(void) {
   assert(partial_reply != NULL);
   char *partial_tool = wd_text_copy(wd_get(partial_reply, "tool"));
   char *partial_text = wd_text_copy(wd_get(partial_reply, "text"));
-  assert(partial_tool != NULL && partial_tool[0] == '\0');
+  assert(partial_tool != NULL && strcmp(partial_tool, "read") == 0);
   assert(partial_text != NULL && strstr(partial_text, "without a path") != NULL);
+  char *partial_args = wd_text_copy(wd_get(partial_reply, "arguments"));
+  assert(partial_args != NULL && partial_args[0] == '\0');
+  free(partial_args);
   free(partial_tool);
   free(partial_text);
   wd_free(partial_reply);
