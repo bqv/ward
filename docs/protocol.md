@@ -22,7 +22,9 @@ message is `limit`.
 M1 adds one method: `session.prompt`, which runs a turn and streams its events. It is
 described below with the session object.
 
-Later milestones add methods without a version bump, because adding a method is compatible:
+Later milestones add methods without a version bump, because adding a method is compatible.
+`model.probe {id}` answers `{id, n_ctx, n_slots, context_source}` — the window and slot count the
+provider reports, or the catalog's `context`, or a default, and which of the three it was.
 `module.list`, `module.reload`, `session.upgrade`, `stats.session`, `stats.global`,
 `attachment.add`, `attachment.list`, `terminal.*`, `schedule.*`, `job.list`, `job.kill`,
 `subagent.prompt`, `subagent.interrupt`, `recall.search`, `mcp.call` and the rest. The one
@@ -401,6 +403,28 @@ Served in M1:
 
 - `text.delta` — payload `{text}`; durable.
 - `turn.end` — payload `{}`; durable, emitted after the last delta of a turn.
+
+Served later, all durable and all additive — a client that ignores them sees exactly the M1 stream:
+
+- `turn.start` — payload `{turn}`.
+- `turn.end` — payload `{turn, aborted?, reason?}`; `aborted` and `reason` appear only on an
+  aborted turn.
+- `turn.state` — payload `{turn, state}`; `prefilling`, `answering` or `idle`. Says what the
+  turn is waiting for while it waits.
+- `turn.timings` — payload `{prompt_n, prompt_ms, predicted_n, predicted_ms, cache_n}`; the
+  provider's own numbers when it reports them, which is what makes a cache hit observable.
+- `error` — payload `{code, name, message, turn}`; the frozen event, emitted before an
+  aborted `turn.end` when the provider failed.
+- `session.time` — payload `{text}`; the local time of a prompt, recorded so a replay
+  reproduces the bytes the model saw.
+- `session.head` — payload `{text}`; the frozen system prompt, appended once per session.
+- `session.overflow` — payload `{bytes, budget}`; the assembled history exceeded the
+  window, said rather than silently trimmed.
+- `judge.decision` — payload `{tool, verdict, escalated}`.
+- `session.modules`, `session.upgraded`, `session.migration_failed`, `session.attachment`,
+  `session.compacted`, `session.forked`, `session.checkpoint`, `session.system`,
+  `session.prompted`, `session.model`, `goal.set`, `goal.cleared`, `schedule.fired`,
+  `job.updated`, `subagent.updated` — as their methods describe.
 
 The full frozen list, from `README.md`:
 
