@@ -220,6 +220,12 @@ int main(void) {
   assert(run_capture(sock, probe, preset_argv, preset_out, sizeof(preset_out)) == 0);
   assert(strstr(preset_out, "reads-only") != NULL);
 
+  char full_out[8192];
+  char *full_argv[] = {(char *)probe, (char *)"--preset", (char *)"full-access",
+                       (char *)"--confirm-danger", NULL};
+  assert(run_capture(sock, probe, full_argv, full_out, sizeof(full_out)) == 0);
+  assert(strstr(full_out, "full-access") != NULL);
+
   kill(pid, SIGTERM);
   int status = 0;
   waitpid(pid, &status, 0);

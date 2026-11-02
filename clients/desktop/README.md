@@ -107,7 +107,7 @@ The client speaks ward's method names and event kinds, not an adapter vocabulary
 | jobs, schedules | `job.list`, `job.kill`, `schedule.list`, `schedule.delete` |
 | trajectory | `turn.*`, `session.prompted`, `text.delta`, `tool.call/result` |
 | workspaces | synthetic groups by session cwd |
-| presets | `policy.list` / `policy.select`; chip normalises `id` to `value`; dangerous presets are hidden behind `WARD_FULL_ACCESS=1` until the daemon enforces them |
+| presets | `policy.list` / `policy.select`; chip normalises `id` to `value`; full-access requires the warning confirmation and marks the chip |
 | queue | `session.prompt` -> `{queued, ahead}` while a turn runs; one queued prompt per session |
 | steer | `session.prompt` with `steer: true` appends to the running turn |
 | images | `tool.result.path` / `session.attachment.path` -> `attachment.read_blob` |
@@ -122,10 +122,6 @@ and are never silently dropped by the wire layer.
 - **QUIC pairing dialog.** Settings > Pair a device runs `ward-pair`, stores the
   certificate paths and says to restart on `--socket quic://…`; the window does
   not switch transport at runtime.
-- **Full access is not functional.** The daemon serves and confirms it, but its
-  rules do not yet change the decision, so the client hides dangerous presets
-  unless `WARD_FULL_ACCESS=1`. The confirmation dialog and danger marker stay in
-  the code for when that is fixed.
 - **Late steer gate.** The daemon carries an undelivered steer into the queue at
   turn end, but no gate yet counts the extra turn; the client does not need a
   new field.
