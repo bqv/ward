@@ -123,7 +123,7 @@ object WardSessionParser {
     }
 
     fun list(value: Cbor): List<WardSession> =
-        value.map("sessions")?.asArray()?.items?.map(::of).orEmpty()
+        value.get("sessions")?.asArray()?.items?.map { of(it) }.orEmpty()
 }
 
 fun OutputStream.writeFrame(type: Int, sub: Long, seq: Long, body: Cbor) {

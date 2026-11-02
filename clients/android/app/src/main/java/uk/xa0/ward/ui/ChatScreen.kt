@@ -1064,7 +1064,7 @@ fun ChatScreen(vm: DshViewModel) {
                 .imePadding(),
         ) {
             ChatHeader(
-                title = current?.title ?: "DSH",
+                title = current?.title ?: "Ward",
                 cwd = current?.cwd ?: header?.cwd,
                 onMenu = { scope.launch { drawerState.open() } },
                 jobs = ui.jobs,
@@ -1196,7 +1196,7 @@ fun ChatScreen(vm: DshViewModel) {
                 }
                 TrajectoryScreen(
                     model = trajectory,
-                    title = current?.title ?: "DSH",
+                    title = current?.title ?: "Ward",
                     onClose = { view = ChatView.CHAT },
                     modifier = Modifier.weight(1f),
                     // The conversation header above already carries the title, the

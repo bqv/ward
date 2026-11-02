@@ -93,7 +93,7 @@ fun DshWordmark(modifier: Modifier = Modifier) {
         DshMark(size = 20.dp)
         Spacer(Modifier.width(DshSpacing.md))
         Text(
-            text = "DSH",
+            text = "Ward",
             style = DshType.heading2.copy(letterSpacing = androidx.compose.ui.unit.TextUnit.Unspecified),
             color = DshTheme.colors.ink,
         )

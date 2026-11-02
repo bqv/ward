@@ -1059,7 +1059,7 @@ fun SessionsDrawer(
             DshMark(size = 20.dp)
             Spacer(Modifier.width(DshSpacing.md))
             Text(
-                text = "DSH",
+                text = "Ward",
                 style = DshType.titleLarge.copy(fontWeight = FontWeight.SemiBold),
                 color = colors.ink,
                 modifier = Modifier.weight(1f),

@@ -30,7 +30,13 @@ class DshRpcException(
     val details: JSONObject?,
 ) : Exception(message)
 
-fun gatewayAnswerText(body: String): String = body.trim().take(200)
+fun gatewayAnswerText(body: String): String {
+    val trimmed = body.trim()
+    val markup = trimmed.isEmpty() ||
+        trimmed.startsWith("<") ||
+        trimmed.contains("<html", ignoreCase = true)
+    return if (markup) "the host did not answer; its web server replied instead" else trimmed.take(200)
+}
 
 class DshUnreachableException(message: String = "Could not reach the host") : Exception(message)
 
@@ -150,20 +156,26 @@ class DshClient(context: Context) {
 
     fun resetTransport(): TransportReset {
         val had = muxInstance != null
+        val pooled = runCatching { http.connectionPool.connectionCount() }.getOrDefault(0)
+        val calls = http.dispatcher.queuedCalls().size + http.dispatcher.runningCalls().size
         muxInstance?.shutdown()
         muxInstance = null
         mux = null
         connection?.restart()
         connection = null
         bridge = null
-        return TransportReset(
+        runCatching { http.connectionPool.evictAll() }
+        runCatching { http.dispatcher.cancelAll() }
+        val reset = TransportReset(
             muxClosed = had,
             doorFaultsForgotten = 0,
             cachedWinnerForgotten = had,
-            pooledConnections = 0,
-            callsCancelled = 0,
+            pooledConnections = pooled,
+            callsCancelled = calls,
             routeJobsCancelled = 0,
         )
+        Log.d("DshRoute", reset.summary())
+        return reset
     }
 
     fun installManualCookie() = Unit

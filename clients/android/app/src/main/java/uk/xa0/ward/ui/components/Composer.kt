@@ -237,7 +237,7 @@ fun Composer(
             ) {
                 if (text.isEmpty()) {
                     Text(
-                        text = "Message DSH…",
+                        text = "Message Ward…",
                         style = DshType.messageBody,
                         color = colors.labelCaption,
                         maxLines = 1,

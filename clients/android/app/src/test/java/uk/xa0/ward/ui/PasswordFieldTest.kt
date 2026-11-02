@@ -21,6 +21,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
@@ -226,25 +227,26 @@ class PasswordFieldTest {
         rule.onNodeWithContentDescription("Show password").assertExists()
     }
 
-    /** `Done` is the submit path the form did not have. */
+    /** `Done` is the submit path the daemon field carries. */
     @Test
-    fun `Done on the sign-in password field submits the form`() {
+    fun `Done on the daemon field submits the form`() {
         var calls = 0
-        var sentPassword = ""
-        showSetup { _, _, _, password, _ ->
+        var sentUrl = ""
+        showSetup { url, _, _, _, _ ->
             calls += 1
-            sentPassword = password
+            sentUrl = url
         }
 
-        val field = maskedField()
-        field.performTextInput("hunter2")
+        val field = rule.onNode(hasSetTextAction())
+        field.performTextClearance()
+        field.performTextInput("tcp://127.0.0.1:45872")
         rule.waitForIdle()
         field.performImeAction()
         rule.waitForIdle()
 
         rule.runOnIdle {
             assertEquals(1, calls)
-            assertEquals("hunter2", sentPassword)
+            assertEquals("tcp://127.0.0.1:45872", sentUrl)
         }
     }
 
@@ -305,8 +307,9 @@ class PasswordFieldTest {
         var calls = 0
         showSetup { _, _, _, _, _ -> calls += 1 }
 
-        val field = maskedField()
-        field.performTextInput("hunter2")
+        val field = rule.onNode(hasSetTextAction())
+        field.performTextClearance()
+        field.performTextInput("tcp://127.0.0.1:45872")
         field.performImeAction()
         rule.waitForIdle()
         val connect = rule.onNodeWithText("Connect")

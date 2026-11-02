@@ -89,7 +89,7 @@ class DshConnectionService : Service() {
             // LOW: it is a standing fact, not something to be alerted about.
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setSmallIcon(R.drawable.ic_stat_dsh)
-            .setContentTitle("DSH connected")
+            .setContentTitle("Ward connected")
             .setContentText("Ready for approvals and questions")
             .setOngoing(true)
             .setShowWhen(false)

@@ -1,599 +1,145 @@
-# DSH — native Android client
+# ward-android — the Ward Android client
 
-A native Jetpack Compose Android client for a DeepSeek Harness (DSH) host. It
-reimplements the official DSH web UI **without a WebView and without installing
-anything on the host**: every call it makes is one the web client already makes,
-against the host's own public HTTP + WebSocket API.
-
-The wire protocol, not the DOM, is the interface. Nothing is injected into the
-host and no host-side plugin is required.
+The project is **ward-android**, the application is **Ward**, and the application
+id is `uk.xa0.ward` (debug builds install as `uk.xa0.ward.debug`). It is a native
+Jetpack Compose client for a ward daemon. There is no WebView, no host-side
+plugin and no HTTP control surface in the path: the app speaks ward's own binary
+CBOR protocol over one socket, exactly as `docs/protocol.md` freezes it.
 
 <p align="center">
-  <img src="docs/images/transcript.png" width="330"
-       alt="A session: the Chat tab, the prompt, its context rows, one tool call folded under a summary line, the answer, and the composer with its statistic pills">
-</p>
-
-A conversation. The agent's process folds under one summary line (`1 tool call · 1
-message`), the prompt's context travels with it as its own rows, and the session's
-own statistics sit under the composer. The Trajectory tab beside Chat shows the
-same turn as the model saw it — input, tool use, result.
-
-<p align="center">
-  <img src="docs/images/drawer.png" width="288"
-       alt="The sessions drawer: New Session, the search box, the Archived filter, Group by Workspace or List, Order by Manual or Updated, and a Settings | About footer. The session list itself is blurred out.">
+  <img src="docs/images/ward-approval.png" width="320"
+       alt="A ward session with a /write prompt, a pending approval card, and the transcript's tool call above it">
   &nbsp;&nbsp;
-  <img src="docs/images/about.png" width="288"
-       alt="The About sheet: app version, Android version and package, the host it is pointed at and how it is signed in, and the open session's route">
+  <img src="docs/images/ward-transcript.png" width="320"
+       alt="The same session after Allow once: the approval grant and the tool result are in the replayed transcript">
 </p>
 
-The drawer groups sessions by the host's own Workspace registry rather than by
-guessing from paths, and its footer pairs **Settings** — which holds only things
-that are actually settable — with **About**, which holds everything that is a fact
-about the app instead: the host, the sign-in mode, the version, the platform, and
-the open session's route. (The session list is blurred in that shot; it is
-someone's, and not this repository's.)
+The UI began as the DSH Android client (`bqv/dsh-android`, copied at `a74f76f`)
+and was repurposed rather than reimplemented: the Compose screens, transcript
+reducer, composer, approval card, drawer, terminal widgets and markdown renderer
+are the same code, while the whole transport and data bridge behind them is
+ward's. The old minimal JNI client kept its home in `../android-ward`; a copy of
+its JNI entry points is in `jni/` for reference.
 
-One shot is still owed: the Shell tab, showing a terminal with `htop` running in
-the host-shell seat, in dark mode.
+## Build
 
-## Requirements
-
-- **Android 8.0 (API 26) or newer.** `minSdk` is 26; `compileSdk` and `targetSdk`
-  are 34, built with build-tools 35.0.0.
-- **JDK 17 and Gradle 8.7**, unpacked under `.toolchain/` as
-  `jdk-17.0.20.1+1` and `gradle-8.7`. `build.sh` expects those two directories to
-  already exist; it does not download them.
-- **An Android SDK** with platform 34 and build-tools 35.0.0. `local.properties`
-  points `sdk.dir` at it (`sdk.dir=/opt/android-sdk` on the development box), and
-  `build.sh` additionally exports `ANDROID_HOME`/`ANDROID_SDK_ROOT`.
-- There is **no Gradle wrapper**. `build.sh` is the entry point for every Gradle
-  invocation, and it redirects `GRADLE_USER_HOME`, `ANDROID_USER_HOME` and
-  `XDG_DATA_HOME` into `.toolchain/`, so the build writes nothing to `$HOME` and
-  works inside a workspace-write sandbox.
-- Hosts are normally reached over plain HTTP on a private LAN; the app's network
-  security config permits cleartext so a typed `http://` URL works.
-
-## Build and install
+Requires JDK 17, Gradle 8.7 and an Android SDK with platform 34. The local
+toolchain layout is the same as the copied project: `.toolchain/jdk-17.0.20.1+1`,
+`.toolchain/gradle-8.7`, and `local.properties` pointing `sdk.dir` at the SDK.
+`build.sh` owns the environment, the build lock and all caches.
 
 ```sh
-bash build.sh :app:assembleDebug
-# -> app/build/outputs/apk/debug/app-debug.apk
-
-bash build.sh :app:testDebugUnitTest
-# 342 tests, all JVM: the VT parser, the protocol gates, the key tables,
-# and the scroll rules — which run a real Compose layout under Robolectric
+./build.sh :app:assembleDebug        # app/build/outputs/apk/debug/app-debug.apk
+./build.sh :app:testDebugUnitTest    # JVM suite, including the protocol gates
 ```
 
-The suite (`app/src/test/java/…`) exists because the VT core and the terminal's
-ordering gates are pure Kotlin with no Android in them: the half of the feature
-a build box cannot exercise on a device is pinned down against bytes instead.
-
-CI runs that suite and builds the same APK on every push to `main` and every pull
-request, so an APK can be had without the local toolchain at all:
-
-- the **Actions** tab → the *Build* workflow → the run for your commit →
-  **Artifacts** → `dsh-android-debug-<sha>`, or
-- the run's summary, which names the file and its size.
-
-That APK is signed with the standard **debug** key, so it installs over an
-existing debug build (`uk.xa0.dsh.debug`) without uninstalling it — the same
-package the local build produces. `.github/workflows/build.yml` only reproduces
-the `.toolchain/` layout and then calls `build.sh`, so local and CI builds cannot
-drift apart.
-
-Install it to one device:
+The protocol tests read a live daemon only when the harness names one; the
+ordinary suite stays hermetic:
 
 ```sh
-tools/install.sh <serial>              # installs the debug APK just built
-tools/install.sh <serial> <apk>        # or an explicit APK
+WARD_TEST_ENDPOINT=tcp://127.0.0.1:45872 \
+  ./build.sh :app:testDebugUnitTest --tests 'uk.xa0.ward.proto.*'
 ```
 
-- `build.sh` takes the build lock (`.build.lock`) itself, and `tools/install.sh`
-  takes `.install.lock`; both live in the checkout because `flock` on `/tmp` is
-  not a mutex here. A second caller waits rather than interleaving.
-- Debug builds carry the `.debug` application id suffix
-  (`uk.xa0.dsh.debug`).
-- `adblease <serial> <command...>` runs a whole device sequence — install,
-  launch, tap, screencap — under one per-device lease, so two verification runs
-  cannot split each other halfway. `$SERIAL` and `$ADB` are exported to the
-  command. It is generic device infrastructure, so it lives outside this
-  checkout with the rest of the adb plumbing (`~/bin/adb-wireless`):
+## Point it at ward
 
-  ```sh
-  adblease 127.0.0.1:5555 sh -c 'adb -s $SERIAL shell input tap 48 128'
-  ```
+Run the daemon with a loopback TCP door and reverse it into the phone:
 
-## Point it at a host and sign in
-
-Set **Server** to the address of the host's HTTP door, e.g.
-`http://192.168.1.110/`. A bare `host:port` is accepted and gets `http://`.
-There are two ways in:
-
-1. **The host's login form.** Enter an account and password; the app posts
-   `application/x-www-form-urlencoded` to `POST /auth/login` with
-   `provider=password`. The host answers with its session cookie, and nginx in
-   front of the harness also injects the `dsh-auth-*` cookie. Both are kept in a
-   `CookieJar` that survives process death and are replayed on every later call.
-   The password is stored in `EncryptedSharedPreferences` (AES-256-GCM, key in
-   the Android Keystore) so an expired session is re-signed-in silently instead
-   of dropping the open transcript back on the setup screen.
-2. **A pasted cookie.** The **Advanced** field on the setup screen takes a raw
-   `name=value` cookie (`dsh-auth-…` or `dsh_auth_session=…`) and bypasses the
-   form. This is the path for a host reached directly on its carrier port, which
-   has no `/auth/login` door; leave the account blank.
-
-**When the host cannot be reached**, nothing logs you out. A timeout, a refused
-connection or a dropped socket is treated as transient: a first connect stays on
-the setup screen with the host's message and retries after 3/6/9/12 seconds, and
-a drop on a live screen keeps the transcript visible with a banner while the
-mux reconnects. Only an HTTP 401/403 (or a redirect to the login page) is a
-credential refusal, and only that offers sign-in again.
-
-**Emulator pointed at a host on the same machine:** the emulator's own
-`127.0.0.1` is the emulator, not the host, so address the host through the
-emulator's NAT alias: **`http://10.0.2.2:8081/`**. (The carrier port is also
-reversed in with `adb reverse tcp:8081 tcp:8081`, which the `adb` user service
-applies to every emulator that registers — but on this box's emulator that relay
-registers without carrying bytes, so do not rely on `127.0.0.1:8081` from inside
-it. Details and the measurement are in `AGENTS.md` and `.work/docs/traps.md`.) Either way, paste the
-carrier cookie — the loopback carrier has no login form.
-
-## Certificates and trust
-
-The app does not take the platform's word for who the host is. It keeps its own
-set of accepted certificates and runs the platform's *path validation* against
-that set, falling back to the system store — the shape WeeChat-Android uses for
-its relay, adapted to a host that can be a private LAN address as easily as a
-public name. Three consequences, in the order they matter:
-
-1. **An ordinary public certificate needs no ceremony.** If the system store
-   already trusts the chain, the connection is made and nothing is recorded. The
-   app only asks a question when the answer is not already on the device.
-2. **A self-signed or private-CA host works, and is remembered.** The first
-   connection records the certificate the host presented (`Trust on first use`).
-   It is stored as a *trust anchor*, not as a fingerprint comparison, so the
-   platform still enforces validity dates, key usage and path length for it — a
-   pinned certificate that expires is still an expired certificate.
-3. **A host that has been accepted is pinned to the key that was accepted.** This
-   is the part that matters for a host reached through somebody else's edge: the
-   party that terminates the connection is also the party a certificate authority
-   will issue to for that name, so "a CA vouched for it" is not a defence. A pin
-   is: a certificate is only useful to an impostor who also holds the private key
-   the pin names. OkHttp checks the pin during the handshake, *before a single
-   byte of the request is written*.
-
-Where this is visible and reversible: a **Certificate** block appears on the setup
-form under the Server field, and — the one that matters once you are signed in,
-because a live session has no route back to setup — in **About**, under
-Connection, beside the host's other facts and the sign-out row. It shows the
-fingerprint already accepted for that host (and **Forget this certificate**),
-**Check certificate**, which reads what the host presents right now without
-trusting any of it, and a **Trust this certificate** action per link of the chain.
-Trusting the *CA* rather than the leaf is the choice that survives a leaf renewal —
-the chain shown is what makes that selectable. The optional LAN address is edited
-in the same place, for the same reason.
-
-A refusal is a first-class state, not a generic error: the presented chain
-travels out of the failed handshake with the exception, so the surface that
-reports it shows the new fingerprint and offers to trust it without a second
-connection. The message says "not the one accepted for it" rather than
-"unreachable", because the two need different answers and only one of them is
-about the network.
-
-```bash
-# What the app displays, computed on the host for comparison:
-openssl x509 -in cert.pem -pubkey -noout \
-  | openssl pkey -pubin -outform der \
-  | openssl dgst -sha256 -binary | base64   # the pin
+```sh
+WARD_CGROUP=off WARD_TCP_BIND=127.0.0.1:45872 \
+  ./out/ward up --state ~/.local/state/ward --socket /run/user/$(id -u)/ward.sock
+adb -s <serial> reverse tcp:45872 tcp:45872
 ```
 
-**What the app does not do.** It does not narrow the platform's trust anchors:
-`res/xml/network_security_config.xml` still trusts the system store and the
-user-installed roots, because a pin is consulted *after* the chain validates, so
-removing the anchor a private CA needs would break the case the pin is meant to
-cover. It does not verify fingerprints for you either: "Trust this certificate"
-records what was presented, and the reading that makes it a defence is the one
-you do against the host.
+On first launch the setup screen defaults to `tcp://127.0.0.1:45872`; a bare
+`host:port` is accepted. The daemon's own `ready` line and its TCP listener are
+the authority: there is no login and no cookie because authentication is the
+transport's `SO_PEERCRED` check (or, for QUIC later, a client certificate).
 
-## Wire protocol
+## The protocol layer
 
-Unary calls are `POST /api/<namespace>/<method>` carrying the harness envelope:
+`app/src/main/java/uk/xa0/ward/proto/` is the implementation:
 
-```json
-{"type":"client-request","rpcId":"…","method":"session/list","payload":{"args":{…}}}
-→ {"type":"server-response","rpcId":"…","result":{"ok":true,"value":{…}}}
-```
+| file | what it owns |
+|---|---|
+| `Cbor.kt` | the documented CBOR subset, definite lengths and the 64-bit unsigned form ward's own encoder emits |
+| `WardProtocol.kt` | the 22-byte little-endian frame, event/session objects, errors and limits |
+| `WardConnection.kt` | socket, `hello`/`welcome`, one reader, request-id ledger, `session.resume` subscriptions, replay and reconnect |
+| `WardApi.kt` | every method in the frozen table, from `session.*` to `device.*`, with ward's parameter names |
 
-Argument keys are the **host service method's parameter names**, which is why
-`session/list` takes `_request` while `session/prompt` takes `request`.
+`net/DshClient.kt` and `net/RemoteMux.kt` keep the surface the copied screens
+already speak. `net/WardBridge.kt` is the only translation point: a ward session
+becomes a DSH list row, `session.resume` events become transcript rows, and a
+ward approval becomes the `$events` waterfall the attention centre already
+answers. Nothing in the screens knows which protocol is underneath.
 
-Everything streaming rides one WebSocket, `/api/remote.mux`, carrying logical
-streams:
+The encoder matches the golden transcript in `docs/transcript.md`: every
+unsigned integer body is emitted in the 8-byte form `ward`'s libcbor encoder
+produces, text is UTF-8, maps and arrays are definite, and tags, floats and
+indefinite forms are refused on decode.
 
-```
-→ {"type":"open","streamId":"s1","endpoint":"session/follow","payload":{"args":{…}}}
-← {"type":"item","streamId":"s1","value":{…}}
-← {"type":"end","streamId":"s1"}
-```
+## What is wired through the UI
 
-Four endpoints are used:
+- sessions: list, create, open, resume/replay, search, rename, fork, pin,
+  archive, cancel;
+- turns: prompt, streaming text deltas, turn start/end, tool calls and results,
+  errors, durable replay after a relaunch;
+- approvals: `approval.requested` parks the turn, the existing card answers
+  through `approval.respond`, and `approval.resolved` withdraws it;
+- models: the ward catalog is grouped by provider and `session.set_model` moves
+  the chip;
+- attachments: the picker's uploads become `attachment.add`, and image parts in
+  a prompt are staged the same way;
+- live status: turn boundaries publish the same `api-session/status` fact the
+  copied drawer and composer already consume.
 
-- `session/follow` — transcript `snapshot`, durable `event` frames, and live
-  `assistant-stream` `start`/`chunk`/`end` frames (token deltas).
-- `session/control` — one `baseline` plus `queue` / `projection` / `jobs` deltas
-  for every session: the pending queue, background jobs and folded projections.
-- `workspace/follow` — the workspace registry the drawer groups by and the
-  directory picker adopts from.
-- `$events` — forwarded host events, including **waterfalls** such as
-  `approval/request` and `user-questions/request`. A waterfall must be answered
-  or the agent stalls; it is settled with `POST /api/$events/result` carrying
-  `{clientId, eventId, outcome}`.
+## Parity gaps, named rather than hidden
 
-`RemoteMux` replays its open registrations after a reconnect, so a dropped
-socket resumes streaming instead of silently freezing the UI.
+These are the differences a reader will notice against the DSH client. They are
+the report sent to the coordinating session, kept here so the repository and the
+message cannot drift.
 
-## What the app does today
+- **QUIC and device pairing are not in the app.** `device.pair`/`enrol` are
+  wrapped, but the phone has no QUIC client, no CSR generation, no client
+  certificate and no QR surface. The loopback TCP door over `adb reverse` is the
+  supported path.
+- **A Unix socket cannot be opened from an Android app.** The daemon's strongest
+  `SO_PEERCRED` door is a desktop/local path; the phone uses TCP.
+- **No Workspace registry.** Ward has no workspaces, so `workspace/follow`
+  answers an empty baseline and the drawer is one flat list.
+- **Terminal output is not subscribed.** The method wrappers and the copied
+  terminal screen exist, but `terminal.output` is not routed into
+  `terminal/follow`.
+- **Jobs, schedules and goals are wrappers, not screens.** `job.*`,
+  `schedule.*` and `goal.*` are in `WardApi`; the copied management sheets
+  answer their empty shapes.
+- **Subagents are wrappers only.** `subagent.prompt`/`interrupt` exist; no
+  lineage UI is wired to ward's ordinary child sessions.
+- **Modules, settings, plugins, file browser and stats are stubs.** Ward either
+  does not serve the DSH method or the copied screen has no ward projection.
+- **Approvals from a background session are not discovered.** A card appears
+  only for a session this app is following; there is no ward "list pending
+  approvals" method to replay the ones raised while the app was away.
+- **Queue/steer semantics are absent.** Ward serialises `session.prompt`; the
+  composer's queue and steer modes do not exist in the protocol.
 
-### Sessions and the drawer
+## Device evidence
 
-- Workspace grouping from the host registry, plus the host's **Ungrouped**
-  bucket; Group by Workspace/List, Order by Manual/Last updated, per-section
-  collapse and "Show more" paging, an Archived filter, and subagent sessions
-  nested under their parent with a per-row subagent disclosure. All three drawer
-  preferences persist across restarts.
-- Local title/path filter over the roster plus host content search
-  (`session/search`), debounced 250 ms and merged in the host's order.
-- Status dots: the ongoing square chase, green done, amber warning. Rows that
-  finished while you were elsewhere keep a client-side "done" marker until you
-  open them.
-- Session row actions: **Rename**, **Fork session** (`session/fork`), **Copy
-  session id**, **Archive** (`workspace/archiveSession`); Settings unarchives.
-- New Session from the hero screen (cwd and workspace resolved against the
-  registry), and **Add workspace** through the directory picker
-  (`directoryPicker/list`, `directoryPicker/createDirectory`, `workspace/create`).
-- Refresh (with a minimum spin so a fast host does not look like a no-op),
-  Settings, and New Session in the drawer footer.
+Built and installed on the disposable handset `91e25acb`, with
+`adb reverse tcp:45872 tcp:45872` and the daemon above:
 
-### The transcript
+- the app created and listed real ward sessions (`session.create`,
+  `session.list`);
+- a `/read` prompt reached the daemon, streamed its tool call and painted the
+  tool row;
+- a `/write` prompt raised **Approval required**; **Allow once** answered
+  `approval.respond`, and the transcript then showed the tool call, the grant
+  and the tool result;
+- force-stopping and relaunching the app replayed the same transcript from
+  `session.resume`, which is the durable-event proof.
 
-- User bubbles, assistant markdown, collapsible "Think" reasoning with a live
-  "Thinking…" line, plan/todo cards, plugin and error notices, compaction
-  markers, and subagent lineage.
-- Per-tool cards: bash/pwsh terminal, write/edit diff, read with line ranges,
-  an image the agent read drawn inline, grep/glob hit lists, `web_search` /
-  `web_fetch`, and the question/answer record for `ask_user_question`. Nested
-  sub-calls render as a tree; anything else falls back to the generic
-  disclosure with IN/OUT cards.
-- Live token streaming with throttling so hundreds of deltas per second stay
-  smooth; a per-turn process fold with a summary; a "Deep diving…" status with
-  an elapsed clock; per-message clock and copy actions; a back-to-bottom button.
-- **Branch into a new conversation** from any earlier finished turn: the branch
-  action sits in the closing answer's footer, next to Copy, and `session/fork`
-  copies the conversation through that turn into a **new session**, which opens
-  while the one you were reading is left untouched. The confirmation says so
-  before the tap.
-- Chat / Trajectory / Shell view tabs: the second is the model's input/output
-  ledger, the third the session's PTY (see *The Shell tab*, below). A fourth,
-  **Router**, appears only for a local model (see *The Router tab*, below).
-- Back-pagination: scrolling to the oldest loaded row pulls one older page with
-  `session/page`, so a long session is not capped at the follow window.
-- A deliverables row after each finished turn, opening the text preview.
-- A background-jobs seat in the header for the session in front of you: the
-  running jobs and their states, fed by the `jobs` delta of `session/control`,
-  with a "done" marker for a job that settled while you were in another session.
-  The count is the *open* session's, never the last session that happened to
-  report.
-
-### The Shell tab
-
-- The view strip is **Chat / Trajectory / Shell**, plus **Router** when the selected
-  model is local. The third is a real PTY over
-  the host's native `terminal` Remote namespace (`environment`, `shells`, `list`,
-  `create`, `follow`, `write`, `resize`, `rename`, `close`), streamed on the same
-  `/api/remote.mux` the transcript uses. It is labelled **Shell** rather than
-  Terminal because it hosts two *seats*, and it is a client view over that
-  namespace rather than a host-registered view — the same material the web
-  client's own terminal panel is assembled from (`.work/docs/research/chrome-ui.md`
-  §5.3).
-- **Host shell · Full access** is the default seat: one dedicated Session per
-  workspace, created at the workspace root, given `danger-full-access` *before*
-  any terminal exists in it, then archived so it never sits in the drawer. The
-  order is the feature. `terminal/create` takes the shell's confinement from the
-  *Session's* policy, and the host refuses a mode change while a terminal is open
-  in that session — "Close browser terminals before changing the Session sandbox
-  mode" — so a terminal opened first would be a confined shell behind a seat
-  labelled "Full access". A session that is in no workspace opens its host shell
-  at the session's own cwd rather than guessing a workspace root.
-- **This session · Workspace Write / Read Only** is the session's own terminal,
-  confined by whatever policy that session runs. The two seats exist because
-  confinement is the *session's* policy with no per-terminal override: under
-  `workspace-write` the host wraps the shell in bwrap (`--ro-bind / /`,
-  `--unshare-pid`, `--tmpfs /tmp`, and only the workspace bound writable), so
-  the filesystem is read-only to it and `htop` sees only its own PID namespace.
-  The host shell is the escape from that, per workspace, without moving the mode
-  of the session the user is working in.
-- Each seat chip carries the policy in force in it ("Host shell · Full access",
-  "This session · Workspace Write"), which is what replaces a one-off "this
-  terminal is sandboxed" notice: the shell in front of you is named by what it
-  can touch, and the chips are re-labelled when the session's access mode moves.
-- The grid is one `Canvas` with a block cursor — a 100×40 screen is 4,000 cells
-  and `htop` repaints most of them several times a second — with a key row for
-  the keys a soft keyboard cannot produce: `Esc`, `Tab`, `^C`, `^D`, a `Ctrl`
-  latch, the arrows, `PgUp`/`PgDn` and `Home`/`End`. A session that retains more
-  than one terminal gets a chip per terminal; one grid is on screen at a time.
-- The VT core (`app/src/main/java/uk/xa0/ward/term/`) is hand-written and
-  Android-free: incremental UTF-8 across chunk boundaries, cursor addressing,
-  EL/ED, insert/delete line and char, DECSTBM scroll regions, `?1049` alternate
-  screen with save/restore, `?25`/`?7`/`?6`/`?1` and ANSI insert mode, SGR
-  through 16/256/truecolor, the `ESC(0` ACS line-drawing table, DSR/DA answers
-  written back to the PTY, and a bounded scrollback.
-- **Verified on the emulator** — the qualification is the point: the grid follows
-  the panel (`stty size` agreed at 16×56 against the panel's 56×16), a 287-column
-  line wraps, after `seq 1 60` the last sixteen rows are visible with the prompt
-  on the bottom, `htop` renders unconfined in the host shell (165 tasks, box
-  characters, no phantom cursor), `exit` reports a stopped shell, and the
-  terminal picker distinguishes two terminals. **Re-attach after a network drop
-  is unverified**: the emulator's `svc wifi/data` do not touch the path this app
-  uses (eth0/10.0.2.15), so a drop-and-resume has not been exercised.
-
-<p align="center">
-  <img src="docs/images/shell.png" width="330"
-       alt="The Shell tab: the terminal's chip and its running state, the two seats labelled Host shell · Full access and This session · Workspace Write, and htop running unconfined in the host shell — showing the host's own processes — above the Esc/Tab/^C/^D key row">
-</p>
-
-### The Router tab
-
-- A **fourth tab, present only while the session's selected model is local**. It
-  describes the `llama.cpp` **router** behind that model: the endpoint, protocol,
-  declared context window, output cap, modalities and whether a credential is sent
-  — all of them the host's own declarations, read from the `llm-pi-ai` provider
-  profile in the `settings/describe` reply the Settings panel already fetches — plus
-  one live check, run by the host on this client's behalf, that answers "can the
-  host reach that endpoint, and what does it advertise right now", with the time it
-  was taken.
-- **"Router", not "Server."** The thing behind a local route is a `llama-server`
-  started with `--models-dir`, which holds several GGUFs and loads one on demand —
-  its own `/props` answers `{"role":"router"}`. "Server" was a placeholder that
-  mislabelled it as a single model process, and the router's own word is the
-  accurate one.
-- **What it deliberately does not show, and why.** The phone reaches the host
-  through a single forwarded port, and on that port `GET /health`, `/v1/models`,
-  `/props`, `/slots` and `/metrics` all answer 404 — the routers are bound to the
-  host's loopback and nothing proxies them (nginx fronts the gate with one
-  `location /`; there is no `/api` passthrough). So the loaded model, slot
-  occupancy, memory and throughput are **not obtainable**, and the tab says so in as
-  many words rather than drawing a number nobody measured.
-- **The gap is a missing host method, and it is closeable.** The host *can* see the
-  load state — `llm/discoverModels` already performs the very `GET /v1/models` that
-  carries each model's `loaded`/`unloaded` status — it simply does not return that
-  field. A sweep of every client-callable method found no other one that can report
-  it. `.work/docs/host-contract.md` therefore specifies **`localRouter/status`**, a small plugin
-  that would answer with the resident model, each slot's prefill progress and the
-  decoded-token counts. **The app's half of that call is already written**: a host
-  that gains the plugin lights the tab's LOAD and PREFILL sections up with no app
-  change, and until then the tab states plainly that the readout is not offered.
-- **The gate is the declared endpoint, not the provider's name.** Nothing in
-  `session/modelCatalog` says which provider is local (a group is `{id, name,
-  models}` and nothing else), and this box's local routes are `dsh-local`,
-  `local-2slot`, `dsh-compactor` and `dsh-local-aux` — so a `dsh-local` prefix rule
-  misses one and a hand-kept list rots. A profile whose declared host is loopback
-  (`127.0.0.0/8`, `localhost`, `::1`) is local; a cloud profile never is. The gate
-  is derived from the model trigger's own `ModelChoice`, so the tab appears and
-  disappears with the route the chip names — **including a switch that is only
-  pending**: a local route the last turn ran does not keep the tab alive once a
-  cloud model has been selected, and the "when created" seat has no tabs at all.
-- **The reachability check is `llm/discoverModels`**, and the request names **no
-  provider**. Naming one lets the host answer from its shipped `pi-ai` catalogue
-  without touching the network — probed: `{"provider":"groq","baseURL":"http://127.0.0.1:55599/v1"}`,
-  a dead port, answers `ok:true` with Groq's cloud catalogue. With no provider the
-  call is unconditionally a live `GET <baseURL>/models`, so a "reachable" verdict
-  is always a measurement and never a catalogue read, and (the handler sending one
-  bare GET and nothing else) it can never load a model. `dsh-local-llm-controller`'s
-  `localLlm/getState` is deliberately not surfaced: it reports that plugin's **own**
-  server process, which reads `stopped` on this box while both OpenRC routers are
-  serving, and its `start` refuses to launch beside anything already answering
-  `/health` on that port.
-- **Unverified on device.** The tab's logic is unit-tested and the host calls behind
-  it were probed by hand, but the tab has not been built into the app and exercised
-  on the test handset.
-
-### The composer
-
-- Send, and stop while a turn runs. While running, a long press on send chooses
-  **queue** or **steer**; the default is a preference in Settings.
-- Model chip and picker grouped by provider, including the reasoning-effort
-  options a route accepts; agent-preset chip and picker (`agentPresets/list`);
-  access-mode chip and picker (`permissionPresets/catalog`, applied through the
-  host's `/permission` command); a Plan chip that leaves plan mode.
-- Context meter with a token-breakdown dialog, and session statistic pills
-  (turns/steps with throughput, and token usage with cache-hit), each opening a
-  detail panel.
-- Docks above the card: approval (Allow once / Reject), questions (options,
-  multi-select, custom text, plan review), to-dos, goal bar
-  (pause/resume/edit/clear), and the queue dock (edit, remove, steer, with a
-  local "Sending…" echo until the host admits the row).
-- Attachments: the `+` button opens the add/command menu, the system file picker
-  stages a file as an upload receipt (`fileUploads/upload`) or sends an image
-  inline as `{type:"image"}`. A picture can be sent with no caption.
-- `/` opens the host's command roster (`commands/list` → `commands/execute`);
-  `@` opens the reference picker (`fileReferences/list`,
-  `sessionReferenceResolver/candidates`). Both are caret-accurate and insert the
-  mention at the token, not at the end of the draft.
-
-### Files
-
-- The header folder seat opens the session's Files panel: the files the
-  transcript touched, with a numbered text preview. Content the transcript
-  already carries is preferred; anything else is read with
-  `workspaceFiles/read`, scoped to the open session.
-- Deliverable chips open the panel on the file they name.
-
-### Settings
-
-- A read-only port of the web settings modal's five sections — General, Models,
-  Plugins, Agent presets, Archived sessions — plus Connection and Session
-  sections for this client's own facts.
-- Live controls are the client-local ones: theme (system/dark/light), busy-Enter
-  behaviour, the new-session default preset, and Archived-session unarchive.
-  Everything that would need a host settings write is shown as a value, because
-  a remote browser lands in a `memory` settings scope where writes are dropped.
-- Sign out clears the cookie jar and the stored credentials.
-
-### Background behaviour
-
-- A `dataSync` foreground service holds the event socket open with no Activity,
-  so an approval or a question still reaches a pocketed phone. Its ongoing
-  notification is LOW importance on its own "Connection status" channel.
-- A separate notifications channel carries approvals, questions, a session going
-  idle/done, session errors and a blocked goal. Each deep-links to its session.
-- `POST_NOTIFICATIONS` is requested on Android 13+, and the battery-optimisation
-  exemption is offered, because an OEM battery manager otherwise reaps the
-  process and the socket with it.
-
-### The homescreen widget
-
-- **DSH status**, a 3×2 card with three lines: what is waiting on you (an approval,
-  a question or a plan review, ranked the way the drawer's status dot is), how much
-  is running, and when the **oldest** of those readings was confirmed — the bound on how
-  much to trust the rest, labelled "oldest reading" rather than "checked", because a label
-  about the app's activity under a value about the lines above it describes the wrong
-  thing. Tapping it opens the app on the session that most needs you, through the same
-  `Attention.EXTRA_SESSION` path a notification uses.
-- Four things are deliberately **not** on it: the model/session a turn would run
-  (composer state, not a glance), background jobs (only known for the session the
-  app has *open*, so a count would be one session's jobs presented as the world's),
-  the account balance (not read until the usage panel is opened, and a money figure
-  ages worst of all), and per-session detail.
-- **"Not known" is never drawn as "nothing needs you."** Every reading is
-  `(known, value, asOf)`, so an app that cannot currently hear the host says so, and
-  a reading nobody ever confirmed has no instant invented for it.
-- **The stamp maintains itself.** It is the reading's instant written out as a date and a
-  time — complete when it is drawn and true from then on, with nothing ticking in the
-  launcher to keep it that way and nothing of ours alive to withdraw it. The date is
-  always there because a bare clock time would read as fresh after a day.
-- **Nothing is scheduled, and nothing re-renders on a timer.** `updatePeriodMillis` is 0
-  and there is no `WorkManager`; the app writes the snapshot and redraws the card while it
-  runs, at most once per quarter hour unless a reading actually moves, and when it does
-  not run nothing happens and the stamp says when it last did. No widget placed means no
-  file write at all.
-
-  The design record — what was cut and why, and what is still unverified — is
-  `.work/docs/WIDGET.md`.
-
-### The account balance
-
-The token panel's cost row opens the DeepSeek account balance: `GET /user/balance`,
-read with an API key you paste on that screen. It is the one request this app makes
-that does not go to your host — DeepSeek has no top-up or usage API, so the balance
-is the whole of what it will tell you about an account, and topping up opens
-`platform.deepseek.com/top_up` in the browser. The key lives in the app's encrypted
-preferences and is sent nowhere but `api.deepseek.com`.
-
-## Sharing into it
-
-The app appears in the Android share sheet for any file type: sharing an image or a
-document to **DSH** attaches it to the open session's composer, exactly as the `+`
-button does, so nothing has to be saved and re-attached by hand. A share can start the
-app from cold — the files wait until it is connected and has a session to stage them
-into. Only `content://` URIs are taken; a shared block of text is not an attachment and
-is left alone.
-
-## Deliberate divergences and gaps
-
-`.work/docs/PARITY.md` is the element-by-element ledger; the short version:
-
-- Notices render as visible rows where the web hides them inside a collapsed
-  turn process — a touch UI has no `hidden="until-found"` reveal to get them
-  back.
-- A typed note alongside a single-select question is sent together with the pick
-  (`{selected, custom}`); the web clears one when you touch the other.
-- Settings is read-only apart from client-local preferences (see above).
-- Not implemented in the terminal: scrollback *rendering* — the tail is retained
-  but not drawn — mouse reporting, terminal search, more than one terminal on
-  screen at a time, sixel/kitty graphics, OSC 8 hyperlinks, bracketed paste and
-  IME composition regions.
-- Not implemented elsewhere: the right-panel tab strip beyond Files,
-  drag-to-reorder and the drawer's bottom fade, and Markdown
-  images/citations/mermaid/math.
-- The jobs "done" marker lives in memory: restarting the app clears it, and a job
-  that settled while the app was closed is not re-announced, because a session's
-  first observation never marks it — the rule that keeps one session's job from
-  lighting a dot on another.
-- The model chip names what the **next** turn will run, taken from the session's
-  `modelSelection.next`. A change the host has accepted but no turn has run yet
-  (`next` differing from `lastUsed`) is marked as pending; a pick still out with the
-  host says `applying…`; and a route the catalog no longer lists is named from the
-  host's own `provider/model` and marked unavailable. `session/selectModel` is never
-  retroactive, so the chip deliberately shows `next` rather than what last ran — a
-  chip showing `lastUsed` would advertise the previous model as the next one.
-- A model picked on the **new-session screen** is recorded and applied to the session
-  that screen creates; before then there is no session id to select for.
-- `session/selectModel` is **global as well as per session**. It sets the session's
-  `next` synchronously *and*, asynchronously — measured at 0.4–2 s on 0.2.0-rc.2 — the
-  host's global default (`session/modelCatalog.default`), which is what a session with
-  no selection of its own runs. That lag is a trap: a catalog re-read taken right after
-  the call still shows the old default, so a chip built from the default can advertise
-  a model the session is not going to run. The chip reads the session's own `next`
-  whenever it has one, and the new-session screen re-reads the catalog on entry because
-  any other session or client can move that default while it is open.
-- One host-side rule the app has to answer in the right vocabulary: a waterfall is
-  fanned out to every registered `$events` client, but the **first** `result` settles
-  it for all of them — only a `next` (a client declining, or handing the request back)
-  waits for the other clients. An answer, a skip and an approval are therefore
-  decisive from this app alone; the attention cap's hand-back is not, and an open
-  browser tab keeps the request pending.
-- The homescreen widget reports what the app knows, and the app only knows things
-  while it has a socket. An approval that arrives after the process is gone is never
-  on the card — it cannot be, because the host has already failed the waterfall by
-  then — and after a force-stop its alarms would be cancelled even if it tried to
-  schedule one, which is why the card carries the instant of its oldest reading
-  instead: a fact that cannot go stale, needing nothing to be woken to keep it true.
-  See `.work/docs/WIDGET.md`.
-
-## Repository map
-
-```
-app/src/main/java/uk/xa0/ward/
-  data/    Encrypted config store: host, credentials, theme, drawer preferences
-  net/     DshClient (cookies + unary RPC), RemoteMux (the stream mux), TerminalClient (the terminal namespace), PersistentCookieJar
-  term/    The VT core and the terminal's own rules: emulator, key encodings, seats, stream gates — no Android, so the JVM suite can drive it
-  model/   Journal → renderable rows: transcript reducer, trajectory, files, search, stats, tool tree
-  widget/  The homescreen card: the one writer of its snapshot, the copy rules, the RemoteViews renderer and the provider
-  ui/      Compose screens and components: chat, drawer, settings, setup, trajectory, terminal, theme, markdown
-app/src/test/java/uk/xa0/ward/term/   JVM tests for the VT parser, the protocol gates and the key tables
-docs/      releases/ (public release bodies), images/ and licences/; agent notes are untracked in .work/docs/
-tools/     install.sh (APK install), dsh-api.mjs (one gateway RPC over loopback), gh-secrets.py (Actions secrets); the adb/emulator services and the device lease are generic host infrastructure and live outside this checkout
-build.sh   Gradle entry point; pins the toolchain, the caches and the build lock
-docs/images/  the screenshots above
-.github/   Build and Release workflows: the JVM suite and an installable APK per push, and a
-           published release per version tag
-app/build.gradle.kts, settings.gradle.kts, gradle.properties, local.properties   Gradle and SDK config
-```
-
-## Documentation
-
-The rule book (`AGENTS.md`) and the working notes below are agent state: they are
-deliberately untracked and live in `.work/docs/` on the development machine, not
-in the published tree. `docs/releases/`, `docs/images/` and `docs/licenses/` are
-tracked.
-
-- `AGENTS.md` — the working agreement: branches and worktrees, build, verification,
-  device policy, commits, releases and the host-contract rules.
-- `.work/docs/traps.md` — the incident-level traps in full: what went wrong, what
-  it cost, and what to check first next time.
-- `.work/docs/host-contract.md` — model selection and the llama.cpp routers as the
-  running host actually serves them.
-- `.work/docs/PARITY.md` — the parity roadmap against the vanilla web UI, including
-  every deliberate divergence and the reasoning behind it.
-- `.work/docs/SCROLL-DIAG.md` — the latent scroll diagnostics: what they record, and
-  how to read them back off a device.
-- `.work/docs/WIDGET.md` — the homescreen widget: what it shows and what it deliberately
-  does not, how a reading stays honest when the app is not running, and what has not
-  been verified on a device.
-- `.work/docs/JOBS.md` — the `job` Remote namespace as the running host actually
-  serves it (`job/list`, `job/follow`, `job/kill`), with the probes that establish
-  it. The shipped typert descriptors disagree with that host, and the roster is no
-  longer in `session/control`, which is how the jobs seat went blank.
-- `.work/docs/research/` — the reverse-engineered reference: design system, wire
-  protocol, transcript/UI node model, settings and panels, composer menus,
-  notification plumbing, and the mobile-remote environment.
+The protocol gates live in
+`app/src/test/java/uk/xa0/ward/proto/WardProtocolTest.kt` (captured golden
+bytes, frame round-trip, CBOR subset and refusals) and
+`app/src/test/java/uk/xa0/ward/proto/WardLiveTest.kt` (create, list, resume,
+rename and archive against a live daemon).

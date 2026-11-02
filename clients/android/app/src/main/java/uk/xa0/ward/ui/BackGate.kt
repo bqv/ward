@@ -81,7 +81,7 @@ fun BackGate(onClose: () -> Unit) {
  * retyping it — and so the one claim that matters is stated once: this closes the
  * screen, and the connection, the process and the agent carry on.
  */
-const val CLOSE_DSH_TITLE: String = "Close DSH?"
+const val CLOSE_DSH_TITLE: String = "Close Ward?"
 
 const val CLOSE_DSH_BODY: String =
     "Only this screen closes. The connection stays open, so the agent keeps " +

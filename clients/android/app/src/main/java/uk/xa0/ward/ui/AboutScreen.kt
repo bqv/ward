@@ -243,7 +243,7 @@ fun AboutContent(
         DshWordmark(Modifier.padding(horizontal = DshSpacing.xxl))
         Spacer(Modifier.height(DshSpacing.md))
         SectionNote(
-            "A native Android client for the DSH host. It speaks the host's own " +
+            "A native Android client for a ward daemon. It speaks ward's own binary " +
                 "HTTP + WebSocket protocol: there is no WebView, and nothing is " +
                 "installed on the host to serve it.",
         )
@@ -357,7 +357,7 @@ fun AboutContent(
         // only identity frame the wire carries. An `Unknown` here is "not connected,
         // or no opening frame yet"; a connected host whose frame named none says so
         // in words rather than being left blank or filled in with this app's version.
-        InfoRow("DSH version", hostVersionLabel(hostVersion), HOST_VERSION_VALUE_TAG)
+        InfoRow("Ward version", hostVersionLabel(hostVersion), HOST_VERSION_VALUE_TAG)
 
         // The transport-level action, beside the facts that explain it. One action,
         // one effect: it rebuilds the socket and re-asks both doors, and leaves the
@@ -656,7 +656,7 @@ const val ABOUT_LAN_DOOR_TRANSPORT: String =
         "after a pause that grows each time it fails."
 
 const val ABOUT_LAN_DOOR_WRONG_ANSWER: String =
-    "The LAN door answered a real call with something that was not DSH, so it is set " +
+    "The LAN door answered a real call with something that was not ward, so it is set " +
         "aside until the network changes."
 
 /**

@@ -78,7 +78,7 @@ class AboutHostVersionTest {
         // An omitted row cannot be told from an app that never had the fact, which
         // is the shape this page's own doc comment refuses.
         about(HostVersion.Unknown, connected = false)
-        rule.onNodeWithText("DSH version").assertExists()
+        rule.onNodeWithText("Ward version").assertExists()
         value().assertTextEquals("Unknown")
     }
 }

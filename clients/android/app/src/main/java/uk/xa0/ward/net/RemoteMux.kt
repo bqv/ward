@@ -80,6 +80,7 @@ class RemoteMux(
 
     private val lastFrameAt = AtomicLong(0L)
     private val approvalFrames = MutableSharedFlow<JSONObject>(replay = 16, extraBufferCapacity = 64)
+    private val forwardedEvents = MutableSharedFlow<JSONObject>(replay = 16, extraBufferCapacity = 64)
     private val nextSynthetic = AtomicLong(1)
 
     init { supervise() }
@@ -94,6 +95,16 @@ class RemoteMux(
     /** Tell the attention centre that a ward approval is settled. */
     internal fun cancelApproval(eventId: String) {
         onWaterfallCancel?.invoke(eventId)
+    }
+
+    /** A ward turn boundary is the DSH live-status fact for one session. */
+    internal fun publishStatus(sessionId: String, running: Boolean) {
+        forwardedEvents.tryEmit(
+            JSONObject()
+                .put("type", "emit")
+                .put("event", "api-session/status")
+                .put("args", JSONArray().put(sessionId).put(running)),
+        )
     }
 
     suspend fun ensureConnected() {
@@ -184,9 +195,16 @@ class RemoteMux(
         onHostVersion?.invoke(hostVersion)
         onEventsGeneration?.invoke("ward-android")
         out.trySend(StreamEvent.Item(ready))
-        approvalFrames.collect { frame ->
-            lastFrameAt.set(System.currentTimeMillis())
-            deliverWaterfall(frame)
+        val approvals = scope.launch {
+            approvalFrames.collect { frame ->
+                lastFrameAt.set(System.currentTimeMillis())
+                deliverWaterfall(frame)
+            }
+        }
+        try {
+            forwardedEvents.collect { event -> out.trySend(StreamEvent.Item(event)) }
+        } finally {
+            approvals.cancel()
         }
     }
 
@@ -347,6 +365,7 @@ private class FollowTranslator(
                 lastTurn = turn
                 text = StringBuilder()
                 assistantStarted = false
+                client.mux?.publishStatus(sessionId, true)
                 listOf(durable(seq, time, "user/message", JSONObject()
                     .put("id", "ward-$seq")
                     .put("content", JSONArray().put(JSONObject()
@@ -400,6 +419,7 @@ private class FollowTranslator(
                         .put("message", reason ?: "the turn was aborted")))
                 }
                 frames += durable(seq + 1, time, "turn/end", data)
+                client.mux?.publishStatus(sessionId, false)
                 text = StringBuilder()
                 assistantStarted = false
                 frames
