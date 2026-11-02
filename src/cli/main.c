@@ -913,10 +913,20 @@ static int command_stats(int argc, char **argv) {
            "prompt bytes %llu\n",
            (unsigned long long)events, (unsigned long long)turns,
            (unsigned long long)text_bytes, (unsigned long long)prompt_bytes);
+    uint64_t prompt_tokens = 0, predicted_tokens = 0, cache_tokens = 0;
+    wd_uint_of(wd_get(result, "prompt_tokens"), &prompt_tokens);
+    wd_uint_of(wd_get(result, "predicted_tokens"), &predicted_tokens);
+    wd_uint_of(wd_get(result, "cache_tokens"), &cache_tokens);
+    if (prompt_tokens > 0 || predicted_tokens > 0)
+      printf("tokens      %llu in, %llu out, %llu cached (measured)\n",
+             (unsigned long long)prompt_tokens,
+             (unsigned long long)predicted_tokens,
+             (unsigned long long)cache_tokens);
     cbor_item_t *cost = wd_get(result, "cost_total");
     if (cost != NULL && cbor_isa_float_ctrl(cost))
-      printf("cost        %.6f (estimated tokens)\n",
-             cbor_float_get_float(cost));
+      printf("cost        %.6f (%s tokens)\n", cbor_float_get_float(cost),
+             cbor_get_bool(wd_get(result, "tokens_estimated")) ? "estimated"
+                                                               : "measured");
     free(session);
     free(model);
   }
