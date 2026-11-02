@@ -2139,3 +2139,17 @@ produce exactly what the assertion saw — one `session.prompted` and no second 
 Both fixes are small and both want the same test: enqueue should not be refused for a session whose carry-over is its only
 entry, and drain should not let one session's queue block another's. Next session settles which, then the assertion is the
 park-steer-deny-count shape already written.
+
+Hundred-and-sixty-third: the design for `job.follow`, recorded before the code so the client lane knows the semantics it will
+get. Ward has no durable job record: a job is a run, and a run is freed when its turn ends. So a follow that survives the job
+cannot be built on the run alone, and pretending otherwise would be the same mistake as advertising a preset that does not
+decide.
+
+What it will be: a bounded ring on the run, appended by `turn_emit` as output is produced, capped at 64 KiB and dropping
+from the front with a `dropped` count so a client can tell truncation from the beginning. `job.follow {id, from}` answers
+`{chunks: [{from, text}], next, dropped}` while the job runs. Once the run is freed, `from` is answered from the session
+transcript instead — `session.resume` already replays every event — and the method says so in its error rather than returning
+an empty stream that looks like silence.
+
+The gate that must exist with it: a job that produces more than the cap, asserting `dropped` grows, `next` advances and a
+resume from a mid-point returns the tail rather than the head.
