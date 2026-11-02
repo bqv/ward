@@ -1469,3 +1469,16 @@ whose new path nothing runs is a claim, not a measurement. The gate it needs: a 
 first completion with the two-call-free `tool_calls` body `provider_test` already uses, then asserts a `tool.call`
 event and a `tool.result` for a `read` of a file written by the fixture, followed by a second completion carrying
 ordinary text so the turn ends.
+
+Hundred-and-eleventh: the tool-dispatch gate was attempted and abandoned for this session. The fake endpoint grew a
+branch that answers a prompt containing "use a tool now" with a single `tool_calls` reply, and the gate watched the
+event stream for a `tool.` kind before `turn.end`. It hung instead of asserting: either the turn never ended (the
+driver's continuation after a tool result asks the provider again, and my "not already answered" guard keyed on the
+absence of an assistant role in the request, which the second request no longer satisfies) or the awaited event
+never arrives and a blocking reader waits forever.
+
+Reverted rather than left in the tree, because a gate that hangs is worse than a documented gap: it costs a timeout
+in every future run and teaches the next person to distrust the suite. The dispatch code from the previous entry
+stays, still unreached by any test, and the recipe in that entry stands. A gate for it wants a fake endpoint that
+counts requests rather than sniffing their text, so the first request answers with tool_calls and every later one
+with ordinary text.
