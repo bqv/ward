@@ -2081,3 +2081,12 @@ What the gate needs instead is a trigger core owns: `session.prompted` arrives a
 yet. The reliable shape is to queue a second prompt (which guarantees the first turn is running, since the queue only
 answers `ahead` while a turn is active) and steer once that second turn starts — or to poll `job.list` for the running turn.
 Both are more honest than a delay, and neither is built yet.
+
+Hundred-and-fifty-eighth: full-access does not work yet, and the gate that would have said so is how I found out. With the
+selection asserted (`policy.list.current == "full-access"`), a `/write` prompt still comes back with an approval, so the turn
+parks exactly as it does under the default preset. The preset is stored, served and confirmed, but its rules are not changing
+the decision.
+
+That is a defect in item one, not a missing test: the catalogue advertises a mode that does nothing, and the client now has a
+confirmation dialog and a danger marker around it. The gate is reverted and the tree is green; the client lane is told before
+it wires further.
