@@ -1557,3 +1557,18 @@ most of the 2 GiB card, so a direct curl fails the same way. That is the box, no
 router.
 
 Next: step three, reading the pipe incrementally under epoll and emitting deltas before EOF.
+
+Hundred-and-seventeenth: the fourth step of the streaming plan is mostly already built. `src/proto/sse.h` carries a
+complete incremental SSE parser — `wd_sse_create`/`wd_sse_feed`/`wd_sse_finish` with an event callback, line and
+data size limits, and escape handling — written for the QUIC and event paths. My first attempt at step four added a
+second parser in `src/core/stream.c`; the linker caught it as `multiple definition of wd_sse_feed`, which is the
+best possible outcome for a duplicated abstraction.
+
+Deleted, with the Makefile line. Step four is therefore a *user* of `wd_sse_*`, not a new parser: feed each pipe
+read into the existing instance, take `content` out of the event data, and emit a delta per event. That also means
+the partial-UTF-8 concern is bounded — the parser emits whole events, so a fragment is never split mid-character
+beyond what the provider already sent.
+
+A reminder worth keeping: check what the tree already has before writing the abstraction it needs. `src/proto/sse.h`
+has been there since M1 and the plan I wrote two entries ago did not mention it — I had read `http.c` and not the
+neighbouring protocol directory.
