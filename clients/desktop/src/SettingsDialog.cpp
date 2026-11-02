@@ -167,13 +167,7 @@ void SettingsDialog::reload()
 {
     if (m_facade == nullptr)
         return;
-    const bool ward = m_facade->transportName() == QLatin1String("ward");
-    m_steerMode->setEnabled(!ward);
-    m_steerMode->setToolTip(ward
-                                ? QStringLiteral("Phase 2 steering is not available yet; a "
-                                                 "message sent during a turn queues.")
-                                : QString());
-    const bool steer = !ward && m_facade->busyEnter() == QLatin1String("steer");
+    const bool steer = m_facade->busyEnter() == QLatin1String("steer");
     m_steerMode->setChecked(steer);
     m_queueMode->setChecked(!steer);
 }

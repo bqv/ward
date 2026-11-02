@@ -109,6 +109,7 @@ The client speaks ward's method names and event kinds, not an adapter vocabulary
 | workspaces | synthetic groups by session cwd |
 | presets | `policy.list` / `policy.select`; chip normalises `id` to `value` |
 | queue | `session.prompt` -> `{queued, ahead}` while a turn runs; one queued prompt per session |
+| steer | `session.prompt` with `steer: true` appends to the running turn |
 | images | `tool.result.path` / `session.attachment.path` -> `attachment.read_blob` |
 | any other method | `wardCall(method, params)` is the generic door; `protocolMethods()` lists the frozen table |
 
@@ -120,8 +121,8 @@ and are never silently dropped by the wire layer.
 
 - **QUIC pairing UI.** `ward-pair` does CSR, `device.pair`/`enrol` and stores the
   credentials, but there is no in-window pairing dialog yet.
-- **Steer.** Phase 1 queue is wired; phase 2, appending to the running turn at
-  the next provider boundary, is not built.
+- **Late steer.** A steer that never reaches another provider call is dropped
+  by the daemon; carrying it into the queue is the remaining ward-side fix.
 
 ## Layout
 

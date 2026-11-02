@@ -317,7 +317,7 @@ private:
     void rebuildWorkspaces();
     void applyApprovals(const QVariantList &entries);
     void subscribe(const QString &sessionId);
-    void doPrompt(const QString &text);
+    void doPrompt(const QString &text, bool steer = false);
     void appendRow(const QString &kind, const QString &text, const QString &title = {},
                    const QString &status = {}, const QString &detail = {},
                    const QString &key = {}, int turn = -1);
@@ -416,6 +416,8 @@ private:
 
     QString m_queuedPrompt;
     QString m_sentPrompt;
+    bool m_steerAttempt = false;
+    int m_steerCount = 0;
     QString m_pendingApproval;
     QHash<QString, QVariantMap> m_approvals;
     QHash<QString, QByteArray> m_attachments;

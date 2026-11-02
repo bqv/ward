@@ -679,6 +679,15 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
         }
         if (method == QLatin1String("session.resume"))
             m_openingSession = false, emit openingSessionChanged();
+        if (method == QLatin1String("session.prompt") && m_steerAttempt) {
+            m_steerAttempt = false;
+            const QString retry = m_sentPrompt;
+            m_sentPrompt.clear();
+            if (!retry.isEmpty()) {
+                doPrompt(retry, false);
+                return;
+            }
+        }
         if (method == QLatin1String("session.prompt") && !m_turnOpen) {
             m_busy = false;
             emit busyChanged();
@@ -752,6 +761,18 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
             doPrompt(text);
         }
     } else if (method == QLatin1String("session.prompt")) {
+        if (result.value(QStringLiteral("steered")).toBool()) {
+            m_steerAttempt = false;
+            ++m_steerCount;
+            m_sentPrompt.clear();
+            if (!m_pendingAttachments.isEmpty()) {
+                m_pendingAttachments.clear();
+                m_stagingName.clear();
+                emit pendingAttachmentsChanged();
+            }
+            setState(Ready, QStringLiteral("steered"));
+            return;
+        }
         if (result.value(QStringLiteral("queued")).toBool()) {
             const int ahead = result.value(QStringLiteral("ahead")).toInt();
             m_queue = QVariantList{QVariantMap{
@@ -980,6 +1001,8 @@ void WardClient::handleEvent(uint64_t sub, uint64_t seq, const QString &kind,
         m_turn = int(payload.value(QStringLiteral("turn")).toULongLong());
         m_turnOpen = true;
         emit turnOpenChanged();
+        m_steerCount = 0;
+        m_steerAttempt = false;
         if (!m_queue.isEmpty()) {
             m_queue.clear();
             emit queueChanged();
@@ -1001,6 +1024,8 @@ void WardClient::handleEvent(uint64_t sub, uint64_t seq, const QString &kind,
         updateTrajectory(QStringLiteral("agent-%1").arg(m_turn),
                          {{QStringLiteral("status"), QStringLiteral("done")}});
         m_transcript->noteTurn(m_turn, false);
+        m_steerCount = 0;
+        m_steerAttempt = false;
         m_turnOpen = false;
         m_busy = false;
         emit turnOpenChanged();
@@ -1326,9 +1351,12 @@ void WardClient::sendPrompt(const QString &text)
 
 void WardClient::sendPrompt(const QString &text, const QString &mode)
 {
-    Q_UNUSED(mode);
     if (text.isEmpty())
         return;
+    if (mode == QLatin1String("steer") && m_turnOpen && m_steerCount < 8) {
+        doPrompt(text, true);
+        return;
+    }
     if (m_sessionId.isEmpty() || m_pendingSession) {
         m_queuedPrompt = text;
         createSessionNow();
@@ -1348,14 +1376,28 @@ void WardClient::sendPrompt(const QString &text, const QString &mode)
     doPrompt(text);
 }
 
-void WardClient::doPrompt(const QString &text)
+void WardClient::doPrompt(const QString &text, bool steer)
 {
+    m_sentPrompt = text;
+    if (steer && m_turnOpen) {
+        m_steerAttempt = true;
+        setState(Ready, QStringLiteral("steering…"));
+        if (!m_pendingAttachments.isEmpty()) {
+            m_pendingAttachments.clear();
+            m_stagingName.clear();
+            emit pendingAttachmentsChanged();
+        }
+        sendRequest(QStringLiteral("session.prompt"),
+                    {{QStringLiteral("id"), m_sessionId},
+                     {QStringLiteral("text"), text},
+                     {QStringLiteral("steer"), true}});
+        return;
+    }
     m_busy = true;
     m_turnOpen = true;
     emit busyChanged();
     emit turnOpenChanged();
     setState(Ready, QStringLiteral("thinking…"));
-    m_sentPrompt = text;
     if (!m_pendingAttachments.isEmpty()) {
         m_pendingAttachments.clear();
         m_stagingName.clear();
@@ -1618,11 +1660,6 @@ void WardClient::setRailCollapsed(const QStringList &entries)
 
 void WardClient::setBusyEnter(const QString &mode)
 {
-    if (mode == QLatin1String("steer")) {
-        m_accessNotice = QStringLiteral("steering is not available on ward yet; the message will queue");
-        emit accessNoticeChanged();
-        return;
-    }
     if (m_busyEnter == mode)
         return;
     m_busyEnter = mode;

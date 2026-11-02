@@ -80,6 +80,7 @@ daemon.
 | approvals | request, respond, resolved; `approval.list` marks every session with a live card and carries tool/reason, so a followed session that reconnects without replay still names the request; `requestId` is `call:epoch` |
 | permission presets | `policy.list` / `policy.select`; `id` normalised to `value`, `current` drives the access chip, `observe` stays in the description |
 | queue | `session.prompt` -> `{queued: true, ahead}` while a turn runs; one queued prompt per session; the chip shows the position |
+| steer | `session.prompt` with `steer: true` appends to the running turn; client falls back to queue when no turn is open or the local steer budget is spent |
 | attachments | `attachment.read_blob` for the image lightbox; `session.attachment.path` and `tool.result.path` supply the reference |
 | QUIC | `WARD_QUIC=ON`, `ward-pair`, `--socket quic://host:port`, `WARD_QUIC_CERT/KEY/CA/PIN` |
 | terminal | `terminal.open/write/resize/close`, `terminal.output`, eof and exit state |
@@ -104,12 +105,14 @@ proven yet. They are reported to the ward session as well.
    `device.enrol` over QUIC, then writes `device.crt`, `device.key` and
    `ca.crt`. A live run minted `DE1EE261...` and connected with the new cert.
    The only remaining part is an in-window pairing dialog.
-2. **Steer.** Phase 1 queue is wired (`{queued, ahead}`, one queued prompt per
-   session). Phase 2, appending a user message to the running turn at the next
-   provider boundary, is still a protocol-design decision; no client-side
-   interruption is invented.
+2. **Late steer.** Steers ride the running turn's next provider request. A
+   turn that reaches no further provider call drops them; the fix is to carry
+   undelivered steers into the queue at turn end, which is a ward-side change.
+   The client never invents an interruption: true interruption is cancel plus
+   queue.
 
 Deferred new sessions, workspaces-by-cwd, trajectory projection, the headless
 `--prompt` path, permission presets, directory and blob reads, the lightbox,
 composer attachment staging, the QUIC transport and a pairing CLI are now in.
-An in-window pairing dialog and phase 2 steer remain; phase 1 queue is in.
+An in-window pairing dialog remains; queue and steer are in, with the late-steer
+carry-over still ward-side.
