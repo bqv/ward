@@ -1643,3 +1643,17 @@ That means the assertion cannot be written against the fixture as it stands, and
 emit two obviously non-empty fragments (fixed strings, not halves of a request field) so the split is controlled by the
 test rather than by the length of whatever the request happened to carry. Reverted again rather than leaving a failing
 gate; the fix belongs in `tests/fake_endpoint.h`, which is where the next attempt should start.
+
+Hundred-and-twenty-fourth: the missing deltas were the status frame. The daemon fed every byte it read into the SSE
+parser, including the four-byte status prefix, so the first `data:` line arrived as `\0\0\0\0data: {...}` and was
+dropped; only the second fragment survived, which is exactly the one-delta-per-reply the log kept showing. Tracking
+whether the status has been consumed and skipping those four bytes fixed it: each reply now yields two content events
+plus `[DONE]`.
+
+With that, the timing gate is writable and written: `turn_text` counts the deltas it sees, and the gate asserts at
+least two for a single prompt — which can only pass if the daemon emitted fragments individually rather than after the
+whole answer. `gate_tool` passes in all three builds.
+
+Four rounds, three wrong hypotheses, and the cause was two layers below where I was looking: not the fixture, not the
+parser, but the four bytes in front of the body. The fixture hypothesis was partly right, though — the first attempt
+used a prompt whose first half was empty, which hid the real fault behind a plausible one.

@@ -221,13 +221,17 @@ static cbor_item_t *wait_turn_end(client *c, uint64_t turn) {
   }
 }
 
+static int turn_deltas;
+
 static void turn_text(client *c, uint64_t turn, char *out, size_t cap) {
   out[0] = '\0';
+  turn_deltas = 0;
   for (;;) {
     char *kind = NULL;
     cbor_item_t *payload = next_event(c, &kind, NULL);
     assert(payload != NULL);
     if (kind != NULL && strcmp(kind, "text.delta") == 0) {
+      turn_deltas++;
       char *text = wd_text_copy(wd_get(payload, "text"));
       if (text != NULL) {
         size_t have = strlen(out);
@@ -494,6 +498,7 @@ int main(void) {
   char rule_text[2048];
   turn_text(&a, last_turn, rule_text, sizeof(rule_text));
   assert(strstr(rule_text, "[rules]") != NULL);
+  assert(turn_deltas >= 2);
 
 
 

@@ -91,6 +91,7 @@ struct wd_run {
   size_t http_cap;
   wd_sse *sse;
   void *sse_ctx;
+  int http_status_seen;
   size_t streamed;
 };
 
@@ -2131,6 +2132,7 @@ static wd_run *run_new(wd_server *srv, wd_session *session, char **err) {
   run->http_cap = 0;
   run->sse = NULL;
   run->sse_ctx = NULL;
+  run->http_status_seen = 0;
   run->streamed = 0;
   snprintf(run->session_id, sizeof(run->session_id), "%s", session->id);
   run->turn = wd_turn_new_pinned(srv->engine, dir, session->cwd, session->pins,
@@ -2703,7 +2705,19 @@ static int read_stream(wd_server *srv, wd_run *run, bool *eof) {
       *eof = true;
       return 0;
     }
-    if (run->sse != NULL) (void)wd_sse_feed(run->sse, (const char *)run->http_body + run->http_len, (size_t)got);
+    size_t skip = 0;
+    if (!run->http_status_seen) {
+      if (run->http_len + (size_t)got < 4) {
+        run->http_len += (size_t)got;
+        return 0;
+      }
+      skip = 4 - run->http_len;
+      run->http_status_seen = 1;
+    }
+    if (run->sse != NULL && (size_t)got > skip)
+      (void)wd_sse_feed(run->sse,
+                        (const char *)run->http_body + run->http_len + skip,
+                        (size_t)got - skip);
     run->http_len += (size_t)got;
     return 0;
   }
