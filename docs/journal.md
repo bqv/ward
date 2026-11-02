@@ -1783,3 +1783,19 @@ text.
 That is the third time this session that a measurement apparatus, not the product, was the fault — the pipe that looked
 like a hang, the fixture that answered by content, and now a decode that read the wrong item. The pattern is consistent
 enough to be a rule for next time: when a number is impossible, print the bytes before theorising about the layer below.
+
+Hundred-and-thirty-fourth: the repair path with ordered answers shows the shape of the real fault. The first request gets
+the vague body, core asks its one repair, the second request gets a valid tool call, the capability runs — and then the
+driver asks the provider *twice more* in the same turn (two further replies logged), after which the turn dies with
+"module returned invalid CBOR" and an error name of "unknown".
+
+So the repair works and the capability runs; what breaks is the number of provider rounds the driver asks for after a
+`{kind:"tool"}` message, and the eventual payload that marshals to nothing. That is a driver-state question: the tool
+message is a new kind for that guest, and after it the driver appears to fall back to its provider path without a prompt.
+
+The provider guard (entry 132) makes a promptless call answer instead of returning silently, so the empty reply now comes
+from somewhere else; the next step is to log which module returns zero bytes, which means naming the instance in `invoke`'s
+error rather than leaving "module returned invalid CBOR" anonymous — and that is worth doing regardless of this bug,
+because the message has cost me two round trips tonight.
+
+Reverted the gate and fixture; tree green.
