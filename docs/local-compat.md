@@ -14,10 +14,18 @@ wait; the queue is FIFO with `ahead`; a model's device has a slot pool and one q
 provider reads a native `tool_calls` reply, and a reply asking for more than one call is refused rather than
 half-run.
 
-Streaming is in the tree and working — the helper pipes chunks, the daemon parses them with the existing SSE
-parser and appends a durable `text.delta` per fragment, and the driver's own delta is suppressed so nothing is
-repeated — but its *timing gate* is still missing, and the fake endpoint is what blocks it: the fixture emits a
-single non-empty content fragment per reply, so a test cannot yet assert that a delta arrives before `turn.end`.
+The device pool is now cross-process: a run holds an `flock` on
+`<state>/device-<name>-<slot>.lock`, so two daemons sharing a card serialise instead of each believing it has the only
+slot.
+
+A tool call the model writes *without* its arguments triggers one repair request, bounded by `repair_tried`. The repair
+request is submitted and its answer parsed, but the dispatch after it is stopping at the judge and ending the turn with
+no `tool.call`; that gap is open and recorded.
+
+Streaming is in the tree, working and gated: the helper pipes chunks, the daemon skips the status frame, parses the
+rest with the existing SSE parser and appends a durable `text.delta` per fragment, the driver's own delta is
+suppressed, and `gate_tool` asserts at least two deltas per prompt — which can only pass if fragments are emitted
+individually.
 
 Still open: the streaming timing gate (fixture first), the one repair for a failed tool-call parse, and the
 per-daemon limits of the device pool.
