@@ -1618,6 +1618,11 @@ void WardClient::setRailCollapsed(const QStringList &entries)
 
 void WardClient::setBusyEnter(const QString &mode)
 {
+    if (mode == QLatin1String("steer")) {
+        m_accessNotice = QStringLiteral("steering is not available on ward yet; the message will queue");
+        emit accessNoticeChanged();
+        return;
+    }
     if (m_busyEnter == mode)
         return;
     m_busyEnter = mode;
