@@ -4,14 +4,17 @@ ward assumes a cloud provider: a large window, cheap prefill and a server that a
 
 ## Status
 
-Landed since this was written: the catalog carries `endpoint` and `key`, the endpoint is no longer read
-from `WARD_ENDPOINT` alone, the request names the catalog's `model` instead of the hardcoded `"local"`,
-`max_tokens` is sent (1024 by default), and a remote endpoint is admitted only when a model names one.
-The system prompt is now assembled from ordered sections (`src/core/prompt.c`), which is the head §2
-wants to freeze.
+Landed: the catalog carries `endpoint`, `key`, `max_output`, `device`, `slots` and `stop`; the request names the
+catalog's model and bounds its length; a remote endpoint is admitted only when a model names one; `model.probe`
+reads `n_ctx` from the server and the prompt budget follows it; the head is frozen once and history is never
+silently trimmed; the driver no longer stamps the clock and the time is a durable tail event; compaction branches
+instead of rewriting; the error taxonomy covers the provider failures a local stack produces; cancel kills the
+curl child; `turn.timings` records the router's own numbers and they are summed into stats; `turn.state` names the
+wait; the queue is FIFO with `ahead`; a model's device has a slot pool and one queued turn per session; and the
+provider reads a native `tool_calls` reply.
 
-Open, in the order below: the error taxonomy (§6), the catalog and `model.probe` (§1, §3), prefix
-stability (§2), streaming, abort and timings (§5), per-device serialisation (§7), tool calling (§4).
+Still open: true streaming (deltas as they arrive), tool dispatch and the grammar-only fallback, and the
+per-daemon limits of the device pool.
 
 ## 1. Model capabilities, not just context length
 
