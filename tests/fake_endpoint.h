@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <fcntl.h>
 #include <signal.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
@@ -43,6 +44,21 @@ static int extract_content(const char *buf, char *out, size_t cap) {
   return (int)n;
 }
 
+static int marker_request_index(void) {
+  const char *path = getenv("WARD_FAKE_COUNTER");
+  if (path == NULL) return 0;
+  int fd = open(path, O_RDWR | O_CREAT, 0600);
+  if (fd < 0) return 0;
+  int seen = 0;
+  if (read(fd, &seen, sizeof(seen)) != (ssize_t)sizeof(seen)) seen = 0;
+  int next = seen + 1;
+  lseek(fd, 0, SEEK_SET);
+  ssize_t written = write(fd, &next, sizeof(next));
+  (void)written;
+  close(fd);
+  return seen;
+}
+
 static void serve(int fd) {
   const char *delay = getenv("WARD_FAKE_DELAY_MS");
   if (delay != NULL) usleep((useconds_t)(atoi(delay) * 1000));
@@ -71,6 +87,20 @@ static void serve(int fd) {
   if (strstr(request, "note.txt") != NULL) {
     size_t used = strlen(prompt);
     snprintf(prompt + used, sizeof(prompt) - used, " [attach]");
+  }
+  if (strstr(request, "use a tool now") != NULL &&
+      marker_request_index() == 0) {
+    static const char call[] =
+        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n"
+        "Connection: close\r\n\r\n"
+        "data: {\"choices\":[{\"message\":{\"tool_calls\":[{\"function\":"
+        "{\"name\":\"read\",\"arguments\":\"{\\\"path\\\":\\\""
+        "note.txt\\\"}\"}}]}}]}\n\n"
+        "data: [DONE]\n\n";
+    ssize_t sent = write(fd, call, strlen(call));
+    (void)sent;
+    close(fd);
+    return;
   }
   size_t half = strlen(prompt) / 2;
   char response[8192];

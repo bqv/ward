@@ -280,6 +280,8 @@ int main(void) {
   setenv("WARD_FAKE_DELAY_MS", "3000", 1);
 #endif
   setenv("WARD_MAX_RUNS", "2", 1);
+  unlink("/tmp/ward-fake-counter");
+  setenv("WARD_FAKE_COUNTER", "/tmp/ward-fake-counter", 1);
   fake_endpoint(&endpoint_port, &endpoint);
   char root[] = "/tmp/ward-tool-gate-XXXXXX";
   assert(mkdtemp(root) != NULL);

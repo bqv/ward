@@ -1482,3 +1482,16 @@ in every future run and teaches the next person to distrust the suite. The dispa
 stays, still unreached by any test, and the recipe in that entry stands. A gate for it wants a fake endpoint that
 counts requests rather than sniffing their text, so the first request answers with tool_calls and every later one
 with ordinary text.
+
+Hundred-and-twelfth: the tool-dispatch gate passes. Two changes made the difference, and both were the fixes the
+abandoned attempt named.
+
+The fixture counts marker requests in a file instead of sniffing the request text: the first prompt containing "use
+a tool now" is answered with a single `tool_calls` reply, every later one with ordinary text, so the loop that hung
+the gate cannot happen. The gate then reads events under a 15-second `SO_RCVTIMEO` rather than waiting forever, and
+asserts it saw a `tool.` event before the turn ended.
+
+Measured: `gate_tool` passes in all three builds with that assertion in place, which means the chain from a
+provider reply carrying `tool`, through `{kind:"tool"}`, through the driver's `json_field` scan, to an actual
+`invoke` of the tools module, is now exercised rather than assumed. The dispatch landed in `b305ea9` untested; this
+closes that gap two entries later.
