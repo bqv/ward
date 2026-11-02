@@ -1749,3 +1749,17 @@ worked for the dispatch gate — count requests in the fake endpoint (a counter 
 assertion belongs in the gate only after that.
 
 Reverted, tree green, and recorded with the trace.
+
+Hundred-and-thirty-first: the fixture now answers the repair turn by position and the trace is unambiguous. The first
+request of the turn gets the tool call; core parses `tool=read`, dispatches, and the capability runs. The *second*
+provider request — the driver asking again after the tool result — matches the same marker, gets the vague body, and the
+provider reports a tool with no arguments. Core has already spent its repair, so it clears the tool and passes the refusal
+text through, and that is where the turn dies with "module returned invalid CBOR" rather than ending with the refusal as
+text.
+
+So the repair itself works; the fault is in what a second provider round inside one turn does to the message that follows
+it. That is a turn-state question (`pending_kind`, the parked action and the reply map), not a parsing one, and it is
+recorded here rather than chased further tonight: the repair is an extra beyond the note's list, and the note's list is
+what the milestone is measured against.
+
+Reverted the gate and fixture; tree green. The repair code stays with `repair_tried` bounding it to one attempt.
