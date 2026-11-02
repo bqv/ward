@@ -1622,3 +1622,14 @@ count the events the SSE callback sees, not just the deltas it emits.
 
 Recorded, reverted, and left green. The streaming behaviour itself is unchanged and the suites pass; what is missing is
 still the assertion, and now it is missing for a known reason rather than an unknown one.
+
+Hundred-and-twenty-second: counting the events settled part of it. With `WARD_DEBUG` printing each SSE event it sees, the
+gate's four provider replies produced **eight** events — two per reply: one content event and one six-byte `[DONE]`. So
+the parser is not merging or dropping anything, and the daemon emits exactly one content delta per reply because the
+fixture sends exactly one non-empty content chunk per reply. The `deltas=1` measurement was correct and the assertion
+was wrong: `strlen(prompt)/2` is zero for a one-character prompt, so the first `%.*s` chunk is empty and carries no
+content.
+
+That means streaming works and the gate I wanted does not need a bigger constant — it needs a fixture prompt long
+enough that both halves are non-empty, or an assertion on the *event* count rather than the delta count. The debug print
+stays: it costs nothing outside `WARD_DEBUG` and answers this exact question in one run.

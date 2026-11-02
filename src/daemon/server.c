@@ -2642,6 +2642,8 @@ static void tool_done(wd_server *srv, wd_run *run) {
 
 static int stream_event(void *ctx, const wd_sse_event *event) {
   stream_ctx *sc = ctx;
+  if (getenv("WARD_DEBUG") != NULL)
+    fprintf(stderr, "ward: sse event %zu bytes\n", event->data_len);
   if (event->data == NULL || event->data_len < 12) return 0;
   const char *at = NULL;
   for (size_t i = 0; i + 11 < event->data_len; i++) {
