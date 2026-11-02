@@ -358,8 +358,11 @@ class WardBridge(private val connection: WardConnection) {
                 }
             }
         }
-        api.prompt(session, text)
-        return JSONObject().put("sessionId", session)
+        val result = api.prompt(session, text, steer = request.optString("mode") == "steer")
+        return JSONObject()
+            .put("sessionId", session)
+            .put("queued", result.bool("queued") ?: false)
+            .put("steered", result.bool("steered") ?: false)
     }
 
     private suspend fun upload(request: JSONObject): JSONObject {

@@ -41,8 +41,20 @@ class WardApi(private val connection: WardConnection) {
 
     suspend fun resume(id: String, from: Long? = 0): WardSubscription = connection.resume(id, from)
 
-    suspend fun prompt(id: String, text: String, timeoutMs: Long = 20 * 60_000): Cbor =
-        connection.call("session.prompt", cborMap("id" to id.cbor(), "text" to text.cbor()), timeoutMs)
+    suspend fun prompt(
+        id: String,
+        text: String,
+        steer: Boolean = false,
+        timeoutMs: Long = 20 * 60_000,
+    ): Cbor = connection.call(
+        "session.prompt",
+        cborMap(
+            "id" to id.cbor(),
+            "text" to text.cbor(),
+            *buildList { if (steer) add("steer" to true.cbor()) }.toTypedArray(),
+        ),
+        timeoutMs,
+    )
 
     suspend fun cancel(id: String): Boolean =
         connection.call("session.cancel", cborMap("id" to id.cbor())).bool("cancelled") ?: false

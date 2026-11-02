@@ -83,7 +83,8 @@ indefinite forms are refused on decode.
 - sessions: list, create, open, resume/replay, search, rename, fork, pin,
   archive, cancel;
 - turns: prompt, streaming text deltas, turn start/end, tool calls and results,
-  errors, durable replay after a relaunch;
+  errors, durable replay after a relaunch; the composer's steer mode travels as
+  ward's `steer: true`, and a prompt while a turn runs is ward's own queue;
 - approvals: `approval.requested` parks the turn, the existing card answers
   through `approval.respond`, `approval.resolved` withdraws it, and an
   `approval.list` poll raises a card for a session this client is not following;
@@ -131,11 +132,14 @@ repository and the message cannot drift.
   `SO_PEERCRED` door is a desktop/local path; the phone uses TCP.
 - **No host Workspace registry.** The drawer's groups are derived from `cwd`, so
   membership and manual ordering are client-owned rather than host state.
-- **Queue and steer do not exist on ward's wire.** A second prompt while a turn
-  is running is a protocol-level serialisation, not a dock row.
-- **The host shell seat is DSH-only.** The session seat (`This session`) is the
-  one wired for ward; the host-shell bootstrap still asks for DSH commands and
-  an archived session that ward does not model.
+- **The queue has no projection.** Steer and queued prompts are accepted and
+  delivered, but ward has no queue snapshot for the copied dock, so a queued
+  message has no authoritative row until its turn starts.
+- **The terminal panel is not device-complete.** The session seat is the one
+  wired for ward; `terminal.open` creates a PTY and the output frames are routed
+  into `terminal/follow`, but the copied attachment screen never reached its
+  first snapshot on the handset. The host-shell seat still asks for DSH commands
+  and an archived session that ward does not model.
 - **Job output is not streamed.** `job.list` and `job.kill` work; there is no
   equivalent of `job/follow`'s output ring.
 - **Ward has no settings document, plugin bundle switch or command catalogue.**
@@ -165,6 +169,9 @@ Built and installed on the disposable handset `91e25acb`, with
 - the drawer grouped four sessions under one `tmp` Workspace, derived from the
   roster's cwd;
 - the composer's stat pills read `2 turns · 2 steps` from `stats.session`;
+- a `/write` parked in a session the app was not following raised its card from
+  `approval.list`; **Allow once** resolved it and the turn continued, which is
+  the background-approval path;
 - force-stopping and relaunching the app replayed the same transcript from
   `session.resume`, which is the durable-event proof.
 
