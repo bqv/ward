@@ -11,6 +11,8 @@
 typedef struct {
   bool used;
   char session[WD_APPROVAL_SESSION_MAX];
+  char tool[64];
+  char reason[256];
   uint64_t call;
   uint64_t epoch;
   uint64_t expires_ms;
@@ -51,6 +53,7 @@ static entry *find(wd_approvals *table, const char *session, uint64_t call,
 }
 
 wd_approval_state wd_approval_request(wd_approvals *table, const char *session,
+                                      const char *tool, const char *reason,
                                       uint64_t call, uint64_t epoch,
                                       uint64_t now_ms, uint64_t ttl_ms) {
   if (session == NULL || strlen(session) >= WD_APPROVAL_SESSION_MAX)
@@ -75,6 +78,9 @@ wd_approval_state wd_approval_request(wd_approvals *table, const char *session,
   memset(slot, 0, sizeof(*slot));
   slot->used = true;
   snprintf(slot->session, sizeof(slot->session), "%s", session);
+  snprintf(slot->tool, sizeof(slot->tool), "%s", tool != NULL ? tool : "");
+  snprintf(slot->reason, sizeof(slot->reason), "%s",
+           reason != NULL ? reason : "");
   slot->call = call;
   slot->epoch = epoch;
   slot->expires_ms = now_ms + ttl_ms;
@@ -127,6 +133,8 @@ size_t wd_approval_list(const wd_approvals *table, uint64_t now_ms,
     const entry *e = &table->entries[i];
     if (expired(e, now_ms)) continue;
     snprintf(out[count].session, sizeof(out[count].session), "%s", e->session);
+    snprintf(out[count].tool, sizeof(out[count].tool), "%s", e->tool);
+    snprintf(out[count].reason, sizeof(out[count].reason), "%s", e->reason);
     out[count].call = e->call;
     out[count].epoch = e->epoch;
     out[count].expires_ms = e->expires_ms;

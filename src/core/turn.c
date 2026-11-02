@@ -74,6 +74,7 @@ struct wd_turn {
   uint64_t park_call;
   uint64_t park_epoch;
   char *park_reason;
+  char park_tool[64];
   uint64_t epoch;
 };
 
@@ -1589,6 +1590,10 @@ static int process_action(wd_turn *turn, cbor_item_t *action, wd_turn_emit emit,
       turn->park_call = call;
       turn->park_epoch = turn->epoch;
       free(turn->park_reason);
+      if (name != NULL)
+        snprintf(turn->park_tool, sizeof(turn->park_tool), "%s", name);
+      else
+        turn->park_tool[0] = '\0';
       turn->park_reason =
           reason != NULL ? reason : strdup("approval required");
       if (turn->parked != NULL) wd_free(turn->parked);
@@ -2214,6 +2219,12 @@ int wd_turn_cancel_tool(wd_turn *turn) {
   if (turn == NULL || turn->pending_kind != 2 || turn->worker == NULL) return 0;
   wd_worker_kill(turn->worker);
   return 1;
+}
+
+int wd_turn_pending_tool(wd_turn *turn, char *out, size_t cap) {
+  if (turn == NULL || out == NULL || cap == 0) return -1;
+  snprintf(out, cap, "%s", turn->park_tool);
+  return 0;
 }
 
 int wd_turn_pending_kind(wd_turn *turn) { return turn != NULL ? turn->pending_kind : 0; }

@@ -2011,3 +2011,11 @@ Two things deliberately left out and said so: the tool name and the reason are n
 If a reconnect needs them, that is the follow-up, and it is additive.
 
 `approval_test` now asserts a pending entry appears with its expiry and disappears exactly at it. Suite green.
+
+Hundred-and-fifty-second: approvals remember why. `wd_approval_request` now takes the tool and the reason, the entries keep
+them, and `approval.list` returns them beside the session, call, epoch and expiry, so a client that reconnects without
+replaying can say "write: write a file in the session directory" instead of "approval required". The parked action already
+carried the tool name; `wd_turn_pending_tool` exposes it, and both server call sites pass it through.
+
+`approval_test` asserts an entry with both fields. Suite green in all three builds, and the protocol document no longer says
+the fields are missing.

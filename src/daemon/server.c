@@ -2036,8 +2036,10 @@ static void handle_approval_list(wd_server *srv, wd_conn *conn, uint64_t id) {
                                   WD_MAX_APPROVALS);
   cbor_item_t *list = wd_array(count);
   for (size_t i = 0; i < count; i++) {
-    cbor_item_t *item = wd_map(4);
+    cbor_item_t *item = wd_map(6);
     wd_put(item, "session", wd_text(pending[i].session));
+    wd_put(item, "tool", wd_text(pending[i].tool));
+    wd_put(item, "reason", wd_text(pending[i].reason));
     wd_put(item, "call", wd_uint(pending[i].call));
     wd_put(item, "epoch", wd_uint(pending[i].epoch));
     wd_put(item, "expires_ms", wd_uint(pending[i].expires_ms));
@@ -2621,8 +2623,10 @@ static void run_after(wd_server *srv, wd_run *run, int rc, char *err) {
       char *reason = NULL;
       if (session != NULL &&
           wd_turn_pending(run->turn, &call, &epoch, &reason) == 0) {
-        wd_approval_request(srv->approvals, session->id, call, epoch,
-                            wd_now_ms(), WD_APPROVAL_TTL_MS);
+        char tool[64];
+        wd_turn_pending_tool(run->turn, tool, sizeof(tool));
+        wd_approval_request(srv->approvals, session->id, tool, reason, call,
+                            epoch, wd_now_ms(), WD_APPROVAL_TTL_MS);
         free(reason);
       }
     }
@@ -2758,8 +2762,10 @@ static void handle_session_prompt(wd_server *srv, wd_conn *conn, uint64_t id,
       respond_internal(srv, conn, id, "the turn asked for an unnamed approval");
       return;
     }
-    wd_approval_request(srv->approvals, session->id, call, epoch, wd_now_ms(),
-                        WD_APPROVAL_TTL_MS);
+    char tool[64];
+    wd_turn_pending_tool(run->turn, tool, sizeof(tool));
+    wd_approval_request(srv->approvals, session->id, tool, reason, call, epoch,
+                        wd_now_ms(), WD_APPROVAL_TTL_MS);
     cbor_item_t *notice = wd_map(3);
     wd_put(notice, "call", wd_uint(call));
     wd_put(notice, "epoch", wd_uint(epoch));

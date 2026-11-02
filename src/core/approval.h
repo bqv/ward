@@ -27,6 +27,7 @@ void wd_approvals_free(wd_approvals *table);
 void wd_approvals_clear(wd_approvals *table);
 
 wd_approval_state wd_approval_request(wd_approvals *table, const char *session,
+                                      const char *tool, const char *reason,
                                       uint64_t call, uint64_t epoch,
                                       uint64_t now_ms, uint64_t ttl_ms);
 wd_approval_state wd_approval_answer(wd_approvals *table, const char *session,
@@ -39,6 +40,8 @@ size_t wd_approval_pending(const wd_approvals *table, uint64_t now_ms);
 
 typedef struct {
   char session[WD_APPROVAL_SESSION_MAX];
+  char tool[64];
+  char reason[256];
   uint64_t call;
   uint64_t epoch;
   uint64_t expires_ms;
