@@ -44,6 +44,7 @@
 #include "net/quic.h"
 #include "proto/codec.h"
 #include "proto/frame.h"
+#include "proto/sse.h"
 
 #define WD_MAX_CONNS 256
 #define WD_MAX_SUBS 16
@@ -88,6 +89,9 @@ struct wd_run {
   uint8_t *http_body;
   size_t http_len;
   size_t http_cap;
+  wd_sse *sse;
+  void *sse_ctx;
+  size_t streamed;
 };
 
 
@@ -189,6 +193,12 @@ static void conn_release(wd_server *srv, wd_conn *conn);
 static cbor_item_t *session_cbor(wd_server *srv, wd_session *session);
 static void handle_session_prompt(wd_server *srv, wd_conn *conn, uint64_t id,
                                   cbor_item_t *params);
+typedef struct {
+  wd_server *srv;
+  wd_run *run;
+} stream_ctx;
+
+static int stream_event(void *ctx, const wd_sse_event *event);
 static wd_run *run_new(wd_server *srv, wd_session *session, char **err);
 static int apply_state(wd_server *srv, wd_session *session, wd_run *run);
 static wd_run *run_find(wd_server *srv, const char *session_id);
@@ -1116,6 +1126,10 @@ static cbor_item_t *dup_item(cbor_item_t *item) {
 static int turn_emit(void *ctx, const char *event, cbor_item_t *payload,
                      char **err) {
   wd_turn_ctx *tc = ctx;
+  if (strcmp(event, "text.delta") == 0 && tc->session != NULL) {
+    wd_run *streaming_run = run_find(tc->srv, tc->session->id);
+    if (streaming_run != NULL && streaming_run->streamed > 0) return 0;
+  }
   cbor_item_t *logged = payload != NULL ? dup_item(payload) : wd_map(0);
   uint64_t seq = 0;
   if (logged == NULL || wd_session_emit(tc->session, event, logged, &seq) != 0) {
@@ -2115,6 +2129,9 @@ static wd_run *run_new(wd_server *srv, wd_session *session, char **err) {
   run->http_body = NULL;
   run->http_len = 0;
   run->http_cap = 0;
+  run->sse = NULL;
+  run->sse_ctx = NULL;
+  run->streamed = 0;
   snprintf(run->session_id, sizeof(run->session_id), "%s", session->id);
   run->turn = wd_turn_new_pinned(srv->engine, dir, session->cwd, session->pins,
                                 session->pins_len, err);
@@ -2183,6 +2200,13 @@ static wd_run *run_new(wd_server *srv, wd_session *session, char **err) {
   char attach_buf[768];
   attachment_context(session, attach_buf, sizeof(attach_buf));
   wd_turn_set_context(run->turn, attach_buf);
+  run->sse_ctx = calloc(1, sizeof(stream_ctx));
+  if (run->sse_ctx != NULL) {
+    stream_ctx *sc = run->sse_ctx;
+    sc->srv = srv;
+    sc->run = run;
+    run->sse = wd_sse_create(stream_event, sc);
+  }
   run->next = srv->runs;
   srv->runs = run;
   return run;
@@ -2347,6 +2371,8 @@ static void run_free(wd_server *srv, wd_run *run) {
   persist_state(srv, run);
   wd_turn_free(run->turn);
   free(run->http_body);
+  if (run->sse != NULL) wd_sse_destroy(run->sse);
+  free(run->sse_ctx);
   free(run);
 }
 
@@ -2614,6 +2640,45 @@ static void tool_done(wd_server *srv, wd_run *run) {
   run_after(srv, run, rc, err);
 }
 
+static int stream_event(void *ctx, const wd_sse_event *event) {
+  stream_ctx *sc = ctx;
+  if (event->data == NULL || event->data_len < 12) return 0;
+  const char *at = NULL;
+  for (size_t i = 0; i + 11 < event->data_len; i++) {
+    if (memcmp(event->data + i, "\"content\":\"", 11) == 0) {
+      at = event->data + i + 11;
+      break;
+    }
+  }
+  if (at == NULL) return 0;
+  size_t room = (size_t)(event->data + event->data_len - at);
+  char text[2048];
+  size_t len = 0;
+  for (size_t i = 0; i < room && len + 1 < sizeof(text); i++) {
+    char c = at[i];
+    if (c == '\\' && i + 1 < room) {
+      char next = at[i + 1];
+      text[len++] = next == 'n' ? '\n' : next;
+      i++;
+      continue;
+    }
+    if (c == '"') break;
+    text[len++] = c;
+  }
+  if (len == 0) return 0;
+  wd_session *session = wd_session_find(&sc->srv->store, sc->run->session_id);
+  if (session == NULL) return 0;
+  cbor_item_t *logged = wd_map(1);
+  wd_put(logged, "text", wd_text_len(text, len));
+  uint64_t seq = 0;
+  if (wd_session_emit(session, "text.delta", logged, &seq) != 0) return 0;
+  cbor_item_t *out = wd_map(1);
+  wd_put(out, "text", wd_text_len(text, len));
+  conn_broadcast(sc->srv, session, "text.delta", seq, out);
+  sc->run->streamed++;
+  return 0;
+}
+
 static int read_stream(wd_server *srv, wd_run *run, bool *eof) {
   (void)srv;
   *eof = false;
@@ -2636,6 +2701,7 @@ static int read_stream(wd_server *srv, wd_run *run, bool *eof) {
       *eof = true;
       return 0;
     }
+    if (run->sse != NULL) (void)wd_sse_feed(run->sse, (const char *)run->http_body + run->http_len, (size_t)got);
     run->http_len += (size_t)got;
     return 0;
   }

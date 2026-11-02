@@ -1585,3 +1585,17 @@ provider path is covered by the subagent and tool gates, so a mistake here would
 What this buys immediately is bounded memory per read rather than per answer, and what it enables is step four: the
 same buffer is where the SSE parser will look for content as it fills. The deltas are still not emitted; that is the
 next edit, and it is the one a gate can finally measure.
+
+Hundred-and-nineteenth: deltas stream. Each pipe read is fed to a per-run `wd_sse` instance whose callback pulls `content`
+out of the event data and appends a durable `text.delta` immediately, so a turn's text now arrives while the provider
+is still generating. The driver's own single delta is suppressed when the run has already streamed at least one, which
+keeps the transcript from repeating the answer and lets history rebuild from the streamed pieces alone.
+
+That completes the five-step plan: helper streams, parent reads to EOF in a growing buffer, the daemon parses
+incrementally, and the driver stays quiet. All three suites pass — the subagent, tool and crash gates all go through
+the provider path, so an ordering mistake would have broken them.
+
+Honest caveat: the *timing* assertion the plan promised — first `text.delta` before `turn.end` under
+`WARD_FAKE_DELAY_MS` — is still not written. The behaviour is implemented and nothing regressed, but "delta arrives
+early" is asserted by no test yet; the next slice is that assertion, and it either passes quickly or shows the
+suppression guard firing where it should not.
