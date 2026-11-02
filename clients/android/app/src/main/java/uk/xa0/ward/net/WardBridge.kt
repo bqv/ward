@@ -32,6 +32,8 @@ class WardBridge(private val connection: WardConnection) {
 
     private val models = ConcurrentHashMap<String, ModelRoute>()
     private val approvals = ConcurrentHashMap<String, ApprovalRef>()
+    private val terminals = ConcurrentHashMap<String, JSONObject>()
+    private val subagentParents = ConcurrentHashMap<String, String>()
 
     fun rememberApproval(eventId: String, session: String, call: Long, epoch: Long) {
         approvals[eventId] = ApprovalRef(session, call, epoch)
@@ -39,6 +41,10 @@ class WardBridge(private val connection: WardConnection) {
 
     fun forgetApproval(eventId: String) {
         approvals.remove(eventId)
+    }
+
+    fun noteSubagent(parent: String, child: String) {
+        if (parent.isNotEmpty() && child.isNotEmpty()) subagentParents[child] = parent
     }
 
     suspend fun call(method: String, args: JSONObject): Any? {
@@ -139,10 +145,20 @@ class WardBridge(private val connection: WardConnection) {
                 JSONObject().put("interrupted", api.interruptSubagent(session))
             }
 
-            "job/list" -> JSONObject().put("jobs", JSONArray(api.listJobs().map { it.toJson() }))
-            "job/kill" -> JSONObject().put("killed", api.killJob(request.optString("job").ifEmpty { request.optString("id") }))
+            "job/list" -> {
+                val session = request.optString("sessionId")
+                val jobs = api.listJobs().filter { session.isEmpty() || it.text("session") == session }
+                JSONObject().put("jobs", JSONArray(jobs.map { jobRow(it) }))
+            }
+            "job/kill" -> JSONObject().put(
+                "killed",
+                api.killJob(
+                    request.optString("job").ifEmpty { request.optString("jobId") }
+                        .ifEmpty { request.optString("id") },
+                ),
+            )
 
-            "schedule/catalog" -> JSONArray()
+            "schedule/catalog" -> JSONArray(api.listSchedules().map { scheduleRow(it) })
             "schedule/history" -> JSONObject().put("items", JSONArray())
             "schedule/delete" -> JSONObject().put("deleted", api.deleteSchedule(
                 request.optString("schedule").ifEmpty { request.optString("id") },
@@ -152,34 +168,51 @@ class WardBridge(private val connection: WardConnection) {
 
             "\$events/result" -> answerApproval(args)
 
-            "terminal/create" -> api.openTerminal(
-                request.optString("sessionId").ifEmpty { request.optString("agentId") },
-                request.optString("command").takeIf { it.isNotBlank() },
-                request.optInt("rows", 0).takeIf { it > 0 },
-                request.optInt("cols", 0).takeIf { it > 0 },
-            ).toJson()
+            "terminal/environment" -> terminalEnvironment(
+                args.optString("agentId").ifEmpty { args.optString("sessionId") }
+                    .ifEmpty { request.optString("agentId") },
+            )
+
+            "terminal/shells" -> JSONArray().put(JSONObject()
+                .put("path", "sh")
+                .put("args", JSONArray().put("-i"))
+                .put("name", "Shell"))
+
+            "terminal/list" -> {
+                val owner = args.optString("sessionId").ifEmpty { args.optString("agentId") }
+                    .ifEmpty { request.optString("sessionId") }
+                JSONArray(terminals.values.filter { it.optString("owner") == owner })
+            }
+
+            "terminal/create" -> createTerminal(
+                args.optString("agentId").ifEmpty { args.optString("sessionId") },
+                args.optJSONObject("request") ?: request,
+            )
 
             "terminal/write" -> JSONObject().put(
                 "written",
                 api.writeTerminal(
-                    request.optString("terminalId").ifEmpty { request.optString("terminal") },
-                    request.optString("data"),
+                    terminalIdOf(args),
+                    args.optString("data").ifEmpty { request.optString("data") },
                 ),
             )
 
             "terminal/resize" -> JSONObject().put(
                 "resized",
                 api.resizeTerminal(
-                    request.optString("terminalId").ifEmpty { request.optString("terminal") },
-                    request.optInt("rows", 24),
-                    request.optInt("cols", 80),
+                    terminalIdOf(args),
+                    args.optInt("rows", 24),
+                    args.optInt("cols", 80),
                 ),
             )
 
-            "terminal/close" -> JSONObject().put(
-                "closed",
-                api.closeTerminal(request.optString("terminalId").ifEmpty { request.optString("terminal") }),
-            )
+            "terminal/close" -> {
+                val terminal = terminalIdOf(args)
+                terminals.remove(terminal)
+                JSONObject().put("closed", api.closeTerminal(terminal))
+            }
+
+            "terminal/rename" -> JSONObject()
 
             // Ward has no Workspace registry, plugin bundles, command catalogue or
             // settings document. These empty shapes are the honest answer: the
@@ -189,22 +222,27 @@ class WardBridge(private val connection: WardConnection) {
                 .put("settings", JSONObject())
                 .put("localProviders", JSONObject())
             "settings/update" -> JSONObject()
-            "pluginManager/listBundles" -> JSONArray()
-            "pluginManager/setBundleEnabled" -> JSONObject()
+            "pluginManager/listBundles" -> JSONArray(api.listModules().map { moduleRow(it) })
+            "pluginManager/setBundleEnabled" -> {
+                val name = request.optString("name")
+                if (request.optBoolean("enabled", false) && name.isNotEmpty()) {
+                    api.reloadModule(name).toJson()
+                } else {
+                    JSONObject()
+                }
+            }
             "commands/list" -> JSONArray()
             "agentPresets/list" -> JSONArray()
-            "permissionPresets/catalog" -> JSONObject().put("presets", JSONArray())
+            "permissionPresets/catalog" -> permissionCatalog()
+            "commands/execute" -> runCommand(args)
             "directoryPicker/list" -> JSONObject()
                 .put("path", request.optString("path"))
                 .put("home", request.optString("path"))
                 .put("crumbs", JSONArray())
                 .put("entries", JSONArray())
                 .put("truncated", false)
-            "workspaceFiles/list" -> JSONObject()
-                .put("path", request.optString("path"))
-                .put("entries", JSONArray())
-                .put("truncated", false)
-            "workspaceFiles/read" -> JSONObject().put("text", "")
+            "workspaceFiles/list" -> listFiles(request)
+            "workspaceFiles/read" -> readFileText(request)
             "workspaceFiles/stat" -> JSONObject()
             "schedule/set" -> JSONObject().put(
                 "schedule",
@@ -232,10 +270,71 @@ class WardBridge(private val connection: WardConnection) {
     suspend fun callBytes(method: String, args: JSONObject): ByteArray {
         if (method != "workspaceFiles/readBytes") return ByteArray(0)
         val request = args.optJSONObject("request") ?: args
+        val session = request.optString("workspaceFileScopeId").ifEmpty { request.optString("sessionId") }
         val path = request.optString("path")
-        if (path.isBlank()) return ByteArray(0)
-        val result = api.readFile(path).asMap()
-        return result.bytes("data") ?: result.bytes("bytes") ?: ByteArray(0)
+        if (session.isBlank() || path.isBlank()) return ByteArray(0)
+        val range = request.optJSONObject("options")?.optJSONObject("range")
+            ?: request.optJSONObject("range")
+        val offset = range?.optLong("offset", 0L) ?: 0L
+        val asked = range?.optInt("length", 0)?.takeIf { it > 0 } ?: DEFAULT_BLOB_BYTES
+        val length = asked.coerceIn(1, MAX_BLOB_REQUEST)
+        val chunks = java.io.ByteArrayOutputStream(length)
+        var at = offset
+        var remaining = length
+        while (remaining > 0) {
+            val want = minOf(remaining, MAX_BLOB_BYTES)
+            val result = api.readFileBlob(session, path, at, want)
+            val data = result.bytes("data") ?: break
+            if (data.isEmpty()) break
+            chunks.write(data)
+            at += data.size
+            remaining -= data.size
+            if (data.size < want) break
+        }
+        return multipartBytes(chunks.toByteArray())
+    }
+
+    private suspend fun listFiles(request: JSONObject): JSONObject {
+        val session = request.optString("workspaceFileScopeId").ifEmpty { request.optString("sessionId") }
+        val raw = request.optString("path")
+        val path = if (raw.isEmpty() || raw == ".") "" else raw
+        val result = api.listFiles(session, path)
+        val entries = JSONArray()
+        result.array("entries")?.items?.forEach { item ->
+            val entry = (item as? Cbor.Map) ?: return@forEach
+            entries.put(JSONObject()
+                .put("name", entry.text("name").orEmpty())
+                .put("type", when (entry.text("kind")) {
+                    "dir" -> "directory"
+                    "file" -> "file"
+                    else -> "other"
+                })
+                .put("size", entry.long("size") ?: 0L))
+        }
+        return JSONObject()
+            .put("path", result.text("path") ?: raw.ifEmpty { "." })
+            .put("entries", entries)
+            .put("truncated", result.bool("truncated") ?: false)
+    }
+
+    private suspend fun readFileText(request: JSONObject): JSONObject {
+        val session = request.optString("workspaceFileScopeId").ifEmpty { request.optString("sessionId") }
+        val path = request.optString("path")
+        val result = api.readFileText(session, path)
+        val text = result.text("text").orEmpty()
+        return JSONObject()
+            .put("text", text)
+            .put("lines", text.count { it == '\n' } + if (text.endsWith('\n')) 0 else 1)
+            .put("eof", true)
+            .put("bytes", result.long("size") ?: text.toByteArray(Charsets.UTF_8).size.toLong())
+            .put("absolutePath", path)
+    }
+
+    private fun multipartBytes(data: ByteArray): ByteArray {
+        val head = "--ward\r\nContent-Disposition: form-data; name=\"bytes-0\"\r\n\r\n"
+            .toByteArray(Charsets.ISO_8859_1)
+        val tail = "\r\n--ward--\r\n".toByteArray(Charsets.ISO_8859_1)
+        return head + data + tail
     }
 
     private suspend fun prompt(request: JSONObject): JSONObject {
@@ -322,6 +421,144 @@ class WardBridge(private val connection: WardConnection) {
             .put("selected", JSONObject().put("provider", provider).put("model", model))
     }
 
+    /**
+     * Ward's three presets behind the DSH permission chip's names. The mapping is
+     * not cosmetic: `default` asks before a write, `reads-only` denies it and
+     * `workspace` asks too but also requires a read before an overwrite. There is
+     * no full-access preset in ward, so that DSH option is not offered.
+     */
+    private suspend fun permissionCatalog(): JSONObject {
+        val policy = api.policyList()
+        val options = JSONArray()
+        policy.array("presets")?.items?.forEach { item ->
+            val preset = item as? Cbor.Map ?: return@forEach
+            val id = preset.text("id").orEmpty()
+            if (id.isEmpty()) return@forEach
+            options.put(JSONObject()
+                .put("value", dshPresetOf(id))
+                .put("name", preset.text("name").orEmpty().ifEmpty { dshPresetOf(id) })
+                .put("description", preset.text("description").orEmpty()))
+        }
+        return JSONObject()
+            .put("options", options)
+            .put("current", dshPresetOf(policy.text("current").orEmpty().ifEmpty { "default" }))
+    }
+
+    private suspend fun runCommand(args: JSONObject): JSONObject {
+        val line = args.optString("line").trim()
+        val preset = line.removePrefix("/permission ").trim()
+        if (line.startsWith("/permission ") && preset.isNotEmpty()) {
+            val wardPreset = wardPresetOf(preset)
+                ?: return JSONObject().put("result", JSONObject()
+                    .put("kind", "error")
+                    .put("text", "ward has no $preset access mode"))
+            api.policySelect(wardPreset)
+            return JSONObject().put("result", JSONObject()
+                .put("kind", "text")
+                .put("text", "Access mode: ${dshPresetOf(wardPreset)}"))
+        }
+        if (line == "/plan off") {
+            return JSONObject().put("result", JSONObject()
+                .put("kind", "text")
+                .put("text", "Plan mode is not a ward switch"))
+        }
+        return JSONObject().put("result", JSONObject()
+            .put("kind", "error")
+            .put("text", "ward does not serve host command $line"))
+    }
+
+    private fun dshPresetOf(ward: String): String = when (ward) {
+        "reads-only" -> "read-only"
+        "workspace" -> "workspace-write"
+        "default" -> "default"
+        else -> ward
+    }
+
+    private fun wardPresetOf(dsh: String): String? = when (dsh) {
+        "read-only", "reads-only" -> "reads-only"
+        "workspace-write", "workspace" -> "workspace"
+        "default" -> "default"
+        else -> null
+    }
+
+    private suspend fun terminalEnvironment(sessionId: String): JSONObject {
+        val session = api.getSession(sessionId)
+        return JSONObject()
+            .put("cwd", session.cwd)
+            .put("maxInputBytes", 64 * 1024)
+            .put("maxCols", 500)
+            .put("maxRows", 200)
+            .put("scrollback", 1000)
+    }
+
+    private suspend fun createTerminal(sessionId: String, request: JSONObject): JSONObject {
+        val cols = request.optInt("cols", 80).coerceIn(1, 500)
+        val rows = request.optInt("rows", 24).coerceIn(1, 200)
+        val shell = request.optString("shellPath").takeIf { it.isNotBlank() } ?: "sh"
+        val opened = api.openTerminal(sessionId, shell, rows, cols)
+        val id = opened.text("terminal").orEmpty()
+        android.util.Log.d("WardBridge", "terminal/open session=$sessionId shell=$shell id=$id")
+        val info = JSONObject()
+            .put("id", id)
+            .put("title", "Shell")
+            .put("shell", JSONObject().put("path", shell).put("args", JSONArray()))
+            .put("cwd", "")
+            .put("cols", cols)
+            .put("rows", rows)
+            .put("state", "running")
+            .put("owner", sessionId)
+        if (id.isNotEmpty()) terminals[id] = info
+        return info
+    }
+
+    private fun terminalIdOf(request: JSONObject): String =
+        request.optString("id").ifEmpty { request.optString("terminalId") }.ifEmpty { request.optString("terminal") }
+
+    private fun moduleRow(item: Cbor.Map): JSONObject {
+        val name = item.text("name").orEmpty()
+        val valid = item.bool("valid") != false
+        val row = JSONObject()
+            .put("name", name)
+            .put("version", item.text("version").orEmpty())
+            .put("meta", JSONObject().put("title", name))
+            .put("enabled", valid)
+            .put("installed", true)
+            .put("optional", false)
+            .put("readOnlyReason", "ward reloads modules as one registry; there is no per-module switch")
+        if (!valid) {
+            row.put("error", JSONObject()
+                .put("code", "invalid")
+                .put("diagnostic", "the module failed its registry validation"))
+        }
+        return row
+    }
+
+    private fun jobRow(item: Cbor.Map): JSONObject {
+        val state = item.text("state").orEmpty().ifEmpty { "running" }
+        return JSONObject()
+            .put("id", item.text("job").orEmpty())
+            .put("kind", "turn")
+            .put("label", "turn")
+            .put("owner", item.text("session").orEmpty())
+            .put("status", state)
+            .put("startedAt", 0L)
+            .put("output", JSONObject().put("total", 0))
+    }
+
+    private fun scheduleRow(item: Cbor.Map): JSONObject {
+        val next = item.long("next_ms") ?: 0L
+        val at = if (next > 0) java.time.Instant.ofEpochMilli(next).toString() else ""
+        return JSONObject()
+            .put("id", item.text("schedule").orEmpty())
+            .put("sessionId", item.text("session").orEmpty())
+            .put("title", item.text("cron").orEmpty())
+            .put("prompt", "")
+            .put("status", "active")
+            .put("kind", "cron")
+            .put("expression", item.text("cron").orEmpty())
+            .put("scheduledAt", at)
+    }
+
     private fun routeOf(model: String): String? {
         if (model.isBlank()) return null
         return models.values.firstOrNull { "${it.provider}|${it.model}" == model }?.catalogId
@@ -343,6 +580,7 @@ class WardBridge(private val connection: WardConnection) {
                     ),
                 )
             }
+            val parent = subagentParents[session.id]
             out.put(JSONObject()
                 .put("sessionId", session.id)
                 .put("cwd", session.cwd)
@@ -350,10 +588,19 @@ class WardBridge(private val connection: WardConnection) {
                 .put("running", false)
                 .put("agentAvailable", true)
                 .put("blank", false)
-                .put("origin", "agent")
+                .put("origin", if (parent != null) "subagent" else "agent")
+                .put("archived", session.archived)
+                .put("pinned", session.pinned)
+                .apply { if (parent != null) put("parentSessionId", parent) }
                 .put("projections", JSONObject().put("values", values)))
         }
         return out
+    }
+
+    private companion object {
+        const val DEFAULT_BLOB_BYTES = 256 * 1024
+        const val MAX_BLOB_BYTES = 1024 * 1024
+        const val MAX_BLOB_REQUEST = 4 * 1024 * 1024
     }
 
     private fun textOf(content: JSONArray?): String {

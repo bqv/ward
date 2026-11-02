@@ -231,6 +231,11 @@ class DshClient(context: Context) {
         bridge?.forgetApproval(eventId)
     }
 
+    /** Remember the parent a ward subagent announced, for the next session list. */
+    fun noteSubagent(parent: String, child: String) {
+        bridge?.noteSubagent(parent, child)
+    }
+
     companion object {
         private const val TAG = "WardRoute"
 

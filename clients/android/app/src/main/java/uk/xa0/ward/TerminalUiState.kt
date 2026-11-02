@@ -47,7 +47,7 @@ data class TerminalUiState(
      * its Workspace's directory, or the cwd it was created at — so a session that
      * belongs to no Workspace still lands on a working shell rather than a refusal.
      */
-    val seat: TerminalSeat = TerminalSeat.HOST_SHELL,
+    val seat: TerminalSeat = TerminalSeat.THIS_SESSION,
     /** The seats on offer, each labelled with the policy in force in it. */
     val seats: List<SeatOption> = emptyList(),
     /**

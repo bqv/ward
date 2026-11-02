@@ -70,6 +70,7 @@ typedef struct wd_out {
 typedef struct wd_run wd_run;
 
 typedef struct wd_queue {
+  bool announced;
   struct wd_queue *next;
   char session[WD_ID_LEN];
   char *text;
@@ -1302,29 +1303,31 @@ static size_t active_runs(wd_server *srv) {
 }
 
 static void start_session_turn(wd_server *srv, wd_session *session,
-                               const char *text) {
+                               const char *text, bool announced) {
   char *err = NULL;
   wd_run *run = run_new(srv, session, &err);
   if (run != NULL) {
     cbor_item_t *history = NULL;
     if (wd_session_history(session, history_budget(srv, session), &history) == 0)
       wd_turn_set_history(run->turn, history);
-    cbor_item_t *asked = wd_map(1);
-    wd_put(asked, "text", wd_text(text));
-    uint64_t seq = 0;
-    char when[64];
-    wd_now_text(when, sizeof(when));
-    cbor_item_t *time_event = wd_map(1);
-    wd_put(time_event, "text", wd_text(when));
-    cbor_item_t *time_payload = wd_map(1);
-    wd_put(time_payload, "text", wd_text(when));
-    uint64_t time_seq = 0;
-    if (wd_session_emit(session, "session.time", time_payload, &time_seq) == 0)
-      conn_broadcast(srv, session, "session.time", time_seq, time_event);
-    if (wd_session_emit(session, "session.prompted", asked, &seq) == 0) {
-      cbor_item_t *event = wd_map(1);
-      wd_put(event, "text", wd_text(text));
-      conn_broadcast(srv, session, "session.prompted", seq, event);
+    if (!announced) {
+      cbor_item_t *asked = wd_map(1);
+      wd_put(asked, "text", wd_text(text));
+      uint64_t seq = 0;
+      char when[64];
+      wd_now_text(when, sizeof(when));
+      cbor_item_t *time_event = wd_map(1);
+      wd_put(time_event, "text", wd_text(when));
+      cbor_item_t *time_payload = wd_map(1);
+      wd_put(time_payload, "text", wd_text(when));
+      uint64_t time_seq = 0;
+      if (wd_session_emit(session, "session.time", time_payload, &time_seq) == 0)
+        conn_broadcast(srv, session, "session.time", time_seq, time_event);
+      if (wd_session_emit(session, "session.prompted", asked, &seq) == 0) {
+        cbor_item_t *event = wd_map(1);
+        wd_put(event, "text", wd_text(text));
+        conn_broadcast(srv, session, "session.prompted", seq, event);
+      }
     }
     wd_turn_ctx tc = {srv, session};
     int rc = wd_turn_prompt(run->turn, text, turn_emit, &tc, &err);
@@ -1392,10 +1395,22 @@ static void drain_queue(wd_server *srv) {
     if (head != NULL && !device_free(srv, head)) break;
     srv->queue = item->next;
     wd_session *session = wd_session_find(&srv->store, item->session);
-    if (session != NULL) start_session_turn(srv, session, item->text);
+    if (session != NULL)
+      start_session_turn(srv, session, item->text, item->announced);
     free(item->text);
     free(item);
   }
+}
+
+static bool enqueue_turn(wd_server *srv, wd_session *session, const char *text,
+                         const char *job);
+
+static bool enqueue_prompt(wd_server *srv, wd_session *session,
+                           const char *text) {
+  if (!enqueue_turn(srv, session, text, NULL)) return false;
+  for (wd_queue *at = srv->queue; at != NULL; at = at->next)
+    if (strcmp(at->session, session->id) == 0) at->announced = true;
+  return true;
 }
 
 static bool enqueue_turn(wd_server *srv, wd_session *session, const char *text,
@@ -2788,9 +2803,38 @@ static void handle_session_prompt(wd_server *srv, wd_conn *conn, uint64_t id,
     return;
   }
   if (run_find(srv, session->id) != NULL) {
+    size_t ahead = 0;
+    for (wd_queue *at = srv->queue; at != NULL; at = at->next)
+      if (strcmp(at->session, session->id) == 0) ahead++;
+    if (ahead >= 8 || !enqueue_prompt(srv, session, text)) {
+      free(session_id);
+      free(text);
+      conn_send_error(conn, id, WD_ERR_BUSY, "the queue is full");
+      conn_arm(srv, conn);
+      return;
+    }
+    cbor_item_t *when_payload = wd_map(1);
+    wd_put(when_payload, "text", wd_text(""));
+    cbor_item_t *when_event = wd_map(1);
+    wd_put(when_event, "text", wd_text(""));
+    uint64_t when_seq = 0;
+    if (wd_session_emit(session, "session.time", when_payload, &when_seq) == 0)
+      conn_broadcast(srv, session, "session.time", when_seq, when_event);
+    cbor_item_t *asked_payload = wd_map(1);
+    wd_put(asked_payload, "text", wd_text(text));
+    cbor_item_t *asked_event = wd_map(1);
+    wd_put(asked_event, "text", wd_text(text));
+    uint64_t asked_seq = 0;
+    if (wd_session_emit(session, "session.prompted", asked_payload,
+                        &asked_seq) == 0)
+      conn_broadcast(srv, session, "session.prompted", asked_seq, asked_event);
+    cbor_item_t *result = wd_map(3);
+    wd_put(result, "session", wd_text(session->id));
+    wd_put(result, "queued", cbor_build_bool(true));
+    wd_put(result, "ahead", wd_uint(ahead));
     free(session_id);
     free(text);
-    conn_send_error(conn, id, WD_ERR_BUSY, "the session is already busy");
+    conn_send_cached(conn, id, wd_response_ok(id, result));
     conn_arm(srv, conn);
     return;
   }

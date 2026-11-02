@@ -2019,3 +2019,12 @@ carried the tool name; `wd_turn_pending_tool` exposes it, and both server call s
 
 `approval_test` asserts an entry with both fields. Suite green in all three builds, and the protocol document no longer says
 the fields are missing.
+
+Hundred-and-fifty-third: a prompt sent while a turn runs is queued, not refused. `session.prompt` answers
+`{session, queued: true, ahead: N}`, appends `session.prompted` immediately so the transcript shows the user row, and
+starts the turn when the running one ends; the queued item carries `announced` so `start_session_turn` does not emit the
+same two events twice. A queue deeper than eight answers the busy error rather than a false queued answer.
+
+Green in the suite, but honestly: this path has **no gate of its own**. The behaviour needs a turn that is still running
+when the second prompt arrives, which means a slowed provider; `gate_tool` has the delay machinery and is where the
+assertion belongs. Recorded rather than claimed.

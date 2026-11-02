@@ -144,12 +144,57 @@ class WardApi(private val connection: WardConnection) {
 
     suspend fun statsGlobal(): Cbor.Map = connection.call("stats.global", Cbor.Map(emptyList())).asMap()
 
+    suspend fun setSystem(id: String, text: String): Cbor =
+        connection.call("session.set_system", cborMap("id" to id.cbor(), "text" to text.cbor()))
+
+    suspend fun policyList(): Cbor.Map =
+        connection.call("policy.list", Cbor.Map(emptyList())).asMap()
+
+    suspend fun policySelect(id: String): Cbor =
+        connection.call("policy.select", cborMap("id" to id.cbor()))
+
+    suspend fun listApprovals(): List<Cbor.Map> =
+        connection.call("approval.list", Cbor.Map(emptyList())).map("approvals")?.asArray()?.items
+            ?.mapNotNull { it as? Cbor.Map }.orEmpty()
+
+    // ---------------------------------------------------------------- files
+
+    suspend fun listFiles(id: String, path: String): Cbor.Map =
+        connection.call("session.file_list", cborMap("id" to id.cbor(), "path" to path.cbor())).asMap()
+
+    suspend fun readFileText(id: String, path: String): Cbor.Map =
+        connection.call("session.file_read", cborMap("id" to id.cbor(), "path" to path.cbor()), 120_000).asMap()
+
+    suspend fun readFileBlob(id: String, path: String, offset: Long, length: Int): Cbor.Map =
+        connection.call(
+            "session.file_read_blob",
+            cborMap(
+                "id" to id.cbor(),
+                "path" to path.cbor(),
+                "offset" to offset.cbor(),
+                "len" to length.cbor(),
+            ),
+            120_000,
+        ).asMap()
+
     // ---------------------------------------------------------------- attachments
 
     suspend fun addAttachment(id: String, name: String, data: Cbor): Cbor.Map =
         connection.call(
             "attachment.add",
             cborMap("id" to id.cbor(), "name" to name.cbor(), "data" to data),
+            120_000,
+        ).asMap()
+
+    suspend fun readAttachmentBlob(id: String, name: String, offset: Long, length: Int): Cbor.Map =
+        connection.call(
+            "attachment.read_blob",
+            cborMap(
+                "id" to id.cbor(),
+                "name" to name.cbor(),
+                "offset" to offset.cbor(),
+                "len" to length.cbor(),
+            ),
             120_000,
         ).asMap()
 

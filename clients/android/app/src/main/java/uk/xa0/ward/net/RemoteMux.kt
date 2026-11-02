@@ -28,6 +28,7 @@ import uk.xa0.ward.model.AnswerDelivery
 import uk.xa0.ward.model.HostVersion
 import uk.xa0.ward.model.hostVersionFromReadyFrame
 import uk.xa0.ward.proto.Cbor
+import uk.xa0.ward.proto.WardApi
 import uk.xa0.ward.proto.WardConnection
 import uk.xa0.ward.proto.WardConnectionException
 import uk.xa0.ward.proto.WardEvent
@@ -81,7 +82,11 @@ class RemoteMux(
     private val lastFrameAt = AtomicLong(0L)
     private val approvalFrames = MutableSharedFlow<JSONObject>(replay = 16, extraBufferCapacity = 64)
     private val forwardedEvents = MutableSharedFlow<JSONObject>(replay = 16, extraBufferCapacity = 64)
+    private val projectionFrames = MutableSharedFlow<JSONObject>(replay = 16, extraBufferCapacity = 64)
+    private val terminalFrames = MutableSharedFlow<JSONObject>(replay = 32, extraBufferCapacity = 256)
+    private val terminalSeq = AtomicLong(1)
     private val nextSynthetic = AtomicLong(1)
+    private val knownApprovals = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
 
     init { supervise() }
 
@@ -89,12 +94,48 @@ class RemoteMux(
 
     /** Feed one translated ward approval to the `$events` collectors. */
     internal fun publishApproval(frame: JSONObject) {
+        val id = frame.optString("eventId")
+        if (id.isNotEmpty()) knownApprovals[id] = true
         approvalFrames.tryEmit(frame)
     }
 
     /** Tell the attention centre that a ward approval is settled. */
     internal fun cancelApproval(eventId: String) {
+        knownApprovals.remove(eventId)
         onWaterfallCancel?.invoke(eventId)
+    }
+
+    /** One control-stream projection delta, in the shape `handleControlFrame` reads. */
+    internal fun publishProjection(sessionId: String, key: String, value: Any?) {
+        projectionFrames.tryEmit(
+            JSONObject()
+                .put("type", "projection")
+                .put("sessionId", sessionId)
+                .put("key", key)
+                .put("value", value ?: JSONObject.NULL),
+        )
+    }
+
+    /** One `terminal.output` broadcast, keyed by ward's terminal handle. */
+    internal fun publishTerminal(payload: Cbor.Map) {
+        val id = payload.text("terminal").orEmpty()
+        if (id.isEmpty()) return
+        val eof = payload.bool("eof") == true
+        terminalFrames.tryEmit(JSONObject()
+            .put("type", if (eof) "eof" else "output")
+            .put("terminal", id)
+            .put("data", payload.text("data").orEmpty())
+            .put("sequence", terminalSeq.getAndIncrement()))
+    }
+
+    /** Tell the roster that a child session exists before the next pull sees it. */
+    internal fun publishSessionAdded(row: JSONObject) {
+        forwardedEvents.tryEmit(
+            JSONObject()
+                .put("type", "emit")
+                .put("event", "api-session/added")
+                .put("args", JSONArray().put(row)),
+        )
     }
 
     /** A ward turn boundary is the DSH live-status fact for one session. */
@@ -201,10 +242,59 @@ class RemoteMux(
                 deliverWaterfall(frame)
             }
         }
+        val polls = scope.launch { pollApprovals(active) }
         try {
             forwardedEvents.collect { event -> out.trySend(StreamEvent.Item(event)) }
         } finally {
             approvals.cancel()
+            polls.cancel()
+        }
+    }
+
+    /**
+     * Ward answers `approval.list` across every session. That is what makes a
+     * background approval visible: the follow stream only ever sees the session
+     * it is attached to, and there is no push for a card raised elsewhere.
+     *
+     * The poll is deliberately slow. It is a reconciliation, not the live path —
+     * a followed session publishes its own `approval.requested` immediately — and
+     * five seconds is inside the daemon's own approval lifetime by a wide margin.
+     */
+    private suspend fun pollApprovals(active: WardConnection) {
+        val api = WardApi(active)
+        while (scope.isActive && !closed) {
+            val pending = runCatching { api.listApprovals() }.getOrNull()
+            if (pending == null) {
+                delay(5_000)
+                continue
+            }
+            if (pending.isNotEmpty()) Log.d(TAG, "approval.list: ${pending.size} pending")
+            val seen = HashSet<String>(pending.size)
+            for (info in pending) {
+                val session = info.text("session").orEmpty()
+                val call = info.long("call") ?: 0L
+                val epoch = info.long("epoch") ?: 0L
+                if (session.isEmpty()) continue
+                val eventId = approvalEventId(session, call, epoch)
+                seen += eventId
+                if (knownApprovals[eventId] == true) continue
+                client.rememberApproval(eventId, session, call, epoch)
+                val tool = info.text("tool").orEmpty().ifEmpty { "tool call $call" }
+                val reason = info.text("reason").orEmpty()
+                publishApproval(JSONObject()
+                    .put("type", "waterfall")
+                    .put("event", "approval/request")
+                    .put("eventId", eventId)
+                    .put("agentId", session)
+                    .put("request", JSONObject()
+                        .put("toolName", tool)
+                        .put("reason", reason)))
+            }
+            knownApprovals.keys.toList().filter { it !in seen }.forEach { eventId ->
+                client.forgetApproval(eventId)
+                cancelApproval(eventId)
+            }
+            delay(5_000)
         }
     }
 
@@ -251,7 +341,7 @@ class RemoteMux(
         val subscription = active.resume(sessionId, 0)
         val header = subscription.session
         if (header != null) {
-            out.trySend(StreamEvent.Item(JSONObject()
+            val snapshot = JSONObject()
                 .put("type", "snapshot")
                 .put("header", JSONObject()
                     .put("id", header.id)
@@ -259,14 +349,29 @@ class RemoteMux(
                     .put("createdAt", header.created))
                 .put("records", JSONArray())
                 .put("cursor", 0)
-                .put("hasMore", false)))
+                .put("hasMore", false)
+            statsProjection(active, sessionId)?.let {
+                snapshot.put("projections", JSONObject().put("values", it))
+            }
+            out.trySend(StreamEvent.Item(snapshot))
         }
         val translator = FollowTranslator(sessionId, client)
+        var replaying = true
         try {
             subscription.events.collect { event ->
                 lastFrameAt.set(System.currentTimeMillis())
-                if (event.kind == "replay.end") return@collect
-                if (event.kind == "terminal.output") return@collect
+                if (event.kind == "replay.end") {
+                    replaying = false
+                    return@collect
+                }
+                if (event.kind == "terminal.output") {
+                    client.mux?.publishTerminal(event.payload)
+                    return@collect
+                }
+                // A historical approval is not a live card. The daemon's
+                // `approval.list` is the authority for what is still parked, and
+                // the poll above is what raises one from the past.
+                if (replaying && event.kind == "approval.requested") return@collect
                 translator.translate(event).forEach { value ->
                     out.trySend(StreamEvent.Item(value))
                 }
@@ -276,45 +381,117 @@ class RemoteMux(
         }
     }
 
+    /**
+     * Ward's whole-log counters, in the two projection blocks the copied stats
+     * pills already read, plus the policy preset behind the access chip.
+     */
+    private suspend fun statsProjection(active: WardConnection, sessionId: String): JSONObject? {
+        val stats = runCatching { WardApi(active).statsSession(sessionId) }.getOrNull() ?: return null
+        val turns = stats.long("turns") ?: 0L
+        val prompt = stats.long("prompt_tokens") ?: 0L
+        val cache = stats.long("cache_tokens") ?: 0L
+        val output = stats.long("predicted_tokens") ?: 0L
+        val permission = runCatching { WardApi(active).policyList() }.getOrNull()
+            ?.text("current").orEmpty()
+            ?.let {
+                when (it) {
+                    "reads-only" -> "read-only"
+                    "workspace" -> "workspace-write"
+                    else -> it
+                }
+            }
+        val projection = JSONObject()
+            .put("sessionStats", JSONObject()
+                .put("turns", turns)
+                .put("steps", turns))
+            .put("tokenUsage", JSONObject()
+                .put("uncachedInputTokens", (prompt - cache).coerceAtLeast(0))
+                .put("cacheReadTokens", cache)
+                .put("cacheWriteTokens", 0)
+                .put("outputTokens", output))
+        if (!permission.isNullOrEmpty()) projection.put("permission", permission)
+        return projection
+    }
+
     private suspend fun collectControl(out: kotlinx.coroutines.channels.ProducerScope<StreamEvent>) {
         out.trySend(StreamEvent.Item(JSONObject()
             .put("type", "baseline")
             .put("value", JSONObject()
                 .put("queues", JSONObject())
                 .put("projections", JSONObject()))))
-        delay(Long.MAX_VALUE)
+        projectionFrames.collect { frame -> out.trySend(StreamEvent.Item(frame)) }
     }
 
+    /**
+     * Ward has no Workspace registry, so the drawer's grouping is derived from the
+     * session directories themselves. That is a client-owned view, not host state:
+     * the id is the cwd, the title is its last segment, and membership follows the
+     * roster's own order. A session with no cwd is left out of every group, which
+     * is what the drawer's flat "Ungrouped" section already means.
+     */
     private suspend fun collectWorkspaces(out: kotlinx.coroutines.channels.ProducerScope<StreamEvent>) {
-        val all = runCatching { client.listSessions() }.getOrNull()
-        val archived = JSONArray()
-        val pinned = JSONArray()
-        all?.optJSONArray("items")?.let { items ->
-            for (i in 0 until items.length()) {
-                val row = items.optJSONObject(i) ?: continue
-                val id = row.optString("sessionId")
-                if (row.optBoolean("archived")) archived.put(id)
-                if (row.optBoolean("pinned")) pinned.put(id)
+        var previous = ""
+        while (scope.isActive && !closed) {
+            val all = runCatching { client.listSessions() }.getOrNull()
+            if (all == null) {
+                delay(5_000)
+                continue
             }
-        }
-        out.trySend(StreamEvent.Item(JSONObject()
-            .put("type", "baseline")
-            .put("value", JSONObject()
-                .put("items", JSONArray())
+            val archived = JSONArray()
+            val pinned = JSONArray()
+            val groups = LinkedHashMap<String, MutableList<String>>()
+            all.optJSONArray("items")?.let { items ->
+                for (i in 0 until items.length()) {
+                    val row = items.optJSONObject(i) ?: continue
+                    val id = row.optString("sessionId")
+                    if (id.isEmpty()) continue
+                    if (row.optBoolean("archived")) archived.put(id)
+                    if (row.optBoolean("pinned")) pinned.put(id)
+                    val cwd = row.optString("cwd").trimEnd('/')
+                    if (cwd.isEmpty()) continue
+                    groups.getOrPut(cwd) { mutableListOf() } += id
+                }
+            }
+            val rows = JSONArray()
+            groups.forEach { (path, ids) ->
+                rows.put(JSONObject()
+                    .put("workspaceId", path)
+                    .put("path", path)
+                    .put("title", path.trimEnd('/').substringAfterLast('/').ifEmpty { path })
+                    .put("sessionIds", JSONArray(ids)))
+            }
+            val value = JSONObject()
+                .put("items", rows)
                 .put("archivedSessionIds", archived)
-                .put("pinnedSessionIds", pinned))))
-        delay(Long.MAX_VALUE)
+                .put("pinnedSessionIds", pinned)
+            if (value.toString() != previous) {
+                previous = value.toString()
+                out.trySend(StreamEvent.Item(JSONObject()
+                    .put("type", "baseline")
+                    .put("value", value)))
+            }
+            delay(5_000)
+        }
     }
 
     private suspend fun collectJobs(
         args: JSONObject,
         out: kotlinx.coroutines.channels.ProducerScope<StreamEvent>,
     ) {
-        val jobs = client.rpcRaw("job/list", args)
-        out.trySend(StreamEvent.Item(JSONObject()
-            .put("type", "jobs")
-            .put("jobs", (jobs as? JSONObject)?.optJSONArray("jobs") ?: JSONArray())))
-        delay(Long.MAX_VALUE)
+        var previous = ""
+        while (scope.isActive && !closed) {
+            val jobs = runCatching { client.rpcRaw("job/list", args) }.getOrNull()
+            if (jobs != null) {
+                val rows = (jobs as? JSONObject)?.optJSONArray("jobs") ?: JSONArray()
+                if (rows.toString() != previous) {
+                    previous = rows.toString()
+                    out.trySend(StreamEvent.Item(JSONObject()
+                        .put("type", "rows")
+                        .put("jobs", rows)))
+                }
+            }
+            delay(5_000)
+        }
     }
 
     private suspend fun collectTerminal(
@@ -454,7 +631,7 @@ private class FollowTranslator(
             "approval.resolved" -> {
                 val call = payload.long("call") ?: 0L
                 val epoch = payload.long("epoch") ?: 0L
-                val eventId = approvalId(sessionId, call, epoch)
+                val eventId = approvalEventId(sessionId, call, epoch)
                 client.forgetApproval(eventId)
                 client.mux?.cancelApproval(eventId)
                 emptyList()
@@ -462,6 +639,42 @@ private class FollowTranslator(
 
             "error" -> listOf(durable(seq, time, "agent/error", JSONObject()
                 .put("message", payload.text("message").orEmpty().ifEmpty { "the turn failed" })))
+
+            "subagent.updated" -> {
+                val child = payload.text("subagent").orEmpty()
+                val parent = payload.text("parent").orEmpty()
+                val state = payload.text("state").orEmpty()
+                if (child.isNotEmpty() && parent.isNotEmpty()) {
+                    client.noteSubagent(parent, child)
+                    client.mux?.publishStatus(child, state == "running")
+                    client.mux?.publishSessionAdded(JSONObject()
+                        .put("sessionId", child)
+                        .put("parentSessionId", parent)
+                        .put("origin", "subagent")
+                        .put("updatedAt", System.currentTimeMillis())
+                        .put("running", state == "running")
+                        .put("agentAvailable", true)
+                        .put("blank", false)
+                        .put("title", ""))
+                }
+                emptyList()
+            }
+
+            "goal.set" -> {
+                client.mux?.publishProjection(sessionId, "goal", JSONObject()
+                    .put("goal", JSONObject()
+                        .put("id", "ward-goal")
+                        .put("revision", 0)
+                        .put("objective", payload.text("text").orEmpty())
+                        .put("phase", "active"))
+                    .put("roundsStarted", 0))
+                emptyList()
+            }
+
+            "goal.cleared" -> {
+                client.mux?.publishProjection(sessionId, "goal", null)
+                emptyList()
+            }
 
             "session.compacted" -> {
                 val summary = payload.text("summary").orEmpty()
@@ -480,7 +693,7 @@ private class FollowTranslator(
         val call = payload.long("call") ?: 0L
         val epoch = payload.long("epoch") ?: 0L
         val reason = payload.text("reason").orEmpty()
-        val eventId = approvalId(sessionId, call, epoch)
+        val eventId = approvalEventId(sessionId, call, epoch)
         client.rememberApproval(eventId, sessionId, call, epoch)
         val frame = JSONObject()
             .put("type", "waterfall")
@@ -511,6 +724,7 @@ private class FollowTranslator(
             .put("type", type)
             .put("data", data))
 
-    private fun approvalId(sessionId: String, call: Long, epoch: Long): String =
-        "ward:$sessionId:$call:$epoch"
 }
+
+internal fun approvalEventId(sessionId: String, call: Long, epoch: Long): String =
+    "ward:$sessionId:$call:$epoch"

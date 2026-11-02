@@ -27,6 +27,12 @@ Later milestones add methods without a version bump, because adding a method is 
 the session's working directory, refused rather than truncated when it exceeds
 64 KiB, and refused when the path resolves outside that directory.
 
+`session.prompt {id, text}` answers `{session, queued, ahead}` — `queued` is
+present and true when a turn is already running for that session, and `ahead`
+counts the prompts before it (0 means next). The prompt is appended to the
+transcript immediately as `session.prompted`; its own `turn.start` arrives when
+it runs. A queue deeper than eight answers a busy error rather than a queued one.
+
 `approval.list {}` answers `{approvals: [{session, tool, reason, call, epoch,
 expires_ms}]}` — every pending approval across all sessions, with an absolute
 expiry in epoch milliseconds and the tool and reason the daemon asked for.
