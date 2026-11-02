@@ -2129,3 +2129,13 @@ finishing, and the enqueue happens after that point, so the item sits there unti
 
 That is a defect, and it is the one the parity note has been calling unmeasured. It is worse than unmeasured: the text is not
 dropped, it is stranded. Next session fixes the ordering first, then the assertion becomes a two-line check of the same shape.
+
+Hundred-and-sixty-second: narrowed, not solved. The carried steer is enqueued by `run_free` *before* the run leaves `srv->runs`,
+and `drain_queue` runs after that, so ordering is not obviously wrong. The two candidates left are the queue's own rules:
+`enqueue_turn` refuses when the session already has an item, and `drain_queue` pops the **global** FIFO head regardless of
+session, so a carried item appended behind another session's entry waits for that one to run and finish first. Either would
+produce exactly what the assertion saw — one `session.prompted` and no second turn.
+
+Both fixes are small and both want the same test: enqueue should not be refused for a session whose carry-over is its only
+entry, and drain should not let one session's queue block another's. Next session settles which, then the assertion is the
+park-steer-deny-count shape already written.
