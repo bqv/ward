@@ -2233,8 +2233,9 @@ because tearing a live instance down mid-turn is how a turn becomes a half-writt
 while any turn ran; that was wrong for a different reason — it made the switch unusable on a busy daemon, and busy is when an
 operator most wants it.
 
-`gate_native` disables `skills`, asserts `module.list` reports it disabled, and re-enables it. The prompt refusal is implemented
-and recorded here but not gated: the gate's sessions pin the default set, so a disabled module never appears in a pin list the
-test builds.
+`gate_native` disables `skills`, asserts `module.list` reports it disabled, and re-enables it. The prompt refusal is implemented but
+**not working yet**: the gate created a session with `skills` disabled and the prompt was accepted, which means the check against
+`session->pins` never matched — the default pins do not name `skills`, or pins are not what the refusal reads. That is the next
+thing to settle, and until it is, the switch changes what `module.list` reports but does not stop a turn.
 
 All three builds green.
