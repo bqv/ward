@@ -107,7 +107,7 @@ The client speaks ward's method names and event kinds, not an adapter vocabulary
 | jobs, schedules | `job.list`, `job.kill`, `schedule.list`, `schedule.delete` |
 | trajectory | `turn.*`, `session.prompted`, `text.delta`, `tool.call/result` |
 | workspaces | synthetic groups by session cwd |
-| presets | `policy.list` / `policy.select`; chip normalises `id` to `value` |
+| presets | `policy.list` / `policy.select`; chip normalises `id` to `value`; full-access shows the warning and a danger marker |
 | queue | `session.prompt` -> `{queued, ahead}` while a turn runs; one queued prompt per session |
 | steer | `session.prompt` with `steer: true` appends to the running turn |
 | images | `tool.result.path` / `session.attachment.path` -> `attachment.read_blob` |

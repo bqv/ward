@@ -220,12 +220,18 @@ int main(void) {
   assert(run_capture(sock, probe, preset_argv, preset_out, sizeof(preset_out)) == 0);
   assert(strstr(preset_out, "reads-only") != NULL);
 
+  char full_out[8192];
+  char *full_argv[] = {(char *)probe, (char *)"--preset", (char *)"full-access",
+                       (char *)"--confirm-danger", NULL};
+  assert(run_capture(sock, probe, full_argv, full_out, sizeof(full_out)) == 0);
+  assert(strstr(full_out, "full-access") != NULL);
+
   kill(pid, SIGTERM);
   int status = 0;
   waitpid(pid, &status, 0);
   stop_server(endpoint);
   if (strcmp(cgroup_base, "off") != 0) drop_test_cgroup(cgroup_base);
 
-  printf("desktop gate passed: ward-gui drove a session over UDS, TCP, a terminal, reads, a directory list, a preset and a headless prompt\n");
+  printf("desktop gate passed: ward-gui drove a session over UDS, TCP, a terminal, reads, a directory list, presets and a headless prompt\n");
   return 0;
 }

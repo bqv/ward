@@ -118,6 +118,8 @@ int main(int argc, char **argv)
     QObject::connect(&client, &WardClient::permissionPresetChanged, &app, [&]() {
         if (!preset || client.permissionPreset().isEmpty())
             return;
+        if (client.permissionPreset() != parser.value(presetOption))
+            return;
         presetResult = client.permissionPreset();
         app.quit();
     });
