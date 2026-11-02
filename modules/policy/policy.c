@@ -65,20 +65,20 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
       return;
     }
   }
-  const char *decision = has_rules ? rule_write : "deny";
+  const char *decision = "deny";
   if (has_rules) {
     if (wd_key_eq((const uint8_t *)tool, wd_len(tool), "read")) decision = rule_read;
     if (wd_key_eq((const uint8_t *)tool, wd_len(tool), "write")) decision = rule_write;
     if (wd_key_eq((const uint8_t *)tool, wd_len(tool), "exec")) decision = rule_exec;
     if (wd_key_eq((const uint8_t *)tool, wd_len(tool), "edit")) decision = rule_edit;
     if (wd_key_eq((const uint8_t *)tool, wd_len(tool), "grep")) decision = rule_grep;
+  } else {
+    if (wd_key_eq((const uint8_t *)tool, wd_len(tool), "read")) decision = "allow";
+    if (wd_key_eq((const uint8_t *)tool, wd_len(tool), "write")) decision = "ask";
+    if (wd_key_eq((const uint8_t *)tool, wd_len(tool), "exec")) decision = "ask";
+    if (wd_key_eq((const uint8_t *)tool, wd_len(tool), "edit")) decision = "ask";
+    if (wd_key_eq((const uint8_t *)tool, wd_len(tool), "grep")) decision = "allow";
   }
-  if (0) decision = "deny";
-  if (!has_rules && wd_key_eq((const uint8_t *)tool, wd_len(tool), "read")) decision = "allow";
-  if (wd_key_eq((const uint8_t *)tool, wd_len(tool), "write")) decision = "ask";
-  if (wd_key_eq((const uint8_t *)tool, wd_len(tool), "exec")) decision = "ask";
-  if (wd_key_eq((const uint8_t *)tool, wd_len(tool), "edit")) decision = "ask";
-  if (wd_key_eq((const uint8_t *)tool, wd_len(tool), "grep")) decision = "allow";
   if (wd_key_eq((const uint8_t *)tool, wd_len(tool), "python")) decision = "ask";
   if (wd_key_eq((const uint8_t *)tool, wd_len(tool), "plan")) decision = "ask";
 

@@ -2090,3 +2090,17 @@ the decision.
 That is a defect in item one, not a missing test: the catalogue advertises a mode that does nothing, and the client now has a
 confirmation dialog and a danger marker around it. The gate is reverted and the tree is green; the client lane is told before
 it wires further.
+
+Hundred-and-fifty-ninth: the rules were arriving all along and the module was throwing them away. The old decision ladder
+(write -> ask, exec -> ask, ...) still ran *after* the new rules block, so it overwrote every preset decision with the
+hard-coded table. `full-access` set `allow`, then the next line set `ask` again. That is why the selection asserted correctly
+and the write still parked.
+
+Fixed by making the ladder the `else` of `has_rules`, so a preset that arrives is the whole decision and the table is only the
+fallback for a daemon that sends no rules.
+
+`gate_native` now proves both ends: with `full-access` selected and asserted, `/write` returns no approval and the file
+exists; with `reads-only` selected, `/write` returns no approval and the file does not exist. All three builds green.
+
+The lesson is the one this week keeps repeating: the store, the method and the chip were all correct, and the decision path
+was wrong. Only the end-to-end gate could see it.

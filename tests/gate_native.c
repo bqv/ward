@@ -237,6 +237,68 @@ int main(void) {
   assert(run_capture(tcp_url, bin, tcp_create, tcp_out, sizeof(tcp_out)) == 0);
   assert(strlen(tcp_out) > 16);
 
+  wd_client writer;
+  assert(wd_client_connect(&writer, sock) == 0);
+  assert(wd_client_handshake(&writer) == 0);
+  cbor_item_t *pick = wd_map(2);
+  wd_put(pick, "id", wd_text("full-access"));
+  wd_put(pick, "confirm", cbor_build_bool(true));
+  cbor_item_t *picked = NULL;
+  assert(wd_client_call(&writer, "policy.select", pick, &picked) == 0);
+  wd_free(picked);
+  cbor_item_t *after = NULL;
+  assert(wd_client_call(&writer, "policy.list", wd_map(0), &after) == 0);
+  char *now = wd_text_copy(wd_get(after, "current"));
+  assert(now != NULL && strcmp(now, "full-access") == 0);
+  free(now);
+  wd_free(after);
+  cbor_item_t *free_created = wd_map(1);
+  wd_put(free_created, "cwd", wd_text(root));
+  cbor_item_t *free_session = NULL;
+  assert(wd_client_call(&writer, "session.create", free_created,
+                        &free_session) == 0);
+  char *free_id = wd_text_copy(wd_get(wd_get(free_session, "session"), "id"));
+  assert(free_id != NULL);
+  wd_free(free_session);
+  cbor_item_t *free_prompt = wd_map(2);
+  wd_put(free_prompt, "id", wd_text(free_id));
+  wd_put(free_prompt, "text", wd_text("/write free.txt unapproved"));
+  cbor_item_t *free_answered = NULL;
+  assert(wd_client_call(&writer, "session.prompt", free_prompt,
+                        &free_answered) == 0);
+  assert(wd_get(free_answered, "approval") == NULL);
+  wd_free(free_answered);
+  char free_path[512];
+  snprintf(free_path, sizeof(free_path), "%s/free.txt", root);
+  assert(access(free_path, R_OK) == 0);
+  free(free_id);
+  cbor_item_t *deny_pick = wd_map(1);
+  wd_put(deny_pick, "id", wd_text("reads-only"));
+  cbor_item_t *deny_picked = NULL;
+  assert(wd_client_call(&writer, "policy.select", deny_pick, &deny_picked) == 0);
+  wd_free(deny_picked);
+  cbor_item_t *deny_created = wd_map(1);
+  wd_put(deny_created, "cwd", wd_text(root));
+  cbor_item_t *deny_session = NULL;
+  assert(wd_client_call(&writer, "session.create", deny_created,
+                        &deny_session) == 0);
+  char *deny_id = wd_text_copy(wd_get(wd_get(deny_session, "session"), "id"));
+  assert(deny_id != NULL);
+  wd_free(deny_session);
+  cbor_item_t *deny_prompt = wd_map(2);
+  wd_put(deny_prompt, "id", wd_text(deny_id));
+  wd_put(deny_prompt, "text", wd_text("/write blocked.txt denied"));
+  cbor_item_t *deny_answered = NULL;
+  assert(wd_client_call(&writer, "session.prompt", deny_prompt,
+                        &deny_answered) == 0);
+  assert(wd_get(deny_answered, "approval") == NULL);
+  wd_free(deny_answered);
+  char deny_path[512];
+  snprintf(deny_path, sizeof(deny_path), "%s/blocked.txt", root);
+  assert(access(deny_path, F_OK) != 0);
+  free(deny_id);
+  close(writer.fd);
+
   kill(pid, SIGTERM);
   int status = 0;
   waitpid(pid, &status, 0);
