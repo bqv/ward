@@ -1443,3 +1443,12 @@ The multi-call refusal belongs in (1): a reply with `calls > 1` ends the turn wi
 the first. The first attempt at counting calls produced a garbage field and was reverted; the cause was not found,
 so the next attempt should count in the *provider* over the raw body it already scans, and test that count in
 `provider_test` before any core change.
+
+Hundred-and-ninth: a multi-call reply is refused, not truncated. When the completion carries more than one
+`function` entry, the provider answers with an empty `tool` and a text naming the refusal, so the driver has nothing
+to dispatch and the client sees why. That is the note's rule — multiple calls are a parse failure, never "run the
+first and forget the rest" — and it needed no new reply field, which is where the earlier attempt went wrong: the
+extra key decoded as garbage and was reverted rather than shipped.
+
+The test feeds a two-call body and asserts an empty tool plus the refusal text; `provider_test` is the right place
+for it because the count lives in the provider, over the body it already scans.

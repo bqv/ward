@@ -104,6 +104,18 @@ static int num_field(const char *body, uint32_t len, const char *key,
   return 0;
 }
 
+static uint32_t count_token(const char *body, uint32_t len,
+                            const char *token) {
+  uint32_t token_len = (uint32_t)wd_len(token);
+  uint32_t count = 0;
+  for (uint32_t i = 0; i + token_len <= len; i++) {
+    uint32_t k = 0;
+    while (k < token_len && body[i + k] == token[k]) k++;
+    if (k == token_len) count++;
+  }
+  return count;
+}
+
 static int has_token(const char *body, uint32_t len, const char *token) {
   uint32_t token_len = (uint32_t)wd_len(token);
   for (uint32_t i = 0; i + token_len <= len; i++) {
@@ -289,6 +301,19 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
                  sizeof(tool));
       text_field((const char *)body, body_len, "\"arguments\":\"", arguments,
                  sizeof(arguments));
+      if (count_token((const char *)body, body_len, "\"function\"") > 1) {
+        tool[0] = '\0';
+        static const char multiple[] =
+            "the model asked for more than one tool call; refusing rather than "
+            "running only the first";
+        uint32_t m = 0;
+        while (multiple[m] != '\0' && m + 1 < sizeof(answer)) {
+          answer[m] = multiple[m];
+          m++;
+        }
+        answer[m] = '\0';
+        text_at = m;
+      }
     }
     wd_w_init(&w, reply, REPLY_SIZE);
     wd_w_map(&w, 9);

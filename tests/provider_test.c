@@ -141,6 +141,32 @@ int main(void) {
   free(tool_args);
   wd_free(tool_reply);
 
+  static const char two_calls[] =
+      "data: {\"choices\":[{\"message\":{\"tool_calls\":["
+      "{\"function\":{\"name\":\"read\",\"arguments\":\"{}\"}},"
+      "{\"function\":{\"name\":\"write\",\"arguments\":\"{}\"}}]}}]}\n\n";
+  cbor_item_t *two_phase = wd_map(2);
+  wd_put(two_phase, "status", wd_uint(200));
+  wd_put(two_phase, "body", wd_text(two_calls));
+  size_t two_len = 0;
+  uint8_t *two_bytes = wd_encode(two_phase, &two_len);
+  assert(two_bytes != NULL);
+  uint8_t *two_out = NULL;
+  size_t two_out_len = 0;
+  assert(wd_instance_call(inst, two_bytes, two_len, &two_out, &two_out_len,
+                          &err) == 0);
+  free(two_bytes);
+  cbor_item_t *two_reply = wd_decode(two_out, two_out_len);
+  free(two_out);
+  assert(two_reply != NULL);
+  char *two_tool = wd_text_copy(wd_get(two_reply, "tool"));
+  char *two_text = wd_text_copy(wd_get(two_reply, "text"));
+  assert(two_tool != NULL && two_tool[0] == '\0');
+  assert(two_text != NULL && strstr(two_text, "more than one tool call") != NULL);
+  free(two_tool);
+  free(two_text);
+  wd_free(two_reply);
+
   wd_instance_free(inst);
   wd_module_free(module);
   wd_engine_free(engine);
