@@ -1403,3 +1403,11 @@ nothing changes — which is why the existing subagent concurrency gate still pa
 Two honesty notes: the pool is per daemon and per process, so a second daemon with the same card is invisible to
 it, and the queue holds at most what it holds — there is no per-session cap yet, which the note asks for so one
 parent cannot starve another.
+
+Hundred-and-sixth: one queued turn per session. `enqueue_turn` refuses a second item for a session already waiting,
+and the prompt path answers `busy: the session is already queued` rather than starting a second run behind the
+first — which would have run twice when the device drained, because the queued item and the immediate run were
+the same turn. The note asked for the cap so one parent cannot starve another; the starvation it actually
+prevents is duplicating the parent's own work.
+
+Tests pass in all three builds unchanged: the existing queue assertions already bound the count.

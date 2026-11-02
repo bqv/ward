@@ -1360,6 +1360,8 @@ static void drain_queue(wd_server *srv) {
 
 static bool enqueue_turn(wd_server *srv, wd_session *session, const char *text,
                          const char *job) {
+  for (wd_queue *at = srv->queue; at != NULL; at = at->next)
+    if (strcmp(at->session, session->id) == 0) return false;
   wd_queue *item = calloc(1, sizeof(*item));
   if (item == NULL) return false;
   snprintf(item->session, sizeof(item->session), "%s", session->id);
@@ -2422,7 +2424,14 @@ static void handle_session_prompt(wd_server *srv, wd_conn *conn, uint64_t id,
     conn_arm(srv, conn);
     return;
   }
-  if (!device_free(srv, session) && enqueue_turn(srv, session, text, NULL)) {
+  if (!device_free(srv, session)) {
+    if (!enqueue_turn(srv, session, text, NULL)) {
+      free(session_id);
+      free(text);
+      conn_send_error(conn, id, WD_ERR_BUSY, "the session is already queued");
+      conn_arm(srv, conn);
+      return;
+    }
     cbor_item_t *queued = wd_map(2);
     wd_put(queued, "session", wd_session_to_cbor(session));
     wd_put(queued, "queued", cbor_build_bool(true));
