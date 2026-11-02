@@ -21,6 +21,8 @@
 #include <sys/signalfd.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
 #include <sys/un.h>
 #include <time.h>
 #include <unistd.h>
@@ -153,6 +155,7 @@ typedef struct wd_conn {
 
 typedef struct {
   int listen_fd;
+  int tcp_fd;
   int epoll_fd;
   int signal_fd;
   char *socket_path;
@@ -187,6 +190,7 @@ typedef struct {
 } wd_server;
 
 static int token_listen;
+static int token_tcp;
 static int token_signal;
 static int token_quic;
 static wd_run_token run_tokens[WD_MAX_RUNS];
@@ -3446,9 +3450,9 @@ static int next_timeout(wd_server *srv, uint64_t now) {
   return socket_timeout;
 }
 
-static void server_accept(wd_server *srv) {
+static void server_accept(wd_server *srv, int listener) {
   for (;;) {
-    int fd = accept4(srv->listen_fd, NULL, NULL, SOCK_NONBLOCK | SOCK_CLOEXEC);
+    int fd = accept4(listener, NULL, NULL, SOCK_NONBLOCK | SOCK_CLOEXEC);
     if (fd < 0) {
       if (errno == EINTR) continue;
       return;
@@ -3457,6 +3461,15 @@ static void server_accept(wd_server *srv) {
     socklen_t len = sizeof(cred);
     bool ok = getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &cred, &len) == 0 &&
               cred.uid == geteuid();
+    if (!ok && listener == srv->tcp_fd) {
+      struct sockaddr_storage peer;
+      socklen_t peer_len = sizeof(peer);
+      if (getpeername(fd, (struct sockaddr *)&peer, &peer_len) == 0 &&
+          peer.ss_family == AF_INET) {
+        struct sockaddr_in *v4 = (struct sockaddr_in *)&peer;
+        ok = ntohl(v4->sin_addr.s_addr) == 0x7f000001u;
+      }
+    }
     if (!ok) {
       wd_conn temp;
       memset(&temp, 0, sizeof(temp));
@@ -3591,6 +3604,46 @@ static int setup_listener(const char *path) {
   return fd;
 }
 
+static int setup_tcp_listener(const char *bind_text, int *port_out) {
+  const char *colon = strrchr(bind_text, ':');
+  if (colon == NULL) {
+    errno = EINVAL;
+    return -1;
+  }
+  char host[64];
+  size_t host_len = (size_t)(colon - bind_text);
+  if (host_len == 0 || host_len >= sizeof(host)) {
+    errno = EINVAL;
+    return -1;
+  }
+  memcpy(host, bind_text, host_len);
+  host[host_len] = '\0';
+  struct sockaddr_in addr;
+  memset(&addr, 0, sizeof(addr));
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons((uint16_t)atoi(colon + 1));
+  if (inet_pton(AF_INET, host, &addr.sin_addr) != 1) {
+    errno = EINVAL;
+    return -1;
+  }
+  int fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+  if (fd < 0) return -1;
+  int one = 1;
+  setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+  if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+    close(fd);
+    return -1;
+  }
+  if (listen(fd, 64) != 0) {
+    close(fd);
+    return -1;
+  }
+  socklen_t size = sizeof(addr);
+  if (getsockname(fd, (struct sockaddr *)&addr, &size) == 0)
+    *port_out = ntohs(addr.sin_port);
+  return fd;
+}
+
 static int setup_signals(void) {
   sigset_t mask;
   sigemptyset(&mask);
@@ -3644,6 +3697,7 @@ int wd_up_run(const wd_up_config *cfg) {
   wd_server srv;
   memset(&srv, 0, sizeof(srv));
   srv.listen_fd = -1;
+  srv.tcp_fd = -1;
   srv.epoll_fd = -1;
   srv.signal_fd = -1;
   srv.socket_path = strdup(cfg->socket_path);
@@ -3735,6 +3789,21 @@ int wd_up_run(const wd_up_config *cfg) {
   ev.data.ptr = &token_listen;
   if (epoll_ctl(srv.epoll_fd, EPOLL_CTL_ADD, srv.listen_fd, &ev) != 0)
     goto cleanup;
+  const char *tcp_bind = getenv("WARD_TCP_BIND");
+  if (tcp_bind != NULL && tcp_bind[0] != '\0') {
+    int tcp_port = 0;
+    srv.tcp_fd = setup_tcp_listener(tcp_bind, &tcp_port);
+    if (srv.tcp_fd < 0) {
+      fprintf(stderr, "ward: cannot listen on %s\n", tcp_bind);
+      goto cleanup;
+    }
+    memset(&ev, 0, sizeof(ev));
+    ev.events = EPOLLIN;
+    ev.data.ptr = &token_tcp;
+    if (epoll_ctl(srv.epoll_fd, EPOLL_CTL_ADD, srv.tcp_fd, &ev) != 0)
+      goto cleanup;
+    printf("tcp 127.0.0.1:%d\n", tcp_port);
+  }
   memset(&ev, 0, sizeof(ev));
   ev.events = EPOLLIN;
   ev.data.ptr = &token_signal;
@@ -3782,8 +3851,12 @@ int wd_up_run(const wd_up_config *cfg) {
     }
     for (int i = 0; i < n; i++) {
       void *ptr = events[i].data.ptr;
+      if (ptr == &token_tcp) {
+        server_accept(&srv, srv.tcp_fd);
+        continue;
+      }
       if (ptr == &token_listen) {
-        server_accept(&srv);
+        server_accept(&srv, srv.listen_fd);
         continue;
       }
       if ((uintptr_t)ptr >= (uintptr_t)&term_tokens[0] &&
@@ -3854,6 +3927,7 @@ cleanup:
     if (srv.conns[i] != NULL && srv.epoll_fd >= 0) conn_close(&srv, srv.conns[i]);
   if (srv.socket_path != NULL) unlink(srv.socket_path);
   if (srv.lock_path != NULL) unlink(srv.lock_path);
+  if (srv.tcp_fd >= 0) close(srv.tcp_fd);
   if (srv.listen_fd >= 0) close(srv.listen_fd);
   if (srv.epoll_fd >= 0) close(srv.epoll_fd);
   if (srv.signal_fd >= 0) close(srv.signal_fd);

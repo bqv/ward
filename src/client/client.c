@@ -7,6 +7,8 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
@@ -38,7 +40,38 @@ static void set_read_timeout(int fd, int seconds) {
   setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 }
 
+static int connect_tcp(const char *target) {
+  const char *colon = strrchr(target, ':');
+  if (colon == NULL) return -1;
+  char host[64];
+  size_t host_len = (size_t)(colon - target);
+  if (host_len == 0 || host_len >= sizeof(host)) return -1;
+  memcpy(host, target, host_len);
+  host[host_len] = '\0';
+  struct sockaddr_in addr;
+  memset(&addr, 0, sizeof(addr));
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons((uint16_t)atoi(colon + 1));
+  if (inet_pton(AF_INET, host, &addr.sin_addr) != 1) return -1;
+  int fd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+  if (fd < 0) return -1;
+  if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+    fprintf(stderr, "ward: no daemon at %s: %s\n", target, strerror(errno));
+    close(fd);
+    return -1;
+  }
+  return fd;
+}
+
 int wd_client_connect(wd_client *client, const char *path) {
+  if (strncmp(path, "tcp://", 6) == 0) {
+    int tcp_fd = connect_tcp(path + 6);
+    if (tcp_fd < 0) return -1;
+    set_read_timeout(tcp_fd, 120);
+    client->fd = tcp_fd;
+    client->next_id = 1;
+    return 0;
+  }
   struct sockaddr_un addr;
   memset(&addr, 0, sizeof(addr));
   addr.sun_family = AF_UNIX;

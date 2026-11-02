@@ -1952,3 +1952,16 @@ Building into `out/` inside the repository works, and the Makefile target does t
 
 The row is still not `delivered`: what remains is libcbor for the Android ABI, an APK, and the conformance fixture replayed
 from a device. What changed is that the interface is no longer unexercised code.
+
+Hundred-and-forty-seventh: ward listens on TCP when asked. `WARD_TCP_BIND=127.0.0.1:PORT` adds a second listener to the same
+event loop, prints `tcp 127.0.0.1:<port>` beside the Unix socket, and accepts those connections into the same machinery. The
+client understands `tcp://host:port`, so `ward-native` drives a session over it: `session e3cfdd3610edc5b6` created and
+resumed through the TCP path, and `gate_native` now asserts that too.
+
+The credential check is the part that needed judgement. ward authenticates a client by `SO_PEERCRED` and requires the uid to
+match its own; a TCP peer has no such credential, so the first attempt was refused with "handshake refused". The rule added
+is deliberately narrow: a TCP connection is accepted only when it comes from `127.0.0.1` **and only on the TCP listener**.
+That is what makes `adb reverse` viable — the phone's connections arrive from adbd on the host as loopback — while keeping
+the Unix socket's uid check exactly as it was.
+
+This is the transport the Android row needed. What is still missing is the library cross-compiled for the phone and an APK.

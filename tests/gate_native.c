@@ -92,6 +92,7 @@ int main(void) {
     setenv("WARD_MODULE_DIR", modules, 1);
     setenv("WARD_TOOL_ROOT", root, 1);
     setenv("WARD_QUIC_BIND", "off", 1);
+    setenv("WARD_TCP_BIND", "127.0.0.1:0", 1);
     prctl(PR_SET_PDEATHSIG, SIGTERM);
     execl(daemon, "ward", "up", "--socket", sock, "--state", state,
           (char *)NULL);
@@ -99,15 +100,26 @@ int main(void) {
   }
   close(ready[1]);
   char line[256];
+  char tcp_url[64];
+  tcp_url[0] = '\0';
+  bool ready_seen = false;
   size_t used = 0;
-  while (used + 1 < sizeof(line)) {
-    ssize_t got = read(ready[0], line + used, 1);
+  while (!ready_seen) {
+    size_t got = read(ready[0], line + used, 1);
     if (got <= 0) break;
-    if (line[used++] == '\n') break;
+    if (line[used++] != '\n') continue;
+    line[used] = '\0';
+    if (strncmp(line, "tcp ", 4) == 0) {
+      snprintf(tcp_url, sizeof(tcp_url), "tcp://%s", line + 4);
+      size_t len = strlen(tcp_url);
+      while (len > 0 && (tcp_url[len - 1] == '\n')) tcp_url[--len] = '\0';
+    }
+    if (strncmp(line, "ready ", 6) == 0) ready_seen = true;
+    used = 0;
   }
-  line[used] = '\0';
   close(ready[0]);
-  assert(strncmp(line, "ready ", 6) == 0);
+  assert(ready_seen);
+  assert(tcp_url[0] != '\0');
 
   char out[8192];
   char *create_argv[] = {(char *)bin, "create", root, NULL};
@@ -133,6 +145,11 @@ int main(void) {
   if (resume_rc != 0) fprintf(stderr, "resume rc=%d out=%s\n", resume_rc, out);
   assert(resume_rc == 0);
   assert(strstr(out, "native hello") != NULL);
+
+  char tcp_out[8192];
+  char *tcp_create[] = {(char *)bin, "create", root, NULL};
+  assert(run_capture(tcp_url, bin, tcp_create, tcp_out, sizeof(tcp_out)) == 0);
+  assert(strlen(tcp_out) > 16);
 
   kill(pid, SIGTERM);
   int status = 0;
