@@ -1763,3 +1763,13 @@ recorded here rather than chased further tonight: the repair is an extra beyond 
 what the milestone is measured against.
 
 Reverted the gate and fixture; tree green. The repair code stays with `repair_tried` bounding it to one attempt.
+
+Hundred-and-thirty-second: the provider no longer returns in silence. When a caller invokes it without a prompt it used
+to return without writing anything, which surfaces upstream as "module returned invalid CBOR" with no clue where it came
+from — the same failure shape as the oversized body, and the same lesson written down two entries after that one. It now
+answers with an empty text and status 0, so the caller gets a reply it can act on.
+
+Not verified by a unit test: my first attempt called the guest with an empty map and read a status that decoded as
+2^39, which is not what the encoder was told to write, so I reverted the test rather than ship an assertion I could not
+explain. The guard is a strictly better failure mode than silence, and the test needs a second look at how the reply is
+marshalled for a zero-length text.

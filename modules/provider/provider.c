@@ -401,7 +401,17 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
     if (!w.failed) pair(out, reply, w.at);
     return;
   }
-  if (!have_prompt) return;
+  if (!have_prompt) {
+    wd_w empty;
+    wd_w_init(&empty, reply, REPLY_SIZE);
+    wd_w_map(&empty, 2);
+    wd_w_textz(&empty, "text");
+    wd_w_textz(&empty, "");
+    wd_w_textz(&empty, "status");
+    wd_w_uint(&empty, 0);
+    if (!empty.failed) pair(out, reply, empty.at);
+    return;
+  }
 
   static const char prefix[] =
       "{\"model\":\"";
