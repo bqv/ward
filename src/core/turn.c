@@ -1703,9 +1703,16 @@ static int process_action(wd_turn *turn, cbor_item_t *action, wd_turn_emit emit,
           }
         }
         if (rc == 0 && !*pending && result != NULL) {
-          cbor_item_t *done = wd_map(2);
+          char *artifact = NULL;
+          if (strcmp(capability, "fs.read") == 0 ||
+              strcmp(capability, "fs.write") == 0 ||
+              strcmp(capability, "fs.edit") == 0)
+            artifact = wd_text_copy(wd_get(args, "path"));
+          cbor_item_t *done = wd_map(artifact != NULL ? 3 : 2);
           wd_put(done, "tool", wd_text(capability));
           wd_put(done, "call", wd_uint(0));
+          if (artifact != NULL) wd_put(done, "path", wd_text(artifact));
+          free(artifact);
           char *done_err = NULL;
           (void)emit(ctx, "tool.result", done, &done_err);
           free(done_err);

@@ -1901,9 +1901,12 @@ static int collect_attachment(void *ctx, uint64_t seq, cbor_item_t *event) {
   uint64_t size = 0;
   wd_uint_of(wd_get(payload, "size"), &size);
   if (name == NULL) return 0;
-  cbor_item_t *entry = wd_map(2);
+  char *path = wd_text_copy(wd_get(payload, "path"));
+  cbor_item_t *entry = wd_map(3);
   wd_put(entry, "name", wd_text(name));
   wd_put(entry, "size", wd_uint(size));
+  wd_put(entry, "path", wd_text(path != NULL ? path : ""));
+  free(path);
   free(name);
   if (list->len == list->cap) {
     size_t cap = list->cap == 0 ? 8 : list->cap * 2;
@@ -1957,6 +1960,72 @@ static void attachment_context(wd_session *session, char *buf, size_t cap) {
     snprintf(line, sizeof(line), "attached to this session: %s", buf);
     snprintf(buf, cap, "%s", line);
   }
+}
+
+
+static void handle_attachment_read_blob(wd_server *srv, wd_conn *conn,
+                                        uint64_t id, cbor_item_t *params) {
+  char *session_id = wd_text_copy(wd_get(params, "id"));
+  char *name = wd_text_copy(wd_get(params, "name"));
+  uint64_t offset = 0;
+  uint64_t want = 0;
+  wd_uint_of(wd_get(params, "offset"), &offset);
+  wd_uint_of(wd_get(params, "len"), &want);
+  wd_session *session =
+      session_id != NULL ? wd_session_find(&srv->store, session_id) : NULL;
+  if (session == NULL) {
+    free(session_id);
+    free(name);
+    conn_send_error(conn, id, WD_ERR_NOT_FOUND, "no such session");
+    conn_arm(srv, conn);
+    return;
+  }
+  if (name == NULL || name[0] == '\0' || want == 0) {
+    free(session_id);
+    free(name);
+    conn_send_error(conn, id, WD_ERR_INVALID_PARAMS, "name and len are required");
+    conn_arm(srv, conn);
+    return;
+  }
+  if (want > (1u << 20) || offset > (4u << 20)) {
+    free(session_id);
+    free(name);
+    conn_send_error(conn, id, WD_ERR_INVALID_PARAMS,
+                    "blob reads are capped at 1 MiB per call and 4 MiB total");
+    conn_arm(srv, conn);
+    return;
+  }
+  char *root = wd_path_join(session->dir, "attachments");
+  char *data = NULL;
+  size_t got = 0;
+  char *err = NULL;
+  int rc = root != NULL
+               ? wd_file_read_range(root, name, (size_t)offset, (size_t)want,
+                                    (size_t)(4u << 20), &data, &got, &err)
+               : -1;
+  free(session_id);
+  if (rc != 0) {
+    conn_send_error(conn, id, WD_ERR_INVALID_PARAMS,
+                    err != NULL ? err : "cannot read the attachment");
+    free(err);
+    free(root);
+    free(name);
+    conn_arm(srv, conn);
+    return;
+  }
+  free(err);
+  char *path = wd_path_join(root, name);
+  cbor_item_t *result = wd_map(4);
+  wd_put(result, "path", wd_text(path != NULL ? path : ""));
+  wd_put(result, "offset", wd_uint(offset));
+  wd_put(result, "size", wd_uint((uint64_t)got));
+  wd_put(result, "data", wd_bytes_len(data != NULL ? data : "", got));
+  free(data);
+  free(path);
+  free(root);
+  free(name);
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
 }
 
 static void handle_attachment_list(wd_server *srv, wd_conn *conn, uint64_t id,
@@ -3386,6 +3455,8 @@ static void handle_request(wd_server *srv, wd_conn *conn, uint64_t id,
     handle_attachment_add(srv, conn, id, params);
   } else if (strcmp(method, "attachment.list") == 0) {
     handle_attachment_list(srv, conn, id, params);
+  } else if (strcmp(method, "attachment.read_blob") == 0) {
+    handle_attachment_read_blob(srv, conn, id, params);
   } else if (strcmp(method, "terminal.open") == 0) {
     handle_terminal_open(srv, conn, id, params);
   } else if (strcmp(method, "terminal.write") == 0) {
