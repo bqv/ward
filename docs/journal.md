@@ -1657,3 +1657,13 @@ whole answer. `gate_tool` passes in all three builds.
 Four rounds, three wrong hypotheses, and the cause was two layers below where I was looking: not the fixture, not the
 parser, but the four bytes in front of the body. The fixture hypothesis was partly right, though — the first attempt
 used a prompt whose first half was empty, which hid the real fault behind a plausible one.
+
+Hundred-and-twenty-fifth: a device slot that other processes can see. `wd_device_acquire` takes an exclusive `flock` on
+`<state>/device-<name>-<slot>.lock`, trying each slot in turn, so two daemons sharing one card serialise instead of each
+believing it has the only slot. `wd_device_release` unlocks and closes; `devlock_test` holds one slot, forks, and asserts
+the child is refused with one slot and admitted with two.
+
+That closes the first of §7's two documented limits at the library level. Wiring it into the daemon is the next step: the
+in-process counter stays authoritative for queueing, and the file lock is consulted when acquiring, releasing on
+`run_free` — with the busy case feeding the same `enqueue_turn` path a full pool already uses. Not wired yet, and the
+test says nothing about the daemon until it is.
