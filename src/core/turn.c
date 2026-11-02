@@ -1652,6 +1652,16 @@ static int process_action(wd_turn *turn, cbor_item_t *action, wd_turn_emit emit,
           *err = strdup("the tools module asked for nothing");
           rc = -1;
         } else {
+          uint64_t call = 0;
+          wd_uint_of(wd_get(action, "call"), &call);
+          cbor_item_t *notice = wd_map(3);
+          wd_put(notice, "tool", wd_text(capability));
+          wd_put(notice, "call", wd_uint(call));
+          wd_put(notice, "module", wd_text("tools"));
+          char *notice_err = NULL;
+          (void)emit(ctx, "tool.call", notice, &notice_err);
+          free(notice_err);
+          wd_free(notice);
           int parked = perform_capability(turn, capability, args, &result, err);
           if (parked == 1) {
             *pending = true;
@@ -1659,6 +1669,15 @@ static int process_action(wd_turn *turn, cbor_item_t *action, wd_turn_emit emit,
           } else if (parked != 0) {
             rc = -1;
           }
+        }
+        if (rc == 0 && !*pending && result != NULL) {
+          cbor_item_t *done = wd_map(2);
+          wd_put(done, "tool", wd_text(capability));
+          wd_put(done, "call", wd_uint(0));
+          char *done_err = NULL;
+          (void)emit(ctx, "tool.result", done, &done_err);
+          free(done_err);
+          wd_free(done);
         }
         free(capability);
         wd_free(request);

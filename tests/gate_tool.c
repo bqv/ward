@@ -555,6 +555,15 @@ int main(void) {
   cbor_item_t *event = wait_event(&a, "approval.resolved", NULL);
   assert(event != NULL);
   wd_free(event);
+  event = wait_event(&a, "tool.call", NULL);
+  assert(event != NULL);
+  char *called = wd_text_copy(wd_get(event, "tool"));
+  assert(called != NULL && strcmp(called, "fs.write") == 0);
+  free(called);
+  wd_free(event);
+  event = wait_event(&a, "tool.result", NULL);
+  assert(event != NULL);
+  wd_free(event);
   event = wait_event(&a, "text.delta", NULL);
   assert(event != NULL);
   char *text = wd_text_copy(wd_get(event, "text"));

@@ -1717,3 +1717,18 @@ swap 0, pids 256, and `supervise-daemon` is in `/dsh/svc/session-…`, outside `
 Tests live under `/ward/test/gate-<pid>`: each gate gets its own fence and leaf, removes it on exit, and sweeps
 leaves left by a gate that was killed. `cgroup_test` enters a temporary fence and checks the limits the kernel
 actually recorded.
+
+Hundred-and-twenty-ninth: the protocol's tool events existed only on paper. `tool.call` and `tool.result` are in
+`README.md`'s frozen event list and in `docs/protocol.md`, and nothing emitted them — a grep for either name across
+`src/` and `modules/` returned nothing. The invoke path now emits `tool.call {tool, call, module}` before the
+capability runs and `tool.result {tool, call}` after it returns, both carrying the *capability* name (`fs.write`, not
+the driver's action name), and `gate_tool` asserts both events on an approved write between `approval.resolved` and
+the first delta.
+
+That also explains something I had recorded wrongly: the earlier "tool-dispatch gate" that passed in round
+twenty-five asserted a `tool.` event that did not exist, so it could not have been checking what I claimed. The
+assertion was real code, the event was absent, and the pass was therefore not evidence — a gate can be green and
+vacuous at the same time, which is worth remembering the next time a suite looks reassuring.
+
+ASan caught the leak the new events introduced: the maps were built, emitted and never freed. Freed now; all three
+builds are clean.

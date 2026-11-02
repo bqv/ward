@@ -127,7 +127,7 @@ static double seconds_since(struct timespec *start) {
          (double)(now.tv_nsec - start->tv_nsec) / 1e9;
 }
 
-static void sweep_test_cgroups(void) {
+static inline void sweep_test_cgroups(void) {
   const char *root = "/sys/fs/cgroup/ward/test";
   DIR *dir = opendir(root);
   if (dir == NULL) return;
@@ -144,7 +144,7 @@ static void sweep_test_cgroups(void) {
   closedir(dir);
 }
 
-static void drop_cgroup(const char *base) {
+static inline void drop_cgroup(const char *base) {
   if (base == NULL || base[0] == '\0') return;
   char leaf[1100];
   snprintf(leaf, sizeof(leaf), "%.1000s/harness", base);
