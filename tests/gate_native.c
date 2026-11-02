@@ -47,6 +47,35 @@ static int run_capture(const char *socket, const char *bin, char *const argv[],
   return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 }
 
+static int count_prompted(wd_client *client, const char *text, int want)
+    __attribute__((unused));
+static int count_prompted(wd_client *client, const char *text, int want) {
+  int seen = 0;
+  while (seen < want) {
+    wd_frame frame;
+    if (wd_client_read_frame(client->fd, &frame) == NULL) return seen;
+    if (frame.type != WD_FRAME_EVENT) continue;
+    cbor_item_t *root = wd_decode(frame.body, frame.len);
+    if (root == NULL) continue;
+    char *kind = NULL;
+    cbor_item_t *payload = NULL;
+    bool read = wd_read_event(root, &kind, &payload);
+    wd_free(root);
+    if (!read) {
+      free(kind);
+      continue;
+    }
+    if (kind != NULL && strcmp(kind, "session.prompted") == 0) {
+      char *said = wd_text_copy(wd_get(payload, "text"));
+      if (said != NULL && strcmp(said, text) == 0) seen++;
+      free(said);
+    }
+    wd_free(payload);
+    free(kind);
+  }
+  return seen;
+}
+
 int main(void) {
   const char *modules = getenv("WARD_MODULE_DIR");
   const char *bin = getenv("WARD_NATIVE");
@@ -92,7 +121,7 @@ int main(void) {
     setenv("WARD_MODULE_DIR", modules, 1);
     setenv("WARD_TOOL_ROOT", root, 1);
     setenv("WARD_QUIC_BIND", "off", 1);
-    setenv("WARD_FAKE_DELAY_MS", "1500", 1);
+    setenv("WARD_FAKE_DELAY_MS", "4000", 1);
     setenv("WARD_TCP_BIND", "127.0.0.1:0", 1);
     prctl(PR_SET_PDEATHSIG, SIGTERM);
     execl(daemon, "ward", "up", "--socket", sock, "--state", state,
@@ -187,9 +216,15 @@ int main(void) {
   wd_free(steer_created);
   cbor_item_t *third = wd_map(2);
   wd_put(third, "id", wd_text(steer_session));
-  wd_put(third, "text", wd_text("third prompt"));
+  wd_put(third, "text", wd_text("/write steer.txt go"));
   cbor_item_t *third_result = NULL;
   assert(wd_client_call(&queuer, "session.prompt", third, &third_result) == 0);
+  cbor_item_t *third_approval = wd_get(third_result, "approval");
+  assert(third_approval != NULL);
+  uint64_t third_call = 0;
+  uint64_t third_epoch = 0;
+  assert(wd_uint_of(wd_get(third_approval, "call"), &third_call));
+  assert(wd_uint_of(wd_get(third_approval, "epoch"), &third_epoch));
   wd_free(third_result);
   cbor_item_t *steer = wd_map(3);
   wd_put(steer, "id", wd_text(steer_session));

@@ -2117,3 +2117,15 @@ what a client-side mirror can never do — see another client's prompts.
 `gate_native` asserts the queued text and its position. The first attempt leaked 144 bytes under ASan because `cbor_array_get`
 hands back a reference the caller must release; the leak was in my test, not the handler, and the trace only made sense once I
 compared the handler with `job.list`, which is the same shape and does not leak.
+
+Hundred-and-sixty-first: the steer test is deterministic and the carry-over is not working. The old test prompted and steered
+immediately, which only passed when the turn happened to still be running; it now parks a `/write` on an approval first, so a
+turn is provably active when the steer arrives, and denies the approval afterwards to clean up.
+
+With that done, the carry-over assertion could finally be run: park a write, steer, deny the approval so the turn ends without
+another provider call, and count `session.prompted` for the steer text. It came back as one, not two — the accept, and no
+carry-over turn. So `run_free` enqueues the late steer but the queued turn never starts: `drain_queue` is driven by a run
+finishing, and the enqueue happens after that point, so the item sits there until some other event drains it.
+
+That is a defect, and it is the one the parity note has been calling unmeasured. It is worse than unmeasured: the text is not
+dropped, it is stranded. Next session fixes the ordering first, then the assertion becomes a two-line check of the same shape.
