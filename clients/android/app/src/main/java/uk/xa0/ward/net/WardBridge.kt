@@ -35,6 +35,7 @@ class WardBridge(private val connection: WardConnection) {
     private val terminals = ConcurrentHashMap<String, JSONObject>()
     private val subagentParents = ConcurrentHashMap<String, String>()
     private val queueEntries = ConcurrentHashMap<String, MutableList<QueueEntry>>()
+    private val presetIds = ConcurrentHashMap<String, String>()
     private data class QueueEntry(val id: String, val text: String, val rpcId: String)
 
     /** Told when this client's view of a session's pending queue changes. */
@@ -468,21 +469,26 @@ class WardBridge(private val connection: WardConnection) {
     }
 
     /**
-     * Ward's three presets behind the DSH permission chip's names. The mapping is
-     * not cosmetic: `default` asks before a write, `reads-only` denies it and
-     * `workspace` asks too but also requires a read before an overwrite. There is
-     * no full-access preset in ward, so that DSH option is not offered.
+     * Whatever presets `policy.list` serves, behind the DSH permission chip's names.
+     *
+     * The list is the authority: today it carries `default`, `reads-only` and
+     * `workspace`, and the owner's policy-module design adds an all-allow preset.
+     * The alias map remembers the exact ward id the daemon used, so selecting the
+     * chip sends that id rather than a guess made from the display name.
      */
     private suspend fun permissionCatalog(): JSONObject {
         val policy = api.policyList()
+        presetIds.clear()
         val options = JSONArray()
         policy.array("presets")?.items?.forEach { item ->
             val preset = item as? Cbor.Map ?: return@forEach
             val id = preset.text("id").orEmpty()
             if (id.isEmpty()) return@forEach
+            val alias = dshPresetOf(id)
+            presetIds[alias] = id
             options.put(JSONObject()
-                .put("value", dshPresetOf(id))
-                .put("name", preset.text("name").orEmpty().ifEmpty { dshPresetOf(id) })
+                .put("value", alias)
+                .put("name", preset.text("name").orEmpty().ifEmpty { alias })
                 .put("description", preset.text("description").orEmpty()))
         }
         return JSONObject()
@@ -494,7 +500,7 @@ class WardBridge(private val connection: WardConnection) {
         val line = args.optString("line").trim()
         val preset = line.removePrefix("/permission ").trim()
         if (line.startsWith("/permission ") && preset.isNotEmpty()) {
-            val wardPreset = wardPresetOf(preset)
+            val wardPreset = presetIds[preset] ?: wardPresetOf(preset)
                 ?: return JSONObject().put("result", JSONObject()
                     .put("kind", "error")
                     .put("text", "ward has no $preset access mode"))
@@ -513,17 +519,18 @@ class WardBridge(private val connection: WardConnection) {
             .put("text", "ward does not serve host command $line"))
     }
 
-    private fun dshPresetOf(ward: String): String = when (ward) {
-        "reads-only" -> "read-only"
-        "workspace" -> "workspace-write"
-        "default" -> "default"
+    private fun dshPresetOf(ward: String): String = when {
+        ward == "reads-only" || ward == "read-only" -> "read-only"
+        ward == "workspace" || ward == "workspace-write" -> "workspace-write"
+        ward.contains("full", ignoreCase = true) -> "danger-full-access"
         else -> ward
     }
 
-    private fun wardPresetOf(dsh: String): String? = when (dsh) {
-        "read-only", "reads-only" -> "reads-only"
-        "workspace-write", "workspace" -> "workspace"
-        "default" -> "default"
+    private fun wardPresetOf(dsh: String): String? = when {
+        dsh == "read-only" || dsh == "reads-only" -> "reads-only"
+        dsh == "workspace-write" || dsh == "workspace" -> "workspace"
+        dsh == "default" -> "default"
+        dsh.contains("full", ignoreCase = true) -> "full-access"
         else -> null
     }
 

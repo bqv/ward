@@ -394,9 +394,10 @@ class RemoteMux(
         val permission = runCatching { WardApi(active).policyList() }.getOrNull()
             ?.text("current").orEmpty()
             ?.let {
-                when (it) {
-                    "reads-only" -> "read-only"
-                    "workspace" -> "workspace-write"
+                when {
+                    it == "reads-only" || it == "read-only" -> "read-only"
+                    it == "workspace" || it == "workspace-write" -> "workspace-write"
+                    it.contains("full", ignoreCase = true) -> "danger-full-access"
                     else -> it
                 }
             }
