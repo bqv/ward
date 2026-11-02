@@ -191,4 +191,5 @@ The protocol gates live in
 `app/src/test/java/uk/xa0/ward/proto/WardProtocolTest.kt` (captured golden
 bytes, frame round-trip, CBOR subset and refusals) and
 `app/src/test/java/uk/xa0/ward/proto/WardLiveTest.kt` (create, list, resume,
-rename and archive against a live daemon).
+rename, archive, file read/list/blob and the four-preset `policy.list` against a
+live daemon).
