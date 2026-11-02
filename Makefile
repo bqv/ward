@@ -109,6 +109,19 @@ $(BUILDDIR)/%.o: %.c
 $(BUILDDIR)/%: tests/%.c $(CLIENT_OBJ) $(CORE_LIB)
 	$(CC) $(CFLAGS) $< $(CLIENT_OBJ) $(CORE_LIB) $(LDFLAGS) $(PKG_LIBS) -o $@
 
+JAVA_HOME ?= $(shell dirname $$(dirname $$(readlink -f $$(which javac 2>/dev/null) 2>/dev/null) 2>/dev/null) 2>/dev/null)
+ANDROID_LIB := $(BUILDDIR)/libwardclient.so
+
+android-lib: $(ANDROID_LIB)
+
+$(ANDROID_LIB): clients/android/ward_jni.c src/client/client.c
+	@mkdir -p $(@D)
+	$(CC) -std=c11 -D_GNU_SOURCE -Wall -Wextra -Wpedantic -Werror -fPIC -shared \
+	  -Isrc -I$(JAVA_HOME)/include -I$(JAVA_HOME)/include/linux \
+	  $(PKG_CFLAGS) clients/android/ward_jni.c src/client/client.c \
+	  src/proto/codec.c src/proto/frame.c src/core/util.c \
+	  $(LDFLAGS) $(PKG_LIBS) -o $@
+
 modules: $(MODULE_WASM)
 guests: $(GUEST_WASM)
 

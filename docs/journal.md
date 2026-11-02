@@ -1930,3 +1930,14 @@ easily as this one does, and "the client produces these bytes" becomes an assert
 
 The rule the repository applies is still not satisfied for Android — the row is not `delivered` until a client under test
 replays the fixture — but the fixture and the harness are the part this repository can own without a device.
+
+Hundred-and-forty-fifth: the Android client's shape is chosen — NDK reuse of `src/client` — and its interface exists.
+`clients/android/ward_jni.c` exposes `connect`, `call` and `close` over `wd_client`, with CBOR crossing as byte arrays so
+the Kotlin side never needs a codec of its own. `make android-lib` builds `out/libwardclient.so` against the host compiler
+and the JDK's `jni.h`, which proves the layer compiles and links.
+
+What it does not prove is behaviour: the library has been built, not exercised. And a real Android build needs libcbor
+cross-compiled for the target ABI — the one dependency the client does not already carry.
+
+The row stays `missing` under the repository's rule, and `docs/m6.md` says exactly what remains: an APK, a device, and the
+conformance fixture replayed from Kotlin.
