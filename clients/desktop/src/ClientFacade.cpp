@@ -165,7 +165,8 @@ ClientFacade::ClientFacade(QObject *transport, QObject *parent)
                    || m_transportName == QLatin1String("ward");
     m_hasPermissionCatalog = m_transportName == QLatin1String("dsh")
                           || m_transportName == QLatin1String("ward");
-    m_hasAttachmentStaging = m_transportName == QLatin1String("dsh");
+    m_hasAttachmentStaging = m_transportName == QLatin1String("dsh")
+                          || m_transportName == QLatin1String("ward");
     m_hasFileSurface = m_transportName == QLatin1String("dsh");
     m_hasTrajectory = roster;
     m_hasGoalEditing = m_transportName == QLatin1String("dsh");

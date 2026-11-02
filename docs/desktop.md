@@ -101,14 +101,11 @@ proven yet. They are reported to the ward session as well.
    transport, device certificates, pairing and `device.*` are not in the client;
    `src/net/quic.h` is the code to reuse, but it pulls ngtcp2 and OpenSSL into a
    Qt client that currently links neither.
-2. **Uploaded attachments.** The image lightbox follows `tool.result.path`
-   (and `session.attachment.path` for store blobs) through
-   `attachment.read_blob`; a path that is absent is not rendered. The composer's
-   staging surface is still not wired to `attachment.add/list`.
-3. **Queue/steer.** `session.prompt` is serialised; the composer's queue/steer
+2. **Queue/steer.** `session.prompt` is serialised; the composer's queue/steer
    mode stays as-is until a mid-turn steer has a defined model-visible meaning.
    No client-side queue is invented.
 
 Deferred new sessions, workspaces-by-cwd, trajectory projection, the headless
-`--prompt` path and permission presets are now in. QUIC remains a dependency
-problem; queue/steer remains a protocol-design decision.
+`--prompt` path, permission presets, directory and blob reads, the lightbox and
+composer attachment staging are now in. QUIC remains a dependency/UX problem;
+queue/steer remains a protocol-design decision.

@@ -399,6 +399,7 @@ private:
     QHash<QString, QVariantMap> m_approvals;
     QHash<QString, QByteArray> m_attachments;
     QSet<QString> m_attachmentPending;
+    QString m_stagingName;
     QString m_attachmentPath;
     QSet<QString> m_announcedApprovals;
 };

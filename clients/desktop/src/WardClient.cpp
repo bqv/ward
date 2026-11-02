@@ -7,9 +7,17 @@
 #include "AcpClient.h"
 
 #include <QDateTime>
+#include <QBuffer>
+#include <QClipboard>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
+#include <QGuiApplication>
+#include <QImage>
+#include <QFile>
 #include <QFileInfo>
+#include <QGuiApplication>
+#include <QImage>
 #include <QSettings>
 #include <QSocketNotifier>
 #include <QTimer>
@@ -516,6 +524,17 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
             || method == QLatin1String("policy.select")) {
             m_accessNotice = text;
             emit accessNoticeChanged();
+        }
+        if (method == QLatin1String("attachment.add")) {
+            for (int i = m_pendingAttachments.size() - 1; i >= 0; --i) {
+                if (m_pendingAttachments.at(i).toMap().value(QStringLiteral("name")).toString()
+                        == m_stagingName) {
+                    m_pendingAttachments.removeAt(i);
+                    break;
+                }
+            }
+            m_stagingName.clear();
+            emit pendingAttachmentsChanged();
         }
         if (method == QLatin1String("session.file_list")) {
             m_fileError = text;
@@ -1137,6 +1156,11 @@ void WardClient::doPrompt(const QString &text)
     emit busyChanged();
     emit turnOpenChanged();
     setState(Ready, QStringLiteral("thinking…"));
+    if (!m_pendingAttachments.isEmpty()) {
+        m_pendingAttachments.clear();
+        m_stagingName.clear();
+        emit pendingAttachmentsChanged();
+    }
     sendRequest(QStringLiteral("session.prompt"),
                 {{QStringLiteral("id"), m_sessionId}, {QStringLiteral("text"), text}});
 }
@@ -1529,18 +1553,81 @@ void WardClient::clearPendingAttachments()
     if (m_pendingAttachments.isEmpty())
         return;
     m_pendingAttachments.clear();
+    m_stagingName.clear();
     emit pendingAttachmentsChanged();
 }
 
 void WardClient::pasteAttachment()
 {
-    emit railNotice(QStringLiteral("ward has no attachment staging"), true);
+    const QImage image = QGuiApplication::clipboard()->image();
+    if (image.isNull()) {
+        emit railNotice(QStringLiteral("the clipboard holds no image"), true);
+        return;
+    }
+    QByteArray bytes;
+    QBuffer buffer(&bytes);
+    buffer.open(QIODevice::WriteOnly);
+    if (!image.save(&buffer, "PNG")) {
+        emit railNotice(QStringLiteral("cannot encode the clipboard image"), true);
+        return;
+    }
+    const QString name = QStringLiteral("clipboard-%1.png")
+                             .arg(QDateTime::currentMSecsSinceEpoch());
+    m_pendingAttachments.append(QVariantMap{
+        {QStringLiteral("name"), name},
+        {QStringLiteral("kind"), QStringLiteral("image")},
+        {QStringLiteral("data"), QString::fromLatin1(bytes.toBase64())}});
+    m_stagingName = name;
+    emit pendingAttachmentsChanged();
+    if (m_sessionId.isEmpty()) {
+        emit railNotice(QStringLiteral("create a session before attaching a file"), true);
+        return;
+    }
+    sendRequest(QStringLiteral("attachment.add"),
+                {{QStringLiteral("id"), m_sessionId},
+                 {QStringLiteral("name"), name},
+                 {QStringLiteral("data"), bytes}});
 }
 
 void WardClient::uploadAttachment(const QUrl &url)
 {
-    Q_UNUSED(url);
-    emit railNotice(QStringLiteral("ward has no attachment staging"), true);
+    if (!url.isLocalFile()) {
+        emit railNotice(QStringLiteral("only local files can be attached"), true);
+        return;
+    }
+    const QString path = url.toLocalFile();
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        emit railNotice(QStringLiteral("cannot read %1").arg(path), true);
+        return;
+    }
+    const QByteArray bytes = file.readAll();
+    if (bytes.size() > 4 * 1024 * 1024) {
+        emit railNotice(QStringLiteral("the attachment is larger than 4 MiB"), true);
+        return;
+    }
+    const QString name = QFileInfo(path).fileName();
+    const bool image = name.endsWith(QLatin1String(".png"), Qt::CaseInsensitive)
+                    || name.endsWith(QLatin1String(".jpg"), Qt::CaseInsensitive)
+                    || name.endsWith(QLatin1String(".jpeg"), Qt::CaseInsensitive)
+                    || name.endsWith(QLatin1String(".gif"), Qt::CaseInsensitive)
+                    || name.endsWith(QLatin1String(".webp"), Qt::CaseInsensitive);
+    QVariantMap row{{QStringLiteral("name"), name},
+                    {QStringLiteral("kind"), image ? QStringLiteral("image")
+                                                   : QStringLiteral("file")}};
+    if (image)
+        row.insert(QStringLiteral("data"), QString::fromLatin1(bytes.toBase64()));
+    m_pendingAttachments.append(row);
+    m_stagingName = name;
+    emit pendingAttachmentsChanged();
+    if (m_sessionId.isEmpty()) {
+        emit railNotice(QStringLiteral("create a session before attaching a file"), true);
+        return;
+    }
+    sendRequest(QStringLiteral("attachment.add"),
+                {{QStringLiteral("id"), m_sessionId},
+                 {QStringLiteral("name"), name},
+                 {QStringLiteral("data"), bytes}});
 }
 
 void WardClient::updateQueueItem(const QString &itemId, const QString &kind)

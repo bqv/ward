@@ -97,16 +97,11 @@ and are never silently dropped by the wire layer.
 
 ## Not adopted yet
 
-- **QUIC.** `WardClient` connects over `AF_UNIX` and loopback TCP. ward's QUIC
-  transport, device certificates and pairing are not in this client yet; the
-  daemon's own QUIC client (`src/net/quic.c`) is the code to reuse.
-- **Composer attachments.** The image lightbox reads a `tool.result.path` or
-  `session.attachment.path` through `attachment.read_blob`; the composer still
-  does not stage `attachment.add/list`.
-- **QUIC.** Unix sockets and loopback TCP only; device pairing and certificates
-  are not in this client.
-- **Deferred new-session seats.** A new session is created immediately rather
-  than on the first send.
+- **QUIC.** Unix sockets and loopback TCP only. ward's QUIC client, device
+  certificates and the pairing flow are not in this client; `src/net/quic.h`
+  is the code to reuse.
+- **Queue/steer.** `session.prompt` is serialised; the composer's mode chip
+  stays as-is until a mid-turn steer has a model-visible meaning.
 
 ## Layout
 
