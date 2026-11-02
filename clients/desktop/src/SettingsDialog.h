@@ -21,6 +21,7 @@ private slots:
     void reload();
     void reloadArchivedSessions();
     void unarchiveSelected();
+    void pairDevice();
 
 private:
     void apply();
@@ -33,4 +34,6 @@ private:
     QLabel *m_archivedEmpty = nullptr;
     QListWidget *m_archivedList = nullptr;
     QPushButton *m_unarchive = nullptr;
+    QPushButton *m_pair = nullptr;
+    QLabel *m_pairNote = nullptr;
 };

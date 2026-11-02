@@ -487,10 +487,18 @@ void WardClient::connectQuic()
     }
     const QByteArray host = target.left(colon).toUtf8();
     const uint16_t port = uint16_t(target.mid(colon + 1).toUInt());
-    const QByteArray cert = qgetenv("WARD_QUIC_CERT");
-    const QByteArray key = qgetenv("WARD_QUIC_KEY");
-    const QByteArray ca = qgetenv("WARD_QUIC_CA");
-    const QByteArray pin = qgetenv("WARD_QUIC_PIN");
+    QByteArray cert = qgetenv("WARD_QUIC_CERT");
+    QByteArray key = qgetenv("WARD_QUIC_KEY");
+    QByteArray ca = qgetenv("WARD_QUIC_CA");
+    QByteArray pin = qgetenv("WARD_QUIC_PIN");
+    if (cert.isEmpty())
+        cert = QSettings().value(QStringLiteral("quic/cert")).toString().toUtf8();
+    if (key.isEmpty())
+        key = QSettings().value(QStringLiteral("quic/key")).toString().toUtf8();
+    if (ca.isEmpty())
+        ca = QSettings().value(QStringLiteral("quic/ca")).toString().toUtf8();
+    if (pin.isEmpty())
+        pin = QSettings().value(QStringLiteral("quic/pin")).toString().toUtf8();
     if (cert.isEmpty() || key.isEmpty()) {
         fail(QStringLiteral("quic needs a paired device: set WARD_QUIC_CERT and WARD_QUIC_KEY"));
         return;

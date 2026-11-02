@@ -82,7 +82,7 @@ daemon.
 | queue | `session.prompt` -> `{queued: true, ahead}` while a turn runs; one queued prompt per session; the chip shows the position |
 | steer | `session.prompt` with `steer: true` appends to the running turn; client falls back to queue when no turn is open or the local steer budget is spent |
 | attachments | `attachment.read_blob` for the image lightbox; `session.attachment.path` and `tool.result.path` supply the reference |
-| QUIC | `WARD_QUIC=ON`, `ward-pair`, `--socket quic://host:port`, `WARD_QUIC_CERT/KEY/CA/PIN` |
+| QUIC | `WARD_QUIC=ON`, `ward-pair`, `--socket quic://host:port`, `WARD_QUIC_CERT/KEY/CA/PIN`; Settings > Pair a device runs the same flow |
 | terminal | `terminal.open/write/resize/close`, `terminal.output`, eof and exit state |
 | session lifecycle | create (client-side lazy), list, resume, prompt, cancel, rename, pin, archive, compact, set_model |
 | catalog | `model.list`, `session.set_model` |
@@ -100,19 +100,14 @@ Unknown events are not dropped by the wire layer: every event reaches
 These are the things the desktop client had and ward-gui does not, or has not
 proven yet. They are reported to the ward session as well.
 
-1. **QUIC pairing UI.** `WARD_QUIC=ON` builds the transport and `ward-pair`;
-   `ward-pair` generates a CSR, calls `device.pair` over the local socket and
-   `device.enrol` over QUIC, then writes `device.crt`, `device.key` and
-   `ca.crt`. A live run minted `DE1EE261...` and connected with the new cert.
-   The only remaining part is an in-window pairing dialog.
-2. **Late steer.** Steers ride the running turn's next provider request. A
-   turn that reaches no further provider call drops them; the fix is to carry
-   undelivered steers into the queue at turn end, which is a ward-side change.
-   The client never invents an interruption: true interruption is cancel plus
-   queue.
+1. **Late steer measurement.** Steers ride the running turn's next provider
+   request; undelivered ones are now carried into the queue at turn end, but no
+   gate yet counts the extra turn. The client never invents an interruption:
+   true interruption is cancel plus queue.
 
 Deferred new sessions, workspaces-by-cwd, trajectory projection, the headless
 `--prompt` path, permission presets, directory and blob reads, the lightbox,
 composer attachment staging, the QUIC transport and a pairing CLI are now in.
-An in-window pairing dialog remains; queue and steer are in, with the late-steer
-carry-over still ward-side.
+The in-window pairing dialog is in Settings; it runs `ward-pair` and stores the
+written paths. Queue and steer are in; the late-steer carry-over is implemented
+but still unmeasured on the ward side.

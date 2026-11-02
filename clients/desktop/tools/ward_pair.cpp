@@ -248,7 +248,6 @@ int main(int argc, char **argv) {
     wd_quic_client_free(quic);
     free(token);
     free(pin);
-    free(endpoint);
     free(csr_pem);
     if (cert_pem == nullptr || ca_pem == nullptr) {
         fprintf(stderr, "ward-pair: device.enrol returned no certificate\n");
@@ -279,12 +278,13 @@ int main(int argc, char **argv) {
         free(serial);
         return 1;
     }
-    printf("paired %s\nkey %s\ncert %s\nca %s\n",
-           serial != nullptr ? serial : "", key_path.c_str(), cert_path.c_str(),
-           ca_path.c_str());
+    printf("paired %s\nendpoint %s\nkey %s\ncert %s\nca %s\n",
+           serial != nullptr ? serial : "", endpoint != nullptr ? endpoint : "",
+           key_path.c_str(), cert_path.c_str(), ca_path.c_str());
     free(key_pem);
     free(cert_pem);
     free(ca_pem);
     free(serial);
+    free(endpoint);
     return 0;
 }

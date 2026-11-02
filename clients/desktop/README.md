@@ -119,10 +119,12 @@ and are never silently dropped by the wire layer.
 
 ## Not adopted yet
 
-- **QUIC pairing UI.** `ward-pair` does CSR, `device.pair`/`enrol` and stores the
-  credentials, but there is no in-window pairing dialog yet.
-- **Late steer.** A steer that never reaches another provider call is dropped
-  by the daemon; carrying it into the queue is the remaining ward-side fix.
+- **QUIC pairing dialog.** Settings > Pair a device runs `ward-pair`, stores the
+  certificate paths and says to restart on `--socket quic://…`; the window does
+  not switch transport at runtime.
+- **Late steer gate.** The daemon carries an undelivered steer into the queue at
+  turn end, but no gate yet counts the extra turn; the client does not need a
+  new field.
 
 ## Layout
 

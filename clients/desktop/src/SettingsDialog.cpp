@@ -4,8 +4,14 @@
 #include "ShellChrome.h"
 #include "Theme.h"
 
+#include <QCoreApplication>
 #include <QDebug>
+#include <QFileInfo>
 #include <QHBoxLayout>
+#include <QInputDialog>
+#include <QProcess>
+#include <QSettings>
+#include <QStandardPaths>
 #include <QLabel>
 #include <QListWidget>
 #include <QPalette>
@@ -91,6 +97,17 @@ SettingsDialog::SettingsDialog(ClientFacade *facade, QWidget *parent)
                                 theme->dim(), Chrome::uiFont(theme->fontData())));
 
     layout->addSpacing(theme->space3());
+    layout->addWidget(textLabel(this, QStringLiteral("QUIC device"), theme->accent(),
+                                Chrome::monoFont(theme->fontData())));
+    m_pairNote = textLabel(this,
+                           QStringLiteral("Pairing mints a token over the local socket and "
+                                          "enrols a new certificate over QUIC."),
+                           theme->dim(), Chrome::uiFont(theme->fontData()));
+    layout->addWidget(m_pairNote);
+    m_pair = pushButton(this, QStringLiteral("Pair a device"));
+    layout->addWidget(m_pair, 0, Qt::AlignLeft);
+
+    layout->addSpacing(theme->space3());
     m_archivedTitle = textLabel(this, QStringLiteral("Archived sessions"), theme->accent(),
                                 Chrome::monoFont(theme->fontData()));
     m_archivedNote = textLabel(this,
@@ -135,6 +152,7 @@ SettingsDialog::SettingsDialog(ClientFacade *facade, QWidget *parent)
     layout->addLayout(actions);
 
     connect(m_unarchive, &QPushButton::clicked, this, &SettingsDialog::unarchiveSelected);
+    connect(m_pair, &QPushButton::clicked, this, &SettingsDialog::pairDevice);
     connect(m_archivedList, &QListWidget::itemSelectionChanged, this, [this]() {
         m_unarchive->setEnabled(m_archivedList->currentItem() != nullptr);
     });
@@ -170,6 +188,53 @@ void SettingsDialog::reload()
     const bool steer = m_facade->busyEnter() == QLatin1String("steer");
     m_steerMode->setChecked(steer);
     m_queueMode->setChecked(!steer);
+}
+
+void SettingsDialog::pairDevice()
+{
+    if (m_facade == nullptr || m_facade->transportName() != QLatin1String("ward")) {
+        m_pairNote->setText(QStringLiteral("Pairing is only available on the ward transport."));
+        return;
+    }
+    QString program = QCoreApplication::applicationDirPath() + QStringLiteral("/ward-pair");
+    if (!QFileInfo::exists(program))
+        program = QStandardPaths::findExecutable(QStringLiteral("ward-pair"));
+    if (program.isEmpty() || !QFileInfo::exists(program)) {
+        m_pairNote->setText(QStringLiteral("ward-pair is not built; configure with WARD_QUIC=ON."));
+        return;
+    }
+    bool ok = false;
+    const QString scope = QInputDialog::getItem(
+        this, QStringLiteral("Pair a device"), QStringLiteral("Scope"),
+        {QStringLiteral("desktop"), QStringLiteral("phone"), QStringLiteral("readonly")},
+        0, false, &ok);
+    if (!ok)
+        return;
+    m_pair->setEnabled(false);
+    m_pairNote->setText(QStringLiteral("Pairing…"));
+    QProcess process;
+    process.setProcessChannelMode(QProcess::MergedChannels);
+    process.start(program, {QStringLiteral("--scope"), scope});
+    if (!process.waitForStarted(5000) || !process.waitForFinished(30000)) {
+        m_pairNote->setText(QStringLiteral("Pairing failed: %1").arg(process.errorString()));
+        m_pair->setEnabled(true);
+        return;
+    }
+    const QString output = QString::fromUtf8(process.readAll()).trimmed();
+    if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
+        m_pairNote->setText(QStringLiteral("Pairing refused: %1").arg(output));
+        m_pair->setEnabled(true);
+        return;
+    }
+    const QString root = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation)
+                       + QStringLiteral("/ward-gui/quic");
+    QSettings settings;
+    settings.setValue(QStringLiteral("quic/cert"), root + QStringLiteral("/device.crt"));
+    settings.setValue(QStringLiteral("quic/key"), root + QStringLiteral("/device.key"));
+    settings.setValue(QStringLiteral("quic/ca"), root + QStringLiteral("/ca.crt"));
+    m_pairNote->setText(QStringLiteral("Paired. Restart ward-gui with --socket quic://… "
+                                       "to use the new device.\n%1").arg(output));
+    m_pair->setEnabled(true);
 }
 
 void SettingsDialog::reloadArchivedSessions()
