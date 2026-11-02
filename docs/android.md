@@ -1,8 +1,14 @@
 # The Android client
 
-`clients/android` holds three pieces: the JNI layer (`ward_jni.c`), the Java
-wrapper (`uk/xa0/ward/WardClient.java`), and a minimal app
+The code lives in **`clients/android-ward`**: the JNI layer (`ward_jni.c`), the
+Java wrapper (`uk/xa0/ward/WardClient.java`), and a minimal app
 (`app/AndroidManifest.xml`, `app/src/uk/xa0/ward/MainActivity.java`).
+
+`clients/android` is a different project — a DSH Jetpack Compose client that
+landed in this tree separately and shares nothing with this one but the
+directory name that used to hold it. The two are kept apart deliberately: this
+client speaks ward's protocol through the JNI layer, that one reimplements the
+DSH web client against a DSH host.
 
 The transport is loopback TCP. Start the daemon with a listener the phone can
 reach through `adb reverse`:

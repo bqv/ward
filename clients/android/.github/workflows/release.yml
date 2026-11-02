@@ -1,0 +1,165 @@
+name: Release
+
+# Publishes an installable APK on a GitHub Release, on a version tag.
+#
+# A release artifact is a permanent, linkable download, which an Actions artifact
+# is not: artifacts expire, and they are only reachable by someone who can see the
+# repository. The APK this attaches is the *release* build (id `uk.xa0.dsh`, no
+# `.debug` suffix), signed with a real release key when one is supplied.
+#
+#   git tag v0.2.0 && git push origin v0.2.0
+#
+# The release body is `docs/releases/<tag>.md` when that file exists, with the
+# generated download/size/version/SHA-256 block appended below it.
+#
+# Keystore, if you want a properly signed release rather than a debug-key one:
+# base64 a keystore and set repository secrets
+#   RELEASE_KEYSTORE_BASE64, RELEASE_KEYSTORE_PASSWORD,
+#   RELEASE_KEY_ALIAS, RELEASE_KEY_PASSWORD
+# Without them the build falls back to the debug key so the job still produces
+# something installable — but a debug-key release cannot be upgraded in place by
+# a later release-key build, so set them before the first public release if you
+# care about that.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to publish (e.g. v0.1.0); must already exist'
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Release APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # Same layout build.sh expects; see .github/workflows/build.yml for why.
+      - name: Lay out .toolchain for build.sh
+        run: |
+          set -euo pipefail
+          # `.toolchain/` is gitignored, so a fresh clone does not have it.
+          mkdir -p .toolchain/android-home .toolchain/xdg-data
+          ln -s "${JAVA_HOME:?setup-java should have set JAVA_HOME}" .toolchain/jdk-17.0.20.1+1
+          curl -fsSL --retry 3 \
+            "https://services.gradle.org/distributions/gradle-8.7-bin.zip" \
+            -o /tmp/gradle.zip
+          unzip -q /tmp/gradle.zip -d .toolchain
+          test -x .toolchain/gradle-8.7/bin/gradle
+          test -n "${ANDROID_SDK_ROOT:-}" || { echo "ANDROID_SDK_ROOT is unset"; exit 1; }
+          echo "sdk.dir=${ANDROID_SDK_ROOT}" > local.properties
+          cat local.properties
+
+      - name: Decode release keystore
+        id: signing
+        env:
+          KEYSTORE: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "${KEYSTORE:-}" ]; then
+            echo "No release keystore configured; the APK will carry the debug key."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/release.keystore"
+          {
+            echo "configured=true"
+            echo "storeFile=$RUNNER_TEMP/release.keystore"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build release APK
+        env:
+          SIGNING_STORE_FILE: ${{ steps.signing.outputs.storeFile }}
+          SIGNING_STORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          bash build.sh :app:assembleRelease
+          ls -la app/build/outputs/apk/release/
+
+      - name: Name the artifacts
+        id: apk
+        run: |
+          set -euo pipefail
+          tag='${{ github.event.inputs.tag || github.ref_name }}'
+          version=$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -1)
+
+          # AGP names the artifact `-unsigned` exactly when it did not sign it, so
+          # this is also the check that the signing secrets were actually used. A
+          # `-unsigned` APK installs nowhere: Android refuses it outright.
+          src=app/build/outputs/apk/release/app-release.apk
+          if [ ! -f "$src" ]; then
+            if [ -f app/build/outputs/apk/release/app-release-unsigned.apk ]; then
+              echo "::error::the release APK is unsigned — the RELEASE_KEYSTORE_BASE64 / password / alias secrets are missing or wrong"
+              exit 1
+            fi
+            echo "::error::no release APK produced at all"
+            exit 1
+          fi
+          out="dsh-android-${tag}-release.apk"
+          cp "$src" "$out"
+          {
+            echo "tag=$tag"
+            echo "version=$version"
+            echo "path=$out"
+            echo "size=$(du -h "$out" | cut -f1)"
+            echo "sha256=$(sha256sum "$out" | cut -d' ' -f1)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag='${{ steps.apk.outputs.tag }}'
+          notes_file="docs/releases/${tag}.md"
+          notes="$RUNNER_TEMP/notes.md"
+
+          # The prose belongs in the repository, next to the code it describes, so
+          # `docs/releases/<tag>.md` is the body when it exists. The facts below are
+          # generated because only the build knows them.
+          if [ -f "$notes_file" ]; then
+            cat "$notes_file" > "$notes"
+            printf '\n---\n\n' >> "$notes"
+          else
+            printf 'Native Android client for DeepSeek Harness.\n\n' > "$notes"
+          fi
+          {
+            printf '**Download:** `%s` (%s)\n\n' '${{ steps.apk.outputs.path }}' '${{ steps.apk.outputs.size }}'
+            printf -- '- Version `%s`, minSdk 26, built from `%s`.\n' '${{ steps.apk.outputs.version }}' "${GITHUB_SHA::7}"
+            printf -- '- Package `uk.xa0.dsh` — a release build, so it installs alongside a debug build rather than over it.\n'
+            printf -- '- SHA-256: `%s`\n\n' '${{ steps.apk.outputs.sha256 }}'
+            printf 'See the README for how to point it at a host and sign in.\n'
+          } >> "$notes"
+
+          # An existing release is updated in place — and `--draft=false` is not
+          # decoration: deleting a tag turns its release into an *untagged draft*
+          # that the API hides from anonymous readers, and a re-run that only edits
+          # it would leave the release published to nobody. This makes a re-cut tag
+          # converge on one live release.
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" '${{ steps.apk.outputs.path }}' --clobber
+            gh release edit "$tag" --notes-file "$notes" --draft=false \
+              --title "DSH for Android $tag"
+          else
+            gh release create "$tag" '${{ steps.apk.outputs.path }}' \
+              --title "DSH for Android $tag" --notes-file "$notes"
+          fi

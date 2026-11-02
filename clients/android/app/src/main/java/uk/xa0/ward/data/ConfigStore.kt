@@ -1,0 +1,309 @@
+package uk.xa0.ward.data
+
+import android.content.Context
+import android.content.SharedPreferences
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
+import uk.xa0.ward.extension.ExtensionTrust
+import uk.xa0.ward.model.DrawerGrouping
+import uk.xa0.ward.net.AcceptedCert
+import uk.xa0.ward.net.CertTrust
+import uk.xa0.ward.term.TerminalCellSize
+import uk.xa0.ward.term.decodeHostShellSessions
+import uk.xa0.ward.term.encodeHostShellSessions
+
+/**
+ * Everything the app needs to reach one DSH host.
+ *
+ * [manualCookie] exists because a DSH host can also be reached *directly* on the
+ * carrier port, where the loopback-bound `dsh-auth-*` cookie is the only way in
+ * (the LAN door normally mints its own session through /auth/login instead).
+ */
+data class DshConfig(
+    val baseUrl: String = "",
+    /**
+     * An optional second door to the same host, on the local network.
+     *
+     * The phone is often on the LAN the host lives on, where the host answers
+     * without a login and without a tunnel, and often on mobile data, where only
+     * [baseUrl] is reachable. The app probes both and prefers this one while it
+     * answers — so it is stored beside the public address rather than replacing
+     * it, and blank simply means "this install has no LAN address to try". An
+     * install whose [baseUrl] is *already* a private address needs nothing
+     * entered here; see [uk.xa0.ward.net.isPrivateLanHost].
+     */
+    val lanUrl: String = "",
+    val username: String = "",
+    val password: String = "",
+    val manualCookie: String = "",
+    val themeMode: String = ThemeMode.SYSTEM,
+    /** Agent preset used for newly created sessions; blank means "host default". */
+    val agentPreset: String = "",
+    /**
+     * What the send button does while the agent is running: `queue` (deliver
+     * after the current turn) or `steer` (interrupt the turn with the message).
+     *
+     * The web client keeps this in the host user-settings document, but a
+     * remote browser is handed a `memory` settings scope whose writes are
+     * dropped, so there is nothing host-side to read or write. It is a
+     * client-local preference here, matching the web's `busyEnter` field and
+     * its `'queue'` default.
+     */
+    val busyEnter: String = BusyEnter.QUEUE,
+    /**
+     * Sidebar Group mode: sibling Workspaces, the Workspace Tree, or one flat list —
+     * the web's own three-way `Group by`. A client-local preference like [busyEnter]:
+     * the host has no settings scope a phone can write, and the sidebar's shape is a
+     * property of this client anyway. See [DrawerGrouping].
+     */
+    val drawerGrouping: DrawerGrouping = DrawerGrouping.WORKSPACE,
+    /** Sidebar Order mode: last updated (`true`) or the Workspace's manual order. */
+    val drawerOrderByUpdated: Boolean = false,
+    /**
+     * The drawer's Archived filter. Saved for the same reason Group and Order are:
+     * it is a view the user chose, and losing it on every restart is the bug the
+     * user reported for Order ("on app restart the drawer's order should persist").
+     */
+    val drawerShowArchived: Boolean = false,
+    /**
+     * Whether journal types this client has no branch for are drawn as small
+     * activity lines in the chat log.
+     *
+     * Off by default: this is an opt-in diagnostic view, not normal transcript
+     * content. The fallback can stop a plugin's own loop phases from making a live
+     * session look silent, but most readers found the rows noisy, so they are a
+     * preference a reader turns on deliberately. Persisted for the same reason as
+     * the drawer's view modes: losing the choice on every restart is the bug.
+     */
+    val showHostEvents: Boolean = false,
+    /**
+     * The Workspace sections the user has collapsed, by section key (a Workspace's
+     * host id, or the `__flat__`/`__ungrouped__` sentinels). Persisted for the same
+     * reason as the three above: collapsing a Workspace is a view the user chose,
+     * and a plain `remember` in the drawer lost it on every cold start.
+     *
+     * Only the Workspace collapse lives here. The drawer's "Show N more" paging and
+     * the per-session subagent disclosure stay ephemeral in the composable: they
+     * are per-visit navigation, not a preference, and restoring them would reopen
+     * the drawer in a state the user did not ask for.
+     */
+    val drawerCollapsedSections: Set<String> = emptySet(),
+    /**
+     * Root key → the dedicated "Host shell" Session that root's unconfined terminal
+     * lives in. The key is a Workspace id, or — for a session in no Workspace — the
+     * `cwd` the shell was rooted at (`uk.xa0.ward.term.HostShellRoot.key`).
+     *
+     * Local, and not recoverable from the host, because that session is **archived**:
+     * an archived session cannot be browsed to, so without this the app would build a
+     * second one on every visit and leave the first behind. It is written only once the
+     * whole bootstrap has succeeded (session created, mode set, archived), so a
+     * remembered id is evidence that the mode step ran — see
+     * [uk.xa0.ward.term.HostShellProgress].
+     *
+     * The drawer's own "Archived" toggle is the recovery path: it is how the user finds
+     * and restores the session if they ever want it back, or wants it gone.
+     */
+    val hostShellSessions: Map<String, String> = emptyMap(),
+    /**
+     * A DeepSeek API key, for reading the account's balance.
+     *
+     * Not the host's key and not a way to bill anything: DeepSeek's only account
+     * endpoint is `GET /user/balance`, and the balance belongs to the *account* —
+     * every key on it reads the same figure — so this key sees exactly the balance
+     * the host is spending from. It is stored in the same encrypted preferences as
+     * the host password, and sent to `api.deepseek.com` and nowhere else.
+     *
+     * Blank means the usage panel says so rather than showing a stale or invented
+     * number.
+     */
+    val deepseekApiKey: String = "",
+    /**
+     * The Shell tab's terminal cell size, in sp.
+     *
+     * Client-local, for the same reason [busyEnter] and the drawer's modes are: the
+     * web's own "Font size" setting is the *conversation's* and says so ("Only
+     * affects conversation content"), and its terminal is xterm.js at a hard-coded
+     * 13px with no control at all. There is no host field to write and none to
+     * mirror, so this is the app's own preference — persisted because a size the
+     * reader chose and lost on every restart is the bug the drawer's Order mode was
+     * reported for.
+     *
+     * The value is a cell size rather than a scale factor: [TerminalCellSize] derives
+     * the line box from it, and the font size *is* the cell's width, so a percentage
+     * would only be a second spelling of the same number.
+     */
+    val terminalFontSp: Float = TerminalCellSize.DEFAULT_FONT_SP,
+    /**
+     * The certificates the app has been told to trust, one per host.
+     *
+     * The trust model is WeeChat-Android's: the accepted certificates are the trust
+     * anchors the client's handshakes are validated against, and a host with one is
+     * pinned to it. Stored here rather than in a keystore of their own because this
+     * is already the one encrypted place client-local state lives — see
+     * [uk.xa0.ward.net.CertTrust] for the format and the reasoning.
+     */
+    val acceptedCerts: List<AcceptedCert> = emptyList(),
+    /**
+     * Extensions the reader switched off, by [uk.xa0.ward.extension.DshExtension.id].
+     *
+     * Local to this phone, exactly like the host Plugins section's bundle switches
+     * are not: a disabled extension is still installed and its code is still in an
+     * APK, but its tabs disappear and no contribution is drawn. An id that no
+     * longer exists is harmless and is kept, so re-enabling after an update is not
+     * a surprise.
+     */
+    val disabledExtensionIds: Set<String> = emptySet(),
+    /**
+     * The signing certificate each extension package is pinned to, as
+     * `package name → SHA-256 hex`.
+     *
+     * A runtime-loaded APK never goes through Android's package installer, so the
+     * platform's own "an update must have the same signer" check never runs for it.
+     * This map is that check. See [ExtensionTrust].
+     */
+    val extensionTrust: Map<String, String> = emptyMap(),
+) {
+    val isConfigured: Boolean get() = baseUrl.isNotBlank()
+
+    /** True when the user opted into pasting a raw cookie instead of logging in. */
+    val usesManualCookie: Boolean get() = manualCookie.isNotBlank()
+}
+
+object ThemeMode {
+    const val SYSTEM = "system"
+    const val DARK = "dark"
+    const val LIGHT = "light"
+    val all = listOf(SYSTEM, DARK, LIGHT)
+}
+
+/** Accepted `busyEnter` values, mirroring the host's `BUSY_ENTER_BEHAVIORS`. */
+object BusyEnter {
+    const val QUEUE = "queue"
+    const val STEER = "steer"
+
+    /** The mode the other gesture uses; the web maps Cmd/Ctrl+Enter to this. */
+    fun flip(mode: String): String = if (mode == STEER) QUEUE else STEER
+}
+
+/**
+ * Credentials live in EncryptedSharedPreferences (AES-256-GCM, key in the Android
+ * Keystore) rather than plain prefs, because the password is kept so the app can
+ * silently re-login when a session token expires (the auth proxy's default TTL
+ * is 24h).
+ */
+class ConfigStore(context: Context) {
+
+    private val prefs: SharedPreferences = run {
+        val masterKey = MasterKey.Builder(context)
+            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+            .build()
+        EncryptedSharedPreferences.create(
+            context,
+            "dsh_config",
+            masterKey,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+        )
+    }
+
+    fun load(): DshConfig = DshConfig(
+        baseUrl = prefs.getString(KEY_BASE_URL, "").orEmpty(),
+        lanUrl = prefs.getString(KEY_LAN_URL, "").orEmpty(),
+        username = prefs.getString(KEY_USERNAME, "").orEmpty(),
+        password = prefs.getString(KEY_PASSWORD, "").orEmpty(),
+        manualCookie = prefs.getString(KEY_COOKIE, "").orEmpty(),
+        themeMode = prefs.getString(KEY_THEME, ThemeMode.SYSTEM) ?: ThemeMode.SYSTEM,
+        agentPreset = prefs.getString(KEY_PRESET, "").orEmpty(),
+        busyEnter = prefs.getString(KEY_BUSY_ENTER, BusyEnter.QUEUE) ?: BusyEnter.QUEUE,
+        // The three-way mode is stored under the web's own ids. The old boolean key
+        // is still read when the new one is absent, so an upgrade keeps the reader's
+        // last choice instead of jumping back to sibling Workspaces.
+        drawerGrouping = DrawerGrouping.fromStored(prefs.getString(KEY_DRAWER_GROUPING, null))
+            ?: if (prefs.getBoolean(KEY_DRAWER_GROUP, true)) {
+                DrawerGrouping.WORKSPACE
+            } else {
+                DrawerGrouping.FLAT
+            },
+        drawerOrderByUpdated = prefs.getBoolean(KEY_DRAWER_ORDER, false),
+        drawerShowArchived = prefs.getBoolean(KEY_DRAWER_ARCHIVED, false),
+        showHostEvents = prefs.getBoolean(KEY_SHOW_HOST_EVENTS, false),
+        // `getStringSet` hands back the set the prefs object is still using, so a
+        // caller that mutated it would edit stored state out from under the store
+        // (and trip the "must not be modified" contract). Copy it on the way out.
+        drawerCollapsedSections = prefs.getStringSet(KEY_DRAWER_COLLAPSED, null)
+            ?.toSet()
+            ?: emptySet(),
+        hostShellSessions = decodeHostShellSessions(prefs.getString(KEY_HOST_SHELLS, null)),
+        deepseekApiKey = prefs.getString(KEY_DEEPSEEK_KEY, "").orEmpty(),
+        // Clamped on the way out, so a value written by another version — or edited
+        // under `run-as` by a bug report — cannot hand the panel a cell size its own
+        // bounds do not allow.
+        terminalFontSp = TerminalCellSize.of(
+            prefs.getFloat(KEY_TERMINAL_FONT_SP, TerminalCellSize.DEFAULT_FONT_SP),
+        ).fontSp,
+        acceptedCerts = CertTrust.decode(prefs.getString(KEY_ACCEPTED_CERTS, null)),
+        disabledExtensionIds = prefs.getStringSet(KEY_DISABLED_EXTENSIONS, null)
+            ?.toSet()
+            ?: emptySet(),
+        extensionTrust = ExtensionTrust.decode(prefs.getString(KEY_EXTENSION_TRUST, null)),
+    )
+
+    fun save(config: DshConfig) {
+        prefs.edit()
+            .putString(KEY_BASE_URL, config.baseUrl)
+            .putString(KEY_LAN_URL, config.lanUrl)
+            .putString(KEY_USERNAME, config.username)
+            .putString(KEY_PASSWORD, config.password)
+            .putString(KEY_COOKIE, config.manualCookie)
+            .putString(KEY_THEME, config.themeMode)
+            .putString(KEY_PRESET, config.agentPreset)
+            .putString(KEY_BUSY_ENTER, config.busyEnter)
+            .putString(KEY_DRAWER_GROUPING, config.drawerGrouping.stored)
+            // Keep the old key meaningful for a downgrade: a tree is still grouped,
+            // so an older build opens on sibling Workspaces rather than the flat list.
+            .putBoolean(KEY_DRAWER_GROUP, config.drawerGrouping.groupsByWorkspace)
+            .putBoolean(KEY_DRAWER_ORDER, config.drawerOrderByUpdated)
+            .putBoolean(KEY_DRAWER_ARCHIVED, config.drawerShowArchived)
+            .putBoolean(KEY_SHOW_HOST_EVENTS, config.showHostEvents)
+            // The same aliasing hazard in reverse: `apply` may keep a reference to
+            // the set, and the caller (a UiState copy) must not be able to mutate
+            // what was stored. Pass a fresh copy.
+            .putStringSet(KEY_DRAWER_COLLAPSED, config.drawerCollapsedSections.toSet())
+            // Same hazard, same answer: the encoding copies the entries into a fresh
+            // String, so nothing the caller still holds can reach the stored value.
+            .putString(KEY_HOST_SHELLS, encodeHostShellSessions(config.hostShellSessions))
+            .putString(KEY_DEEPSEEK_KEY, config.deepseekApiKey)
+            .putFloat(KEY_TERMINAL_FONT_SP, config.terminalFontSp)
+            .putString(KEY_ACCEPTED_CERTS, CertTrust.encode(config.acceptedCerts))
+            .putStringSet(KEY_DISABLED_EXTENSIONS, config.disabledExtensionIds.toSet())
+            .putString(KEY_EXTENSION_TRUST, ExtensionTrust.encode(config.extensionTrust))
+            .apply()
+    }
+
+    fun clearCredentials() {
+        prefs.edit().remove(KEY_PASSWORD).remove(KEY_COOKIE).remove(KEY_DEEPSEEK_KEY).apply()
+    }
+
+    private companion object {
+        const val KEY_BASE_URL = "base_url"
+        const val KEY_LAN_URL = "lan_url"
+        const val KEY_USERNAME = "username"
+        const val KEY_PASSWORD = "password"
+        const val KEY_COOKIE = "cookie"
+        const val KEY_THEME = "theme"
+        const val KEY_PRESET = "preset"
+        const val KEY_BUSY_ENTER = "busy_enter"
+        const val KEY_DRAWER_GROUP = "drawer_group_by_workspace"
+        const val KEY_DRAWER_GROUPING = "drawer_grouping"
+        const val KEY_DRAWER_ORDER = "drawer_order_by_updated"
+        const val KEY_DRAWER_ARCHIVED = "drawer_show_archived"
+        const val KEY_SHOW_HOST_EVENTS = "show_host_events"
+        const val KEY_DRAWER_COLLAPSED = "drawer_collapsed_sections"
+        const val KEY_HOST_SHELLS = "host_shell_sessions"
+        const val KEY_DEEPSEEK_KEY = "deepseek_api_key"
+        const val KEY_TERMINAL_FONT_SP = "terminal_font_sp"
+        const val KEY_ACCEPTED_CERTS = "accepted_certs"
+        const val KEY_DISABLED_EXTENSIONS = "disabled_extension_ids"
+        const val KEY_EXTENSION_TRUST = "extension_trust"
+    }
+}

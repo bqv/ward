@@ -1,0 +1,176 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The homescreen card: a headline, up to three named running sessions with a "+N more"
+  line, and a stamp.
+
+  Three things about this file are load-bearing and easy to undo by accident:
+
+  * Nothing here resolves a theme attribute. A widget is inflated by the *launcher*,
+    against the launcher's theme, from this app's resources — so `?attr/colorSurface`
+    or `?android:textColorPrimary` would resolve to whatever the launcher happens to
+    be, and a light launcher would draw dark-on-dark. Every colour is a literal from
+    `values/colors.xml`, and the renderer sets the ones that carry state.
+
+  * The text in the `android:text` attributes is the `initialLayout`'s copy, shown in
+    the moment between the widget appearing and the first update. It must not claim
+    anything the app has not said, so it names the app and offers the way in. The
+    renderer overwrites the lines on the first draw. The row views carry no text at all
+    and start `gone`: the initial card draws no list, because before the app has spoken
+    an empty list and an unknown one would look identical.
+
+  * The row count is fixed, at `WidgetSnapshot.MAX_NAMED_SESSIONS`, and the views are
+    declared one by one rather than left to a collection view. A `RemoteViewsService`
+    list would buy scrolling on a tile that measures 408x200dp on the launcher this was
+    checked against (Kvaesitso on the test handset: a placed 3x2 widget is 1040x510px at
+    an override density of 408) — a surface that shows three rows and is flicked past,
+    not scrolled. It would cost a second process binding and a second reader of the
+    snapshot, and this design is one writer and one reader. What it would *not* buy is
+    honesty: the bounded list plus the "+N more" line below makes the same statement
+    either way. See `docs/WIDGET.md`.
+
+  Text sizes are set here rather than by the renderer: `RemoteViews` cannot change a
+  text size, and a row that kept its font padding would spend about 3dp of the card's
+  budget on nothing, four times over.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_background"
+    android:gravity="center_vertical"
+    android:orientation="vertical"
+    android:padding="10dp">
+
+    <TextView
+        android:id="@+id/widget_headline"
+        android:gravity="start"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:text="@string/widget_initial_headline"
+        android:textColor="@color/widget_text_unknown"
+        android:textSize="16sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/widget_detail"
+        android:gravity="start"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:textColor="@color/widget_text_detail"
+        android:textSize="13sp" />
+
+    <!--
+      The named running sessions. The renderer fills these top-down, hides the ones it
+      does not need, and gives each row a tap target carrying that row's own session id —
+      so a reader opens the session they can see, rather than only the one that most needs
+      them.
+    -->
+    <LinearLayout
+        android:id="@+id/widget_rows"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/widget_row_0"
+            android:gravity="start"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:includeFontPadding="false"
+            android:maxLines="1"
+            android:textColor="@color/widget_text_detail"
+            android:textSize="12sp"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/widget_row_1"
+            android:gravity="start"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="1dp"
+            android:ellipsize="end"
+            android:includeFontPadding="false"
+            android:maxLines="1"
+            android:textColor="@color/widget_text_detail"
+            android:textSize="12sp"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/widget_row_2"
+            android:gravity="start"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="1dp"
+            android:ellipsize="end"
+            android:includeFontPadding="false"
+            android:maxLines="1"
+            android:textColor="@color/widget_text_detail"
+            android:textSize="12sp"
+            android:visibility="gone" />
+
+        <!--
+          "+2 more". A line of its own rather than a figure folded into a count line,
+          because it is the only thing standing between a bounded list and a silent drop.
+        -->
+        <TextView
+            android:id="@+id/widget_row_more"
+            android:gravity="start"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="1dp"
+            android:ellipsize="end"
+            android:includeFontPadding="false"
+            android:maxLines="1"
+            android:textColor="@color/widget_text_stamp"
+            android:textSize="11sp"
+            android:visibility="gone" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/widget_stamp"
+            android:gravity="start"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/widget_initial_stamp"
+            android:textColor="@color/widget_text_stamp"
+            android:textSize="11sp" />
+
+        <!--
+          The instant the oldest reading on the card was confirmed, as a date and a time.
+
+          A TextView holding a finished string rather than a Chronometer: a Chronometer
+          re-renders once a second inside the launcher's process for as long as the card is
+          on a homescreen, and no widget-side call can slow that down or stop it — the
+          launcher owns the view and the only lever `RemoteViews` has is the one-way
+          `started` flag, whose "off" position freezes the number at the moment it was
+          applied with nothing of ours alive to re-apply it. An instant is complete when it
+          is written, so it has nothing to keep true and nothing to leave behind. The
+          reader does the subtraction, against the clock on the same screen. The date is
+          part of it because a bare clock time would be ambiguous after a day — see
+          `WidgetCopy.stampTime`.
+        -->
+        <TextView
+            android:id="@+id/widget_age"
+            android:gravity="start"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:maxLines="1"
+            android:textColor="@color/widget_text_stamp"
+            android:textSize="11sp"
+            android:visibility="gone" />
+    </LinearLayout>
+</LinearLayout>
