@@ -2019,8 +2019,8 @@ fun ChatScreen(vm: DshViewModel) {
         PermissionSheet(
             options = ui.permissionOptions,
             current = ui.currentPermission,
-            onSelect = {
-                vm.setPermission(it)
+            onSelect = { preset, confirmed ->
+                vm.setPermission(preset, confirmed)
                 showPermission = false
             },
             onDismiss = { showPermission = false },

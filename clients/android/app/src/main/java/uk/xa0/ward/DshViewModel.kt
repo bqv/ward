@@ -425,6 +425,10 @@ data class PermissionOption(
     val value: String,
     val name: String,
     val description: String?,
+    /** The host says selecting this preset removes ordinary confirmation steps. */
+    val dangerous: Boolean = false,
+    /** The host's own warning, shown before a dangerous preset is confirmed. */
+    val warning: String? = null,
 )
 
 /**
@@ -1451,6 +1455,9 @@ class DshViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Failed connect attempts since the last success, for [scheduleReconnect]. */
     private var connectRetries = 0
+
+    /** Whether the next pending-session access write carried the danger confirmation. */
+    private var pendingPermissionConfirmed = false
 
     /**
      * Whether the connect about to run was asked for by a person, and may therefore
@@ -5919,9 +5926,12 @@ class DshViewModel(application: Application) : AndroidViewModel(application) {
         // mode change is refused while a turn is in flight; a refusal is reported
         // but does not lose the send.
         pending.permission?.let { mode ->
-            runCatching { runCommandFor(id, "/permission $mode").getOrThrow() }
+            runCatching {
+                runCommandFor(id, "/permission $mode${if (pendingPermissionConfirmed) " confirm" else ""}").getOrThrow()
+            }
                 .onSuccess { _ui.value = _ui.value.copy(currentPermission = mode) }
                 .onFailure { showFailure(it, "commands/execute", "Could not switch access mode: ") }
+            pendingPermissionConfirmed = false
         }
         // Whatever was typed on the hero belongs to the session it just created: the
         // composer's key changes with the session id, so without this the reader's own
@@ -8682,6 +8692,8 @@ class DshViewModel(application: Application) : AndroidViewModel(application) {
                     value = id,
                     name = if (raw.isEmpty() || raw == id) permissionLabel(id) else raw,
                     description = option.str("description").takeIf { it.isNotEmpty() },
+                    dangerous = option.optBoolean("dangerous", false),
+                    warning = option.str("warning").takeIf { it.isNotEmpty() },
                 )
             }
         }
@@ -8870,12 +8882,13 @@ class DshViewModel(application: Application) : AndroidViewModel(application) {
         text
     }
 
-    fun setPermission(preset: String) {
+    fun setPermission(preset: String, confirmed: Boolean = false) {
         // On the pending seat there is no session to run `/permission` in. The mode
         // is *recorded* and applied by [materializePending] before anything is sent,
         // so choosing access by itself never creates a session.
         val pending = _ui.value.pendingSession
         if (_ui.value.currentSessionId == null && pending != null) {
+            pendingPermissionConfirmed = confirmed
             _ui.value = _ui.value.copy(
                 pendingSession = pending.copy(permission = preset),
                 currentPermission = preset,
@@ -8885,7 +8898,7 @@ class DshViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         viewModelScope.launch {
-            runCommand("/permission $preset")
+            runCommand("/permission $preset${if (confirmed) " confirm" else ""}")
                 .onSuccess {
                     _ui.value = _ui.value.copy(currentPermission = preset)
                     refreshTerminalSeats()

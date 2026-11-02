@@ -113,8 +113,12 @@ indefinite forms are refused on decode.
   because ward reloads the registry as one set; `module.reload` is available;
 - policy and access: `policy.list`/`policy.select` drive the access chip through
   the DSH permission names. The list is the authority: whatever presets the
-  daemon serves are rendered, and the all-allow preset the policy module is
-  adding maps to the chip's `danger-full-access` name when it lands;
+  daemon serves are rendered, and an all-allow preset maps to the chip's
+  `danger-full-access` name. A preset row is marked dangerous from the host's
+  `dangerous` flag, never from its id; selecting one shows the host's own
+  `warning` text first and only then sends `policy.select {id, confirm: true}`.
+  The daemon's default stays `default` because the client never invents a
+  selection;
 - stats: `stats.session` becomes the session and token projections behind the
   stat pills; the provider's wall-time fields do not exist on ward's wire and are
   left at zero rather than invented;
@@ -149,10 +153,11 @@ repository and the message cannot drift.
   answers an empty document and the plugin switch is read-only; module reload is
   the one management action offered. The slash-command catalogue is supplied by
   the client for the commands ward's `skills` guest serves.
-- **Full access is pending on the daemon.** The client renders whatever
-  `policy.list` returns and maps an all-allow preset to the chip's
-  `danger-full-access` name; until the policy-module preset is served, the chip
-  is absent rather than faked.
+- **Full access is pending on the daemon.** The client is ready for the fourth
+  preset: it renders the host's `dangerous`/`warning` fields, shows the warning
+  before sending confirmation, and maps an all-allow id to the chip's
+  `danger-full-access` name. Until `policy.list` serves it, the chip is absent
+  rather than faked.
 - **Binary reads are bounded.** `session.file_read_blob` caps one call at 1 MiB
   and 4 MiB total; the app reassembles multiple windows, but a larger file is
   refused by the daemon rather than truncated.

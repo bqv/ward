@@ -162,8 +162,14 @@ class WardApi(private val connection: WardConnection) {
     suspend fun policyList(): Cbor.Map =
         connection.call("policy.list", Cbor.Map(emptyList())).asMap()
 
-    suspend fun policySelect(id: String): Cbor =
-        connection.call("policy.select", cborMap("id" to id.cbor()))
+    suspend fun policySelect(id: String, confirm: Boolean = false): Cbor =
+        connection.call(
+            "policy.select",
+            cborMap(
+                "id" to id.cbor(),
+                *buildList { if (confirm) add("confirm" to true.cbor()) }.toTypedArray(),
+            ),
+        )
 
     suspend fun listApprovals(): List<Cbor.Map> =
         connection.call("approval.list", Cbor.Map(emptyList())).array("approvals")?.items

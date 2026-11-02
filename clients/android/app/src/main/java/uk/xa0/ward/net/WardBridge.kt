@@ -489,7 +489,9 @@ class WardBridge(private val connection: WardConnection) {
             options.put(JSONObject()
                 .put("value", alias)
                 .put("name", preset.text("name").orEmpty().ifEmpty { alias })
-                .put("description", preset.text("description").orEmpty()))
+                .put("description", preset.text("description").orEmpty())
+                .put("dangerous", preset.bool("dangerous") ?: false)
+                .put("warning", preset.text("warning").orEmpty()))
         }
         return JSONObject()
             .put("options", options)
@@ -498,25 +500,27 @@ class WardBridge(private val connection: WardConnection) {
 
     private suspend fun runCommand(args: JSONObject): JSONObject {
         val line = args.optString("line").trim()
-        val preset = line.removePrefix("/permission ").trim()
-        if (line.startsWith("/permission ") && preset.isNotEmpty()) {
+        val confirm = line.endsWith(" confirm")
+        val command = if (confirm) line.removeSuffix(" confirm").trim() else line
+        val preset = command.removePrefix("/permission ").trim()
+        if (command.startsWith("/permission ") && preset.isNotEmpty()) {
             val wardPreset = presetIds[preset] ?: wardPresetOf(preset)
                 ?: return JSONObject().put("result", JSONObject()
                     .put("kind", "error")
                     .put("text", "ward has no $preset access mode"))
-            api.policySelect(wardPreset)
+            api.policySelect(wardPreset, confirm = confirm)
             return JSONObject().put("result", JSONObject()
                 .put("kind", "text")
                 .put("text", "Access mode: ${dshPresetOf(wardPreset)}"))
         }
-        if (line == "/plan off") {
+        if (command == "/plan off") {
             return JSONObject().put("result", JSONObject()
                 .put("kind", "text")
                 .put("text", "Plan mode is not a ward switch"))
         }
         return JSONObject().put("result", JSONObject()
             .put("kind", "error")
-            .put("text", "ward does not serve host command $line"))
+            .put("text", "ward does not serve host command $command"))
     }
 
     private fun dshPresetOf(ward: String): String = when {

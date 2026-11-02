@@ -48,7 +48,6 @@ import uk.xa0.ward.diag.diagDrag
 import uk.xa0.ward.diag.diagOffset
 import uk.xa0.ward.AgentPresetOption
 import uk.xa0.ward.ContextBreakdown
-import uk.xa0.ward.FULL_ACCESS_PRESET
 import uk.xa0.ward.ModelOption
 import uk.xa0.ward.PermissionOption
 import uk.xa0.ward.SessionItem
@@ -665,7 +664,7 @@ private fun ChoiceChip(label: String, selected: Boolean, onClick: () -> Unit) {
 fun PermissionSheet(
     options: List<PermissionOption>,
     current: String,
-    onSelect: (String) -> Unit,
+    onSelect: (value: String, confirmed: Boolean) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val colors = DshTheme.colors
@@ -708,7 +707,7 @@ fun PermissionSheet(
 
             options.forEach { option ->
                 val selected = option.value == current
-                val dangerous = option.value == FULL_ACCESS_PRESET
+                val dangerous = option.dangerous
                 Row(
                     Modifier
                         .fillMaxWidth()
@@ -716,7 +715,7 @@ fun PermissionSheet(
                         .clip(RoundedCornerShape(DshRadius.md))
                         .background(if (selected) colors.hover else colors.bgBase)
                         .clickableNoRipple {
-                            if (dangerous && !selected) confirming = option else onSelect(option.value)
+                            if (dangerous && !selected) confirming = option else onSelect(option.value, false)
                         }
                         .padding(horizontal = DshSpacing.lg, vertical = DshSpacing.lg),
                     verticalAlignment = Alignment.CenterVertically,
@@ -756,12 +755,17 @@ fun PermissionSheet(
         AlertDialog(
             onDismissRequest = { confirming = null },
             containerColor = colors.bgBase,
-            title = { Text("Enable Full access?", color = colors.labelPrimary, style = DshType.titleMedium) },
+            title = {
+                Text(
+                    text = "Enable ${option.name}?",
+                    color = colors.labelPrimary,
+                    style = DshType.titleMedium,
+                )
+            },
             text = {
                 Text(
-                    text = "Full access lets new sessions reduce confirmation steps and perform " +
-                        "more actions directly, including sensitive operations, file changes, or " +
-                        "external commands. Only use it when you trust subsequent tasks.",
+                    text = option.warning
+                        ?: "This preset removes ordinary confirmation steps. Only use it when you trust the tasks ahead.",
                     style = DshType.bodyMedium,
                     color = colors.labelSecondary,
                 )
@@ -769,9 +773,9 @@ fun PermissionSheet(
             confirmButton = {
                 TextButton(onClick = {
                     confirming = null
-                    onSelect(option.value)
+                    onSelect(option.value, true)
                 }) {
-                    Text("Enable Full access", color = colors.warn)
+                    Text("Enable ${option.name}", color = colors.warn)
                 }
             },
             dismissButton = {
