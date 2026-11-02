@@ -78,7 +78,7 @@ daemon.
 | events | routed by kind and subscription; `eventReceived(kind, payload)` is the generic door |
 | replay | `session.resume {from: 0}` and the `replay` control frame |
 | approvals | request, respond, resolved; `approval.list` marks every session with a live card and carries tool/reason, so a followed session that reconnects without replay still names the request; `requestId` is `call:epoch` |
-| permission presets | `policy.list` / `policy.select`; `id` normalised to `value`, `current` drives the access chip. Full-access is dangerous: the client shows the verbatim warning, sends `confirm: true` only after Yes, and marks the chip while selected |
+| permission presets | `policy.list` / `policy.select`; `id` normalised to `value`, `current` drives the access chip. Full-access is dangerous: the warning is verbatim, `confirm: true` follows Yes, and the chip is marked. The gate writes a file under full-access and proves the same write is refused under reads-only |
 | queue | `session.prompt` -> `{queued: true, ahead}` while a turn runs; one queued prompt per session; the chip shows the position |
 | steer | `session.prompt` with `steer: true` appends to the running turn; client falls back to queue when no turn is open or the local steer budget is spent |
 | attachments | `attachment.read_blob` for the image lightbox; `session.attachment.path` and `tool.result.path` supply the reference |

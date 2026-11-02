@@ -226,6 +226,28 @@ int main(void) {
   assert(run_capture(sock, probe, full_argv, full_out, sizeof(full_out)) == 0);
   assert(strstr(full_out, "full-access") != NULL);
 
+  char write_out[8192];
+  char *write_argv[] = {(char *)probe, (char *)"--prompt",
+                        (char *)"/write free.txt hi", NULL};
+  assert(run_capture(sock, probe, write_argv, write_out, sizeof(write_out)) == 0);
+  char free_path[512];
+  snprintf(free_path, sizeof(free_path), "%s/free.txt", root);
+  assert(access(free_path, F_OK) == 0);
+
+  char reads_out[8192];
+  char *reads_argv[] = {(char *)probe, (char *)"--preset", (char *)"reads-only",
+                        (char *)"--confirm-danger", NULL};
+  assert(run_capture(sock, probe, reads_argv, reads_out, sizeof(reads_out)) == 0);
+  assert(strstr(reads_out, "reads-only") != NULL);
+
+  char blocked_out[8192];
+  char *blocked_argv[] = {(char *)probe, (char *)"--prompt",
+                          (char *)"/write blocked.txt hi", NULL};
+  assert(run_capture(sock, probe, blocked_argv, blocked_out, sizeof(blocked_out)) == 0);
+  char blocked_path[512];
+  snprintf(blocked_path, sizeof(blocked_path), "%s/blocked.txt", root);
+  assert(access(blocked_path, F_OK) != 0);
+
   kill(pid, SIGTERM);
   int status = 0;
   waitpid(pid, &status, 0);
