@@ -1909,3 +1909,14 @@ the bug rather than fixing it.
 
 The gate also needed three build changes: tests now link `src/client` (so a gate can act as a client), `WARD_NATIVE` is
 exported into the suite, and `make test` depends on the native binary so every build directory has one.
+
+Hundred-and-forty-third: a golden transcript exists. `WARD_DUMP_FRAMES=1` makes the client print every frame it sends and
+receives as hex, and `docs/transcript.md` records a captured `create` exchange: the daemon's `welcome`, the
+`session.create` request and its response, byte for byte.
+
+That is the first of the three things the Android client needed. It is also a cross-check the C client can keep using: the
+bytes are the contract, and a re-implementation can diff against them instead of reading three files and hoping.
+
+The dump also exposed a build fault worth noting: `ward-native` was not relinked when `src/client/client.c` changed, because
+its link rule listed the native and core objects but not the client's. The binary I had been testing was older than the
+library it linked — the same class of mistake as the missing test dependency files, in the same Makefile.

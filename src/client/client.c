@@ -60,7 +60,24 @@ int wd_client_connect(wd_client *client, const char *path) {
   return 0;
 }
 
+static void dump_sent(const char *method, cbor_item_t *item) {
+  if (getenv("WARD_DUMP_FRAMES") == NULL) return;
+  size_t len = 0;
+  unsigned char *bytes = NULL;
+  size_t written = cbor_serialize_alloc(item, &bytes, &len);
+  if (written == 0 || bytes == NULL) return;
+  if (strcmp(method, "frame") == 0) {
+    fprintf(stderr, "sent frame len=%zu body=", len);
+    for (size_t i = 0; i < len; i++) fprintf(stderr, "%02x", bytes[i]);
+    fputc('\n', stderr);
+  } else {
+    fprintf(stderr, "sent %s\n", method);
+  }
+  free(bytes);
+}
+
 int wd_client_send_item(wd_client *client, cbor_item_t *item) {
+  if (getenv("WARD_DUMP_FRAMES") != NULL) dump_sent("frame", item);
   size_t len = 0;
   uint8_t *body = wd_encode(item, &len);
   if (body == NULL) return -1;
@@ -70,6 +87,15 @@ int wd_client_send_item(wd_client *client, cbor_item_t *item) {
   if (rc == 0) rc = write_full(client->fd, body, len);
   free(body);
   return rc;
+}
+
+static void dump_frame(const wd_frame *frame, const uint8_t *body) {
+  if (getenv("WARD_DUMP_FRAMES") == NULL) return;
+  fprintf(stderr, "frame type=%u sub=%llu seq=%llu len=%zu body=", frame->type,
+          (unsigned long long)frame->sub, (unsigned long long)frame->seq,
+          (size_t)frame->len);
+  for (size_t i = 0; i < frame->len; i++) fprintf(stderr, "%02x", body[i]);
+  fputc('\n', stderr);
 }
 
 uint8_t *wd_client_read_frame(int fd, wd_frame *frame) {
@@ -93,6 +119,7 @@ uint8_t *wd_client_read_frame(int fd, wd_frame *frame) {
   }
   frame->len = len;
   frame->body = body;
+  dump_frame(frame, body);
   return body;
 }
 
@@ -128,6 +155,7 @@ int wd_client_handshake(wd_client *client) {
 
 int wd_client_call(wd_client *client, const char *method,
                           cbor_item_t *params, cbor_item_t **result) {
+  if (getenv("WARD_DUMP_FRAMES") != NULL) dump_sent(method, params);
   uint64_t id = client->next_id++;
   if (wd_client_send_item(client, wd_request(id, method, params)) != 0) return -1;
   for (;;) {
