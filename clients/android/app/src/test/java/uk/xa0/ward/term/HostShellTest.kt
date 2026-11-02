@@ -84,43 +84,34 @@ class HostShellTest {
     // ------------------------------------------------------------------- the seats
 
     @Test
-    fun `the host shell is the first seat and addresses its own session`() {
+    fun `the session seat is the only seat and addresses the open session`() {
         val seats = terminalSeats(
             sessionId = "session-user",
             sessionPolicyLabel = "Workspace Write",
             hostShellSessionId = "session-shell-1",
         )
 
-        assertEquals(listOf(TerminalSeat.HOST_SHELL, TerminalSeat.THIS_SESSION), seats.map { it.seat })
-        // The host seat's terminal RPCs must address the archived shell session, and
-        // the session seat's must address the session the user has open. Swapping them
-        // would open a confined shell and call it the host shell.
-        assertEquals("session-shell-1", seats[0].agentId)
-        assertEquals("session-user", seats[1].agentId)
+        assertEquals(listOf(TerminalSeat.THIS_SESSION), seats.map { it.seat })
+        assertEquals("session-user", seats[0].agentId)
     }
 
     @Test
-    fun `each seat is labelled with the policy in force in it`() {
+    fun `the seat is labelled with the policy in force in it`() {
         val seats = terminalSeats(
             sessionId = "session-user",
             sessionPolicyLabel = "Workspace Write",
             hostShellSessionId = "session-shell-1",
         )
 
-        assertEquals("Host shell \u00b7 Full access", seats[0].label)
-        assertEquals("This session \u00b7 Workspace Write", seats[1].label)
-        // The host seat's label is the fixed full-access word even though the session
-        // it is displayed over runs workspace-write; labelling it with the session's
-        // policy would describe the wrong shell entirely.
-        assertFalse(seats[0].label.contains("Workspace Write"))
+        assertEquals("This session \u00b7 Workspace Write", seats[0].label)
     }
 
     @Test
     fun `a seat with no policy said is labelled access unknown rather than blank`() {
         val seats = terminalSeats("session-user", sessionPolicyLabel = "", hostShellSessionId = null)
 
-        assertEquals("This session \u00b7 access unknown", seats[1].label)
-        assertNull(seats[0].agentId)
+        assertEquals("This session \u00b7 access unknown", seats[0].label)
+        assertEquals("session-user", seats[0].agentId)
     }
 
     // ---------------------------------------------------------------- persistence

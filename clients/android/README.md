@@ -92,6 +92,10 @@ indefinite forms are refused on decode.
   the chip; `model.list` is read through the array key the daemon actually sends;
 - attachments: the picker's uploads become `attachment.add`, and image parts in
   a prompt are staged the same way;
+- terminal: the session seat opens a PTY through `terminal.open`, routes
+  `terminal.output` into the copied terminal screen, and sends writes and
+  resizes back through `terminal.write`/`terminal.resize`; device-verified with
+  `echo hello` in the shell;
 - files: the Files panel lists through `session.file_list`, reads text through
   `session.file_read`, and windows binary reads through `session.file_read_blob`;
   the byte windows are reassembled into the multipart shape the copied panel
@@ -132,19 +136,18 @@ repository and the message cannot drift.
   `SO_PEERCRED` door is a desktop/local path; the phone uses TCP.
 - **No host Workspace registry.** The drawer's groups are derived from `cwd`, so
   membership and manual ordering are client-owned rather than host state.
-- **The queue has no projection.** Steer and queued prompts are accepted and
-  delivered, but ward has no queue snapshot for the copied dock, so a queued
-  message has no authoritative row until its turn starts.
-- **The terminal panel is not device-complete.** The session seat is the one
-  wired for ward; `terminal.open` creates a PTY and the output frames are routed
-  into `terminal/follow`, but the copied attachment screen never reached its
-  first snapshot on the handset. The host-shell seat still asks for DSH commands
-  and an archived session that ward does not model.
+- **The queue is client-derived.** Ward answers `{queued, ahead}` but exposes no
+  queue snapshot, so the dock mirrors this client's own queued prompts until the
+  daemon's `session.prompted` retires them. A prompt queued by another client is
+  invisible here.
+- **There is no Host shell seat.** Ward has no archived, unconfined host-shell
+  session to bootstrap; the session seat is the only terminal seat offered.
 - **Job output is not streamed.** `job.list` and `job.kill` work; there is no
   equivalent of `job/follow`'s output ring.
-- **Ward has no settings document, plugin bundle switch or command catalogue.**
-  `settings/describe`, `commands/list` and the writable plugin switch answer
-  empty/read-only shapes; module reload is the one management action offered.
+- **Ward has no settings document or writable plugin switch.** `settings/describe`
+  answers an empty document and the plugin switch is read-only; module reload is
+  the one management action offered. The slash-command catalogue is supplied by
+  the client for the commands ward's `skills` guest serves.
 - **The full-access preset has no ward equivalent.** Ward's presets are
   `default`, `reads-only` and `workspace`; the DSH `danger-full-access` chip is
   not offered.
@@ -172,6 +175,8 @@ Built and installed on the disposable handset `91e25acb`, with
 - a `/write` parked in a session the app was not following raised its card from
   `approval.list`; **Allow once** resolved it and the turn continued, which is
   the background-approval path;
+- the Shell tab opened a `sh` PTY in the session seat, painted its prompt, and
+  ran `echo hello` with the answer in the screen;
 - force-stopping and relaunching the app replayed the same transcript from
   `session.resume`, which is the durable-event proof.
 

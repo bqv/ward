@@ -410,6 +410,7 @@ class RemoteMux(
                 .put("cacheWriteTokens", 0)
                 .put("outputTokens", output))
         if (!permission.isNullOrEmpty()) projection.put("permission", permission)
+        client.queueProjection(sessionId)?.let { projection.put("inbox", it) }
         return projection
     }
 
@@ -506,12 +507,13 @@ class RemoteMux(
             delay(5_000)
             return
         }
-        Log.d(TAG, "terminal/follow id=$id")
+        val attachment = request.optString("attachmentId")
+        Log.d(TAG, "terminal/follow id=$id attachment=$attachment")
         out.trySend(StreamEvent.Item(JSONObject()
             .put("type", "snapshot")
             .put("sequence", 0)
             .put("screen", "")
-            .put("info", terminalInfo(id, "running"))))
+            .put("info", terminalInfo(id, "running", attachment))))
         terminalFrames.collect { frame ->
             if (frame.optString("terminal") != id) return@collect
             lastFrameAt.set(System.currentTimeMillis())
@@ -523,20 +525,21 @@ class RemoteMux(
                 "eof" -> {
                     out.trySend(StreamEvent.Item(JSONObject()
                         .put("type", "state")
-                        .put("info", terminalInfo(id, "exited"))))
+                        .put("info", terminalInfo(id, "exited", attachment))))
                     return@collect
                 }
             }
         }
     }
 
-    private fun terminalInfo(id: String, state: String): JSONObject = JSONObject()
+    private fun terminalInfo(id: String, state: String, controller: String): JSONObject = JSONObject()
         .put("id", id)
         .put("title", "Shell")
         .put("shell", JSONObject().put("path", "sh"))
         .put("cwd", "")
         .put("cols", 80)
         .put("rows", 24)
+        .put("controllerId", controller)
         .put("state", state)
 
     private companion object {
@@ -575,6 +578,8 @@ private class FollowTranslator(
             "session.prompted" -> {
                 turn = (payload.long("turn") ?: (lastTurn + 1L)).toInt()
                 lastTurn = turn
+                val prompted = payload.text("text").orEmpty()
+                client.notePromptStarted(sessionId, prompted)
                 text = StringBuilder()
                 assistantStarted = false
                 client.mux?.publishStatus(sessionId, true)

@@ -34,6 +34,11 @@ class WardBridge(private val connection: WardConnection) {
     private val approvals = ConcurrentHashMap<String, ApprovalRef>()
     private val terminals = ConcurrentHashMap<String, JSONObject>()
     private val subagentParents = ConcurrentHashMap<String, String>()
+    private val queueEntries = ConcurrentHashMap<String, MutableList<QueueEntry>>()
+    private data class QueueEntry(val id: String, val text: String, val rpcId: String)
+
+    /** Told when this client's view of a session's pending queue changes. */
+    var onQueueChanged: ((sessionId: String, inbox: JSONObject) -> Unit)? = null
 
     fun rememberApproval(eventId: String, session: String, call: Long, epoch: Long) {
         approvals[eventId] = ApprovalRef(session, call, epoch)
@@ -45,6 +50,42 @@ class WardBridge(private val connection: WardConnection) {
 
     fun noteSubagent(parent: String, child: String) {
         if (parent.isNotEmpty() && child.isNotEmpty()) subagentParents[child] = parent
+    }
+
+    /**
+     * Ward has no queue projection; the dock's rows are what this client queued.
+     * A queued prompt is tracked until the daemon writes its `session.prompted`.
+     */
+    fun queueProjection(sessionId: String): JSONObject {
+        val entries = queueEntries[sessionId].orEmpty()
+        val next = JSONArray()
+        entries.forEach { entry ->
+            next.put(JSONObject()
+                .put("id", entry.id)
+                .put("content", JSONArray().put(JSONObject()
+                    .put("type", "text")
+                    .put("text", entry.text)))
+                .put("source", JSONObject()
+                    .put("kind", "user")
+                    .put("rpcId", entry.rpcId)))
+        }
+        return JSONObject().put("next-turn", next).put("next-step", JSONArray())
+    }
+
+    fun notePromptStarted(sessionId: String, text: String) {
+        val entries = queueEntries[sessionId] ?: return
+        val at = entries.indexOfFirst { it.text == text }
+        if (at < 0) return
+        entries.removeAt(at)
+        if (entries.isEmpty()) queueEntries.remove(sessionId)
+        onQueueChanged?.invoke(sessionId, queueProjection(sessionId))
+    }
+
+    private fun queuePrompt(sessionId: String, request: JSONObject, text: String) {
+        val rpcId = request.optString("requestId").ifEmpty { java.util.UUID.randomUUID().toString() }
+        val entry = QueueEntry(id = "ward-queue-$rpcId", text = text, rpcId = rpcId)
+        queueEntries.getOrPut(sessionId) { mutableListOf() } += entry
+        onQueueChanged?.invoke(sessionId, queueProjection(sessionId))
     }
 
     suspend fun call(method: String, args: JSONObject): Any? {
@@ -231,7 +272,7 @@ class WardBridge(private val connection: WardConnection) {
                     JSONObject()
                 }
             }
-            "commands/list" -> JSONArray()
+            "commands/list" -> wardCommands()
             "agentPresets/list" -> JSONArray()
             "permissionPresets/catalog" -> permissionCatalog()
             "commands/execute" -> runCommand(args)
@@ -359,9 +400,11 @@ class WardBridge(private val connection: WardConnection) {
             }
         }
         val result = api.prompt(session, text, steer = request.optString("mode") == "steer")
+        val queued = result.bool("queued") ?: false
+        if (queued) queuePrompt(session, request, text)
         return JSONObject()
             .put("sessionId", session)
-            .put("queued", result.bool("queued") ?: false)
+            .put("queued", queued)
             .put("steered", result.bool("steered") ?: false)
     }
 
@@ -516,6 +559,32 @@ class WardBridge(private val connection: WardConnection) {
 
     private fun terminalIdOf(request: JSONObject): String =
         request.optString("id").ifEmpty { request.optString("terminalId") }.ifEmpty { request.optString("terminal") }
+
+    /**
+     * The slash commands ward actually serves. The copied command menu is fed from
+     * this array and inserts the chosen line into the composer; the daemon's
+     * `skills` guest then handles it.
+     */
+    private fun wardCommands(): JSONArray = JSONArray().apply {
+        put(command("help", "List ward's slash commands"))
+        put(command("rules", "Show the project rules ward loaded"))
+        put(command("skills", "List the skills ward carries"))
+        put(command("read", "Read a file through the read tool", "<path>"))
+        put(command("write", "Write a file through the write tool", "<path> <text>"))
+        put(command("grep", "Search the session tree", "<pattern>"))
+        put(command("search", "Search the web through srchdsh", "<terms>"))
+        put(command("recall", "Search the local recall index", "<words>"))
+        put(command("py", "Run a Python snippet through the worker", "<program>"))
+        put(command("mcp", "Send one JSON-RPC line to the MCP server", "<json>"))
+        put(command("permission", "Select a ward access preset", "<preset>"))
+        put(command("plan", "Enter or leave the plan gate", "<on|off>"))
+    }
+
+    private fun command(name: String, description: String, hint: String? = null): JSONObject {
+        val row = JSONObject().put("name", name).put("description", description)
+        if (hint != null) row.put("input", JSONObject().put("hint", hint))
+        return row
+    }
 
     private fun moduleRow(item: Cbor.Map): JSONObject {
         val name = item.text("name").orEmpty()

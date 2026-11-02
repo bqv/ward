@@ -303,11 +303,6 @@ fun terminalSeats(
     hostShellSessionId: String?,
 ): List<SeatOption> = listOf(
     SeatOption(
-        seat = TerminalSeat.HOST_SHELL,
-        label = seatLabel(TerminalSeat.HOST_SHELL, HOST_SHELL_POLICY_LABEL),
-        agentId = hostShellSessionId,
-    ),
-    SeatOption(
         seat = TerminalSeat.THIS_SESSION,
         label = seatLabel(
             TerminalSeat.THIS_SESSION,
