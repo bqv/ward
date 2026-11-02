@@ -1424,3 +1424,22 @@ handling. Its first placement put the block after `wd_instance_free`, which ASan
 Still ahead for §4: dispatch. `process_action` must turn a `tool` reply into an `invoke` so the driver's tool path
 runs, the grammar-only fallback, the lenient parse with one repair, and refusing multiple calls instead of
 silently taking the first.
+
+Hundred-and-eighth: the design for tool dispatch, written down before the code because the shape matters more
+than the lines. The provider already reports `{tool, arguments, calls}` when a completion carries `tool_calls`; the
+loop that consumes it is three small pieces.
+
+1. In `wd_turn_resume_http`, after `provider_phase`, a reply with a non-empty `tool` is not handed to the driver as
+   `{kind:"result"}`. It becomes `{kind:"tool", tool, arguments}` — a shape the driver can recognise without
+   parsing the provider's reply struct.
+2. The driver gains that branch beside its slash-command ones: it scans the arguments text for `"path"` and
+   `"text"` (a substring scan, not a JSON parser — the guest has no parser and the note's own advice is to keep
+   schemas flat), then calls the existing `invoke_tool` for `read`, `write`, `grep` or `edit`. An unknown tool or
+   missing field answers with a text delta naming the problem rather than inventing a call.
+3. The tool result returns through the ordinary `invoke` path, so `perform_capability`, approvals and the worker
+   are unchanged — which is the point of routing through the driver rather than dispatching from core.
+
+The multi-call refusal belongs in (1): a reply with `calls > 1` ends the turn with `tool_parse` instead of taking
+the first. The first attempt at counting calls produced a garbage field and was reverted; the cause was not found,
+so the next attempt should count in the *provider* over the raw body it already scans, and test that count in
+`provider_test` before any core change.
