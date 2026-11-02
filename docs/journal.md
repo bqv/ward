@@ -1541,3 +1541,19 @@ The five edits, in order, each of which keeps the tree green on its own:
 
 Step 4 is the one a gate can measure: with `WARD_FAKE_DELAY_MS` the fixture already spaces its two content chunks by
 seconds, so a turn test can assert that the first `text.delta` arrives before `turn.end` rather than after it.
+
+Hundred-and-sixteenth: the helper streams. Steps one and two of the plan are in: `wd_http_start`'s child now runs
+curl itself with a write callback that pipes each chunk straight through, sends the status from a header callback
+before the first chunk, and the parent reads status then everything to EOF instead of a declared length. Nothing
+downstream changed, which is the point — every existing path sees the same `wd_http_response`.
+
+Proven the useful way: a live turn failed with the router refusing to load the model, and the *whole* JSON error body
+arrived intact through the streamed path (`provider_unavailable`, message `model ... failed to load`). Before this
+the same failure would have travelled as a length-prefixed blob; now it travels as a stream, and §6's taxonomy turned
+it into a named error the client can read.
+
+The router itself is currently unable to load `qwen1_5-1_8b-chat-q4_k_m` — `Kev-0.8B` and the embedding model hold
+most of the 2 GiB card, so a direct curl fails the same way. That is the box, not ward, and no test depends on a live
+router.
+
+Next: step three, reading the pipe incrementally under epoll and emitting deltas before EOF.
