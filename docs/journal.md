@@ -1852,3 +1852,16 @@ whose executable name starts with `gate_` — zero remain. Before the fix the sa
 A hanging gate is the same class of problem: `gate_native` blocked for its whole timeout while it was being written, so the
 file is removed rather than committed. Its next attempt needs a hard `alarm()` so a stall fails instead of occupying a
 slot for five minutes.
+
+Hundred-and-thirty-ninth: the native gate fails fast now and fails for a real reason. It no longer hangs: the child is
+forked with `PR_SET_PDEATHSIG` and an `alarm(20)`, so a stalled command is killed and the gate reports instead of occupying
+a slot. What it reports is that `ward-native prompt` never returns against the gate's daemon — the child dies at the alarm
+with empty output — while the same command against the running service answers promptly (it printed "turn failed" when the
+router could not load a model). So the fixture wiring for this gate is not right yet: something about the way the daemon
+reaches the fake endpoint differs from `gate_tool`'s setup, and the provider request never completes.
+
+Removed rather than committed, because a gate that always fails is as useless as one that hangs, and the tree stays green.
+
+The other thing the run showed: `wd_cgroup_leave` builds its path from `/proc/self/cgroup`, which ends in a newline, so the
+`sudo tee` fallback received `.../cgroup.procs\n` and failed — the daemon cannot leave its cgroup on shutdown, so the test
+cgroup is left behind for the sweep. Trimming the newline is a two-line fix for the next round.
