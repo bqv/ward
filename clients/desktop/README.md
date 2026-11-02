@@ -88,6 +88,7 @@ The client speaks ward's method names and event kinds, not an adapter vocabulary
 | trajectory | `turn.*`, `session.prompted`, `text.delta`, `tool.call/result` |
 | workspaces | synthetic groups by session cwd |
 | presets | `policy.list` / `policy.select`; chip normalises `id` to `value` |
+| images | `tool.result.path` / `session.attachment.path` -> `attachment.read_blob` |
 | any other method | `wardCall(method, params)` is the generic door; `protocolMethods()` lists the frozen table |
 
 Events the shell has no control for (`turn.timings`, `job.updated`,
@@ -99,11 +100,9 @@ and are never silently dropped by the wire layer.
 - **QUIC.** `WardClient` connects over `AF_UNIX` and loopback TCP. ward's QUIC
   transport, device certificates and pairing are not in this client yet; the
   daemon's own QUIC client (`src/net/quic.c`) is the code to reuse.
-- **Image lightbox and attachments.** Text files read through
-  `session.file_read`, binary ranges through `session.file_read_blob`, and the
-  tree through `session.file_list`. The image lightbox needs an image reference
-  in ward's events before it can resolve one; the composer does not stage
-  `attachment.add/list`.
+- **Composer attachments.** The image lightbox reads a `tool.result.path` or
+  `session.attachment.path` through `attachment.read_blob`; the composer still
+  does not stage `attachment.add/list`.
 - **QUIC.** Unix sockets and loopback TCP only; device pairing and certificates
   are not in this client.
 - **Deferred new-session seats.** A new session is created immediately rather

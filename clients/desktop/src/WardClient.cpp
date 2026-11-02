@@ -236,6 +236,17 @@ WardClient::WardClient(const QString &socketPath, QObject *parent)
     m_busyEnter = QStringLiteral("queue");
     m_railExpanded = QSettings().value(QStringLiteral("ward/railExpanded")).toStringList();
     m_railCollapsed = QSettings().value(QStringLiteral("ward/railCollapsed")).toStringList();
+    connect(this, &WardClient::blobRead, this,
+            [this](const QString &path, qint64 offset, const QByteArray &data,
+                   const QString &error) {
+        Q_UNUSED(offset);
+        if (!m_attachmentPending.contains(path))
+            return;
+        m_attachmentPending.remove(path);
+        if (error.isEmpty())
+            m_attachments.insert(path, data);
+        emit attachmentsChanged();
+    });
 }
 
 WardClient::~WardClient()
@@ -651,6 +662,10 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
         emit fileEntriesChanged();
         emit fileTruncatedChanged();
         emit fileErrorChanged();
+    } else if (method == QLatin1String("attachment.read_blob")) {
+        emit blobRead(m_attachmentPath,
+                      qint64(result.value(QStringLiteral("offset")).toULongLong()),
+                      result.value(QStringLiteral("data")).toByteArray(), QString());
     } else if (method == QLatin1String("session.file_read_blob")) {
         emit blobRead(result.value(QStringLiteral("path")).toString(),
                       qint64(result.value(QStringLiteral("offset")).toULongLong()),
@@ -797,8 +812,23 @@ void WardClient::handleEvent(uint64_t sub, uint64_t seq, const QString &kind,
             {QStringLiteral("seq"), QVariant::fromValue<qulonglong>(seq)}});
     } else if (kind == QLatin1String("tool.result")) {
         const QString tool = payload.value(QStringLiteral("tool")).toString();
-        appendRow(QStringLiteral("tool"), tool, tool, QStringLiteral("completed"), tool, {},
-                  m_turn);
+        const QString path = payload.value(QStringLiteral("path")).toString();
+        const QString lower = path.toLower();
+        if (!path.isEmpty()
+                && (lower.endsWith(QStringLiteral(".png"))
+                    || lower.endsWith(QStringLiteral(".jpg"))
+                    || lower.endsWith(QStringLiteral(".jpeg"))
+                    || lower.endsWith(QStringLiteral(".gif"))
+                    || lower.endsWith(QStringLiteral(".webp")))) {
+            appendRow(QStringLiteral("image"), tool + QLatin1Char(' ') + path, tool,
+                      QStringLiteral("completed"), path, {}, m_turn);
+        } else if (!path.isEmpty()) {
+            appendRow(QStringLiteral("file"), path, tool, QStringLiteral("openable"), path,
+                      {}, m_turn);
+        } else {
+            appendRow(QStringLiteral("tool"), tool, tool, QStringLiteral("completed"), tool,
+                      {}, m_turn);
+        }
         for (int i = m_trajectory.size() - 1; i >= 0; --i) {
             QVariantMap cell = m_trajectory.at(i).toMap();
             if (cell.value(QStringLiteral("kind")).toString() != QLatin1String("tool"))
@@ -1363,12 +1393,28 @@ void WardClient::setBusyEnter(const QString &mode)
 
 void WardClient::loadAttachment(const QString &path)
 {
-    Q_UNUSED(path);
+    if (path.isEmpty() || m_attachments.contains(path)
+            || m_attachmentPending.contains(path))
+        return;
+    m_attachmentPending.insert(path);
+    if (path.contains(QStringLiteral("/attachments/"))) {
+        m_attachmentPath = path;
+        sendRequest(QStringLiteral("attachment.read_blob"),
+                    {{QStringLiteral("id"), m_sessionId},
+                     {QStringLiteral("name"), QFileInfo(path).fileName()},
+                     {QStringLiteral("offset"), 0},
+                     {QStringLiteral("len"), 1 << 20}});
+        return;
+    }
+    readBlob(path, 0, 1 << 20);
 }
 
 QString WardClient::attachmentUrl(const QString &ref) const
 {
-    return ref;
+    if (!m_attachments.contains(ref))
+        return {};
+    return QStringLiteral("data:application/octet-stream;base64,")
+         + QString::fromLatin1(m_attachments.value(ref).toBase64());
 }
 
 void WardClient::deleteScheduleTask(const QString &id)
@@ -1619,7 +1665,7 @@ QStringList WardClient::protocolMethods() const
             QStringLiteral("goal.clear"), QStringLiteral("terminal.open"),
             QStringLiteral("terminal.write"), QStringLiteral("terminal.resize"),
             QStringLiteral("terminal.close"), QStringLiteral("attachment.add"),
-            QStringLiteral("attachment.list"), QStringLiteral("module.list"),
+            QStringLiteral("attachment.list"), QStringLiteral("attachment.read_blob"), QStringLiteral("module.list"),
             QStringLiteral("module.reload"), QStringLiteral("stats.session"),
             QStringLiteral("stats.global"), QStringLiteral("device.pair"),
             QStringLiteral("device.enrol"), QStringLiteral("device.list"),

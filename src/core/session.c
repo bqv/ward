@@ -444,9 +444,10 @@ int wd_session_attach(wd_session *s, const char *name, const uint8_t *data,
     if (err != NULL) *err = strdup("cannot write the attachment");
     return -1;
   }
-  cbor_item_t *payload = wd_map(2);
+  cbor_item_t *payload = wd_map(3);
   wd_put(payload, "name", wd_text(name));
   wd_put(payload, "size", wd_uint((uint64_t)len));
+  wd_put(payload, "path", wd_text(path));
   if (wd_session_emit(s, "session.attachment", payload, NULL) != 0) {
     (void)unlink(path);
     free(path);

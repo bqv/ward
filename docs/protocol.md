@@ -161,9 +161,12 @@ fields stay the same when a real tokenizer replaces the estimate.
 
 **Attachments.** `attachment.add {id, name, data}` writes `data` (bytes or text, capped at
 4 MiB) to `<state>/<session>/attachments/<name>` — the name is refused if it holds `/` or `..`
-— appends a durable `session.attachment {name, size}` event and answers `{path, size}`.
-`attachment.list {id}` replays those events into `[{name, size}]`. The file lives in the state
-directory, not the tool root, so a turn cannot read it without being told the path. Before a
+— appends a durable `session.attachment {name, size, path}` event and answers `{path, size}`.
+`attachment.list {id}` replays those events into `[{name, size, path}]`.
+`attachment.read_blob {id, name, offset, len}` answers `{path, offset, size, data}` with
+`data` as a CBOR byte string; it is rooted at the session's attachment directory, with the
+same 1 MiB per call and 4 MiB total caps as `session.file_read_blob`. The file lives in the
+state directory, not the tool root, so a turn cannot read it without being told the path. Before a
 prompt runs, core also sends the attachments as a `system` message — `attached to this
 session: note.txt (13 bytes)` — so the model knows what is there.
 
@@ -419,6 +422,9 @@ Served in M0:
 
 Served in M1:
 
+- `tool.result` — payload `{tool, call}`; `path` is present only when the result is about
+  one file (read, write, edit), session-relative and canonical. It is absent for plural
+  results such as grep hits or a directory write.
 - `text.delta` — payload `{text}`; durable.
 - `turn.end` — payload `{}`; durable, emitted after the last delta of a turn.
 

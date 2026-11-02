@@ -347,8 +347,12 @@ int main(void) {
     dup2(ready[1], 1);
     close(ready[1]);
     char cgroup_base[128];
-    snprintf(cgroup_base, sizeof(cgroup_base),
-             "/sys/fs/cgroup/ward/test/gate-%d", (int)getpid());
+    const char *cgroup_override = getenv("WARD_GATE_CGROUP");
+    if (cgroup_override != NULL)
+      snprintf(cgroup_base, sizeof(cgroup_base), "%s", cgroup_override);
+    else
+      snprintf(cgroup_base, sizeof(cgroup_base),
+               "/sys/fs/cgroup/ward/test/gate-%d", (int)getpid());
     setenv("WARD_CGROUP", cgroup_base, 1);
     setenv("WARD_MODULE_DIR", modules, 1);
     setenv("WARD_TOOL_ROOT", root, 1);
@@ -563,6 +567,9 @@ int main(void) {
   wd_free(event);
   event = wait_event(&a, "tool.result", NULL);
   assert(event != NULL);
+  char *result_path = wd_text_copy(wd_get(event, "path"));
+  assert(result_path != NULL && strstr(result_path, "out.txt") != NULL);
+  free(result_path);
   wd_free(event);
   event = wait_event(&a, "text.delta", NULL);
   assert(event != NULL);
@@ -1004,7 +1011,26 @@ int main(void) {
                  NULL) == 0);
   cbor_item_t *att_items = wd_get(att_list, "attachments");
   assert(att_items != NULL && cbor_array_size(att_items) == 1);
+  cbor_item_t *att_entry = cbor_array_handle(att_items)[0];
+  char *att_listed_path = wd_text_copy(wd_get(att_entry, "path"));
+  assert(att_listed_path != NULL && strstr(att_listed_path, "note.txt") != NULL);
+  free(att_listed_path);
   wd_free(att_list);
+
+  cbor_item_t *blob_req = wd_map(4);
+  wd_put(blob_req, "id", wd_text(session));
+  wd_put(blob_req, "name", wd_text("note.txt"));
+  wd_put(blob_req, "offset", wd_uint(0));
+  wd_put(blob_req, "len", wd_uint(64));
+  cbor_item_t *blob_resp = NULL;
+  assert(request(&a, a.next_id++, "attachment.read_blob", blob_req, &blob_resp,
+                 NULL) == 0);
+  cbor_item_t *blob_data = wd_get(blob_resp, "data");
+  assert(blob_data != NULL && cbor_typeof(blob_data) == CBOR_TYPE_BYTESTRING);
+  assert(cbor_bytestring_length(blob_data) == strlen("attached body"));
+  assert(memcmp(cbor_bytestring_handle(blob_data), "attached body",
+                strlen("attached body")) == 0);
+  wd_free(blob_resp);
 
   cbor_item_t *sched = NULL;
   cbor_item_t *sched_params = wd_map(3);

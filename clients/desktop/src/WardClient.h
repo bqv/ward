@@ -278,6 +278,7 @@ signals:
     void terminalSizeChanged();
     void blobRead(const QString &path, qint64 offset, const QByteArray &data,
                   const QString &error);
+    void attachmentsChanged();
 
 private slots:
     void onReadable();
@@ -396,5 +397,8 @@ private:
     QString m_queuedPrompt;
     QString m_pendingApproval;
     QHash<QString, QVariantMap> m_approvals;
+    QHash<QString, QByteArray> m_attachments;
+    QSet<QString> m_attachmentPending;
+    QString m_attachmentPath;
     QSet<QString> m_announcedApprovals;
 };

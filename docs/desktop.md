@@ -79,6 +79,7 @@ daemon.
 | replay | `session.resume {from: 0}` and the `replay` control frame |
 | approvals | request, respond, resolved; `approval.list` marks every session with a live card and carries tool/reason, so a followed session that reconnects without replay still names the request; `requestId` is `call:epoch` |
 | permission presets | `policy.list` / `policy.select`; `id` normalised to `value`, `current` drives the access chip, `observe` stays in the description |
+| attachments | `attachment.read_blob` for the image lightbox; `session.attachment.path` and `tool.result.path` supply the reference |
 | terminal | `terminal.open/write/resize/close`, `terminal.output`, eof and exit state |
 | session lifecycle | create (client-side lazy), list, resume, prompt, cancel, rename, pin, archive, compact, set_model |
 | catalog | `model.list`, `session.set_model` |
@@ -100,10 +101,10 @@ proven yet. They are reported to the ward session as well.
    transport, device certificates, pairing and `device.*` are not in the client;
    `src/net/quic.h` is the code to reuse, but it pulls ngtcp2 and OpenSSL into a
    Qt client that currently links neither.
-2. **Image lightbox and uploaded attachments.** Text, blob and directory
-   surfaces are wired. The image lightbox still needs an image reference in
-   ward's tool-result or attachment event before `attachmentUrl` can resolve
-   one, and the composer's staging surface is not wired to `attachment.add/list`.
+2. **Uploaded attachments.** The image lightbox follows `tool.result.path`
+   (and `session.attachment.path` for store blobs) through
+   `attachment.read_blob`; a path that is absent is not rendered. The composer's
+   staging surface is still not wired to `attachment.add/list`.
 3. **Queue/steer.** `session.prompt` is serialised; the composer's queue/steer
    mode stays as-is until a mid-turn steer has a defined model-visible meaning.
    No client-side queue is invented.
