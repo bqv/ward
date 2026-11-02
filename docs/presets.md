@@ -23,8 +23,16 @@ Descriptions, verbatim as the chip shows them:
 `observe` is never a chip, toggle or row of its own; it is part of the
 description.
 
-There is **no fourth "full access" preset**, and that is a deliberate
-difference from DSH rather than an omission. The clamp below only tightens, so a
+There is a fourth preset, **`full-access`**, and it is honest because the
+policy module decides with the preset's rules rather than core overriding a
+denial. It is never the default, `policy.select` refuses it without
+`confirm: true` and returns the warning as the message, and a stored selection
+without a confirmation record loads as `default`.
+
+Earlier this note argued the opposite — that there should be **no fourth
+preset** — on the grounds that the clamp only tightens. That was right about the
+clamp and wrong about the fix: the answer was to let the module decide from the
+rules, not to drop the mode. The clamp below only tightens, so a
 preset whose rules all say `allow` could not turn the policy module's
 `write → ask` into `allow`: the chip would change its own label and nothing
 else. Making presets authoritative instead would let one turn a module `deny`

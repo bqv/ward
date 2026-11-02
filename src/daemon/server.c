@@ -2122,11 +2122,14 @@ static cbor_item_t *preset_to_cbor(const wd_preset *preset) {
   wd_put(rules, "edit", wd_text(preset->edit));
   wd_put(rules, "exec", wd_text(preset->exec));
   wd_put(rules, "grep", wd_text(preset->grep));
-  cbor_item_t *item = wd_map(5);
+  cbor_item_t *item = wd_map(7);
   wd_put(item, "id", wd_text(preset->id));
   wd_put(item, "name", wd_text(preset->name));
   wd_put(item, "description", wd_text(preset->description));
   wd_put(item, "observe", wd_text(preset->observe));
+  wd_put(item, "dangerous", cbor_build_bool(preset->dangerous));
+  wd_put(item, "warning",
+         wd_text(preset->warning != NULL ? preset->warning : ""));
   wd_put(item, "rules", rules);
   return item;
 }
@@ -2155,8 +2158,10 @@ static void handle_policy_select(wd_server *srv, wd_conn *conn, uint64_t id,
     conn_arm(srv, conn);
     return;
   }
+  bool confirmed = false;
+  wd_bool_of(wd_get(params, "confirm"), &confirmed);
   char *err = NULL;
-  if (wd_preset_select(srv->state_dir, choice, &err) != 0) {
+  if (wd_preset_select(srv->state_dir, choice, confirmed, &err) != 0) {
     conn_send_error(conn, id, WD_ERR_INVALID_PARAMS,
                     err != NULL ? err : "cannot select the preset");
     free(err);

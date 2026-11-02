@@ -1100,10 +1100,43 @@ static int judge_ask(void *ctx, const char *tool, const uint8_t *args,
   return result;
 }
 
+static uint8_t *policy_request(wd_turn *turn, const uint8_t *in, size_t in_len,
+                               size_t *out_len) {
+  const wd_preset *preset = wd_preset_current(wd_engine_state_dir(turn->engine));
+  if (preset == NULL) return NULL;
+  cbor_item_t *given = wd_decode(in, in_len);
+  if (given == NULL) return NULL;
+  char *tool = wd_text_copy(wd_get(given, "tool"));
+  char *payload = wd_text_copy(wd_get(given, "payload"));
+  wd_free(given);
+  cbor_item_t *rules = wd_map(5);
+  wd_put(rules, "read", wd_text(preset->read));
+  wd_put(rules, "write", wd_text(preset->write));
+  wd_put(rules, "edit", wd_text(preset->edit));
+  wd_put(rules, "exec", wd_text(preset->exec));
+  wd_put(rules, "grep", wd_text(preset->grep));
+  cbor_item_t *request = wd_map(4);
+  wd_put(request, "tool", wd_text(tool != NULL ? tool : ""));
+  wd_put(request, "payload", wd_text(payload != NULL ? payload : ""));
+  wd_put(request, "rules", rules);
+  wd_put(request, "observe", wd_text(preset->observe));
+  free(tool);
+  free(payload);
+  uint8_t *bytes = encode_keep(request, out_len);
+  wd_free(request);
+  return bytes;
+}
+
 static int policy_check(wd_turn *turn, const uint8_t *in, size_t in_len,
                         uint8_t **out, size_t *out_len, char **err) {
-  if (wd_instance_call(turn->policy, in, in_len, out, out_len, err) != 0)
-    return -1;
+  size_t asked_len = 0;
+  uint8_t *asked = policy_request(turn, in, in_len, &asked_len);
+  const uint8_t *payload_in = asked != NULL ? asked : in;
+  size_t payload_len = asked != NULL ? asked_len : in_len;
+  int called = wd_instance_call(turn->policy, payload_in, payload_len, out,
+                                out_len, err);
+  free(asked);
+  if (called != 0) return -1;
   cbor_item_t *request = wd_decode(in, in_len);
   cbor_item_t *reply = wd_decode(*out, *out_len);
   if (request == NULL || reply == NULL) {

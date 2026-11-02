@@ -14,14 +14,20 @@
 static const wd_preset presets[] = {
     {"default", "Ask writes",
      "Reads and grep allowed. Writes, edits and exec ask first. Observation off.",
-     "allow", "ask", "ask", "ask", "allow", "off"},
+     "allow", "ask", "ask", "ask", "allow", "off", false, NULL},
     {"reads-only", "Reads only",
      "Reads and grep allowed. Write, edit and exec are denied. Observation off.",
-     "allow", "deny", "deny", "deny", "allow", "off"},
+     "allow", "deny", "deny", "deny", "allow", "off", false, NULL},
+    {"full-access", "Full access",
+     "Writes, edits and exec run without asking. Every command the model "
+     "chooses will run on this machine.",
+     "allow", "allow", "allow", "allow", "allow", "off", true,
+     "Writes, edits and exec run without asking. Every command the model "
+     "chooses will run on this machine."},
     {"workspace", "Workspace",
      "Reads and grep allowed. Writes, edits and exec ask first. A file must be "
      "read before it is overwritten.",
-     "allow", "ask", "ask", "ask", "allow", "require-read"},
+     "allow", "ask", "ask", "ask", "allow", "require-read", false, NULL},
 };
 
 size_t wd_preset_count(void) { return sizeof(presets) / sizeof(presets[0]); }
@@ -43,6 +49,8 @@ static int preset_path(const char *state_dir, char *out, size_t cap) {
   return written > 0 && (size_t)written < cap ? 0 : -1;
 }
 
+static bool confirmed_selection(const char *state_dir, const char *id);
+
 const wd_preset *wd_preset_current(const char *state_dir) {
   char path[512];
   const wd_preset *fallback = wd_preset_find("default");
@@ -59,14 +67,34 @@ const wd_preset *wd_preset_current(const char *state_dir) {
   while (len > 0 && (id[len - 1] == '\n' || id[len - 1] == '\r'))
     id[--len] = '\0';
   const wd_preset *found = wd_preset_find(id);
+  if (found != NULL && found->dangerous && !confirmed_selection(state_dir, id))
+    return fallback;
   return found != NULL ? found : fallback;
 }
 
-int wd_preset_select(const char *state_dir, const char *id, char **err) {
-  if (wd_preset_find(id) == NULL) {
-    if (err != NULL) *err = strdup("policy: no such preset");
-    return -1;
-  }
+static int confirmation_path(const char *state_dir, char *out, size_t cap) {
+  int written = snprintf(out, cap, "%s/policy.confirmed", state_dir);
+  return written > 0 && (size_t)written < cap ? 0 : -1;
+}
+
+static bool confirmed_selection(const char *state_dir, const char *id) {
+  char path[512];
+  if (state_dir == NULL || confirmation_path(state_dir, path, sizeof(path)) != 0)
+    return false;
+  int fd = open(path, O_RDONLY | O_CLOEXEC);
+  if (fd < 0) return false;
+  char held[64];
+  ssize_t got = read(fd, held, sizeof(held) - 1);
+  close(fd);
+  if (got <= 0) return false;
+  held[got] = '\0';
+  size_t len = strlen(held);
+  while (len > 0 && (held[len - 1] == '\n' || held[len - 1] == '\r'))
+    held[--len] = '\0';
+  return strcmp(held, id) == 0;
+}
+
+static int write_selection(const char *state_dir, const char *id, char **err) {
   char path[512];
   if (state_dir == NULL || preset_path(state_dir, path, sizeof(path)) != 0) {
     if (err != NULL) *err = strdup("policy: no state directory");
@@ -94,6 +122,42 @@ int wd_preset_select(const char *state_dir, const char *id, char **err) {
   }
   return 0;
 }
+
+int wd_preset_select(const char *state_dir, const char *id, bool confirmed,
+                     char **err) {
+  const wd_preset *chosen = wd_preset_find(id);
+  if (chosen == NULL) {
+    if (err != NULL) *err = strdup("policy: no such preset");
+    return -1;
+  }
+  if (chosen->dangerous && !confirmed) {
+    if (err != NULL) *err = strdup(chosen->warning);
+    return -1;
+  }
+  if (chosen->dangerous) {
+    char path[512];
+    if (state_dir == NULL || confirmation_path(state_dir, path, sizeof(path)) != 0) {
+      if (err != NULL) *err = strdup("policy: no state directory");
+      return -1;
+    }
+    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+    if (fd < 0) {
+      if (err != NULL) *err = strdup("policy: cannot record the confirmation");
+      return -1;
+    }
+    ssize_t written = write(fd, id, strlen(id));
+    close(fd);
+    if (written != (ssize_t)strlen(id)) {
+      if (err != NULL) *err = strdup("policy: cannot record the confirmation");
+      return -1;
+    }
+  } else if (state_dir != NULL) {
+    char path[512];
+    if (confirmation_path(state_dir, path, sizeof(path)) == 0) unlink(path);
+  }
+  return write_selection(state_dir, id, err);
+}
+
 
 static const char *axis_rule(const wd_preset *preset, const char *tool) {
   if (preset == NULL || tool == NULL) return NULL;

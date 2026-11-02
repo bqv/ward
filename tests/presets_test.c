@@ -11,7 +11,7 @@
 #include "core/presets.h"
 
 int main(void) {
-  assert(wd_preset_count() == 3);
+  assert(wd_preset_count() == 4);
   const wd_preset *def = wd_preset_find("default");
   assert(def != NULL && strcmp(def->name, "Ask writes") == 0);
   assert(strcmp(def->observe, "off") == 0);
@@ -32,12 +32,24 @@ int main(void) {
   char dir[] = "/tmp/ward-preset-XXXXXX";
   assert(mkdtemp(dir) != NULL);
   assert(strcmp(wd_preset_current(dir)->id, "default") == 0);
-  assert(wd_preset_select(dir, "reads-only", NULL) == 0);
+  assert(wd_preset_select(dir, "reads-only", false, NULL) == 0);
   assert(strcmp(wd_preset_current(dir)->id, "reads-only") == 0);
   char *err = NULL;
-  assert(wd_preset_select(dir, "bogus", &err) != 0);
+  assert(wd_preset_select(dir, "bogus", false, &err) != 0);
   assert(err != NULL && strstr(err, "no such preset") != NULL);
   free(err);
+  assert(strcmp(wd_preset_current(dir)->id, "reads-only") == 0);
+
+  const wd_preset *full = wd_preset_find("full-access");
+  assert(full != NULL && full->dangerous && full->warning != NULL);
+  err = NULL;
+  assert(wd_preset_select(dir, "full-access", false, &err) != 0);
+  assert(err != NULL && strstr(err, "without asking") != NULL);
+  free(err);
+  assert(strcmp(wd_preset_current(dir)->id, "reads-only") == 0);
+  assert(wd_preset_select(dir, "full-access", true, NULL) == 0);
+  assert(strcmp(wd_preset_current(dir)->id, "full-access") == 0);
+  assert(wd_preset_select(dir, "reads-only", false, NULL) == 0);
   assert(strcmp(wd_preset_current(dir)->id, "reads-only") == 0);
 
   printf("presets tests passed\n");
