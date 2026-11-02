@@ -1390,10 +1390,27 @@ static void device_release(wd_server *srv, wd_session *session,
 
 static void drain_queue(wd_server *srv) {
   while (srv->queue != NULL && active_runs(srv) < srv->max_runs) {
+    wd_queue *prev = NULL;
     wd_queue *item = srv->queue;
-    wd_session *head = wd_session_find(&srv->store, item->session);
-    if (head != NULL && !device_free(srv, head)) break;
-    srv->queue = item->next;
+    while (item != NULL) {
+      wd_session *head = wd_session_find(&srv->store, item->session);
+      if (head != NULL && run_find(srv, head->id) != NULL) {
+        prev = item;
+        item = item->next;
+        continue;
+      }
+      if (head != NULL && !device_free(srv, head)) {
+        prev = item;
+        item = item->next;
+        continue;
+      }
+      break;
+    }
+    if (item == NULL) break;
+    if (prev == NULL)
+      srv->queue = item->next;
+    else
+      prev->next = item->next;
     wd_session *session = wd_session_find(&srv->store, item->session);
     if (session != NULL)
       start_session_turn(srv, session, item->text, item->announced);

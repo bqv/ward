@@ -2153,3 +2153,13 @@ an empty stream that looks like silence.
 
 The gate that must exist with it: a job that produces more than the cap, asserting `dropped` grows, `next` advances and a
 resume from a mid-point returns the tail rather than the head.
+
+Hundred-and-sixty-fourth: head-of-line blocking in `drain_queue`, fixed. It popped the global FIFO head and, when that item's
+session already had a running turn, `break` out of the loop entirely — so one session's queued prompt stopped every other
+session's from ever starting. It now walks the queue for the first item whose session has neither a running turn nor a busy
+device, and leaves the rest in place. All three builds green.
+
+Carry-over still does not deliver, and the fix changed its symptom without curing it: the enqueue runs, the drain no longer
+blocks, and the second `session.prompted` still does not arrive. So the remaining fault is downstream of the queue — either the
+carried turn starts and dies before emitting, or the started turn is not the one the subscriber hears. That is where the next
+session should look, with the trace re-added around `start_session_turn` for the carried item.
