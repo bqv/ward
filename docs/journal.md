@@ -1920,3 +1920,13 @@ bytes are the contract, and a re-implementation can diff against them instead of
 The dump also exposed a build fault worth noting: `ward-native` was not relinked when `src/client/client.c` changed, because
 its link rule listed the native and core objects but not the client's. The binary I had been testing was older than the
 library it linked — the same class of mistake as the missing test dependency files, in the same Makefile.
+
+Hundred-and-forty-fourth: the conformance harness exists. `tests/transcripts/create.txt` holds the captured frames — the
+welcome, the `session.create` request and its response — and `tests/conformance_test.c` decodes each one with `wd_decode`
+and re-encodes it, asserting the result is byte-identical. Three frames round-trip exactly.
+
+That is the third thing the Android row needed, in its first form: the bytes are now a fixture a JVM test can read as
+easily as this one does, and "the client produces these bytes" becomes an assertion rather than a hope.
+
+The rule the repository applies is still not satisfied for Android — the row is not `delivered` until a client under test
+replays the fixture — but the fixture and the harness are the part this repository can own without a device.
