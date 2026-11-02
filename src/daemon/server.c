@@ -1785,17 +1785,49 @@ static void handle_session_upgrade(wd_server *srv, wd_conn *conn, uint64_t id,
   conn_arm(srv, conn);
 }
 
+static void handle_module_enable(wd_server *srv, wd_conn *conn, uint64_t id,
+                                 cbor_item_t *params) {
+  char *name = wd_text_copy(wd_get(params, "name"));
+  bool enabled = true;
+  wd_bool_of(wd_get(params, "enabled"), &enabled);
+  if (name == NULL || name[0] == '\0') {
+    conn_send_error(conn, id, WD_ERR_INVALID_PARAMS, "name is required");
+    conn_arm(srv, conn);
+    return;
+  }
+  char *err = NULL;
+  if (wd_settings_set_module(&srv->settings, name, enabled, &err) != 0) {
+    conn_send_error(conn, id, WD_ERR_INVALID_PARAMS,
+                    err != NULL ? err : "cannot change the module");
+    free(err);
+    free(name);
+    conn_arm(srv, conn);
+    return;
+  }
+  free(err);
+  wd_settings_save(srv->state_dir, &srv->settings);
+  cbor_item_t *result = wd_map(2);
+  wd_put(result, "name", wd_text(name));
+  wd_put(result, "enabled", cbor_build_bool(enabled));
+  free(name);
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
 static void handle_module_list(wd_server *srv, wd_conn *conn, uint64_t id) {
   cbor_item_t *items = wd_array(srv->registry.len);
   for (size_t i = 0; i < srv->registry.len; i++) {
     const wd_module_info *info = &srv->registry.items[i];
-    cbor_item_t *entry = wd_map(6);
+    cbor_item_t *entry = wd_map(7);
     wd_put(entry, "name", wd_text(info->name));
     wd_put(entry, "version", wd_text(info->version));
     wd_put(entry, "size", wd_uint((uint64_t)info->size));
     wd_put(entry, "hash", wd_uint(info->hash));
     wd_put(entry, "changed", cbor_build_bool(info->changed));
     wd_put(entry, "valid", cbor_build_bool(info->valid));
+    wd_put(entry, "enabled",
+           cbor_build_bool(!wd_settings_module_disabled(&srv->settings,
+                                                       info->name)));
     bool pushed = cbor_array_push(items, entry);
     cbor_decref(&entry);
     if (!pushed) break;
@@ -2987,6 +3019,18 @@ static void handle_session_prompt(wd_server *srv, wd_conn *conn, uint64_t id,
     conn_arm(srv, conn);
     return;
   }
+  for (size_t p = 0; p < session->pins_len; p++) {
+    if (wd_settings_module_disabled(&srv->settings, session->pins[p].name)) {
+      char detail[128];
+      snprintf(detail, sizeof(detail), "module %s is disabled",
+               session->pins[p].name);
+      free(session_id);
+      free(text);
+      conn_send_error(conn, id, WD_ERR_INVALID_PARAMS, detail);
+      conn_arm(srv, conn);
+      return;
+    }
+  }
   if (run_find(srv, session->id) != NULL) {
     size_t ahead = 0;
     for (wd_queue *at = srv->queue; at != NULL; at = at->next)
@@ -3710,6 +3754,8 @@ static void handle_request(wd_server *srv, wd_conn *conn, uint64_t id,
     handle_policy_list(srv, conn, id);
   } else if (strcmp(method, "policy.select") == 0) {
     handle_policy_select(srv, conn, id, params);
+  } else if (strcmp(method, "module.enable") == 0) {
+    handle_module_enable(srv, conn, id, params);
   } else if (strcmp(method, "settings.get") == 0) {
     handle_settings_get(srv, conn, id);
   } else if (strcmp(method, "settings.set") == 0) {

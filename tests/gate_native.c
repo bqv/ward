@@ -478,6 +478,39 @@ int main(void) {
   close(speaker.fd);
   close(watcher.fd);
 
+  wd_client admin;
+  assert(wd_client_connect(&admin, sock) == 0);
+  assert(wd_client_handshake(&admin) == 0);
+  cbor_item_t *off = wd_map(2);
+  wd_put(off, "name", wd_text("skills"));
+  wd_put(off, "enabled", cbor_build_bool(false));
+  cbor_item_t *off_done = NULL;
+  assert(wd_client_call(&admin, "module.enable", off, &off_done) == 0);
+  wd_free(off_done);
+  cbor_item_t *listed = NULL;
+  assert(wd_client_call(&admin, "module.list", wd_map(0), &listed) == 0);
+  cbor_item_t *items = wd_get(listed, "modules");
+  bool saw_disabled = false;
+  for (size_t i = 0; i < cbor_array_size(items); i++) {
+    cbor_item_t *entry = cbor_array_get(items, i);
+    char *name = wd_text_copy(wd_get(entry, "name"));
+    bool enabled_here = true;
+    wd_bool_of(wd_get(entry, "enabled"), &enabled_here);
+    if (name != NULL && strcmp(name, "skills") == 0 && !enabled_here)
+      saw_disabled = true;
+    free(name);
+    cbor_decref(&entry);
+  }
+  assert(saw_disabled);
+  wd_free(listed);
+  cbor_item_t *back_on = wd_map(2);
+  wd_put(back_on, "name", wd_text("skills"));
+  wd_put(back_on, "enabled", cbor_build_bool(true));
+  cbor_item_t *back_done = NULL;
+  assert(wd_client_call(&admin, "module.enable", back_on, &back_done) == 0);
+  wd_free(back_done);
+  close(admin.fd);
+
   kill(pid, SIGTERM);
   int status = 0;
   waitpid(pid, &status, 0);

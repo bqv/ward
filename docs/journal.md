@@ -2223,3 +2223,18 @@ green.
 What is not done from item five: the writable plugin bundle switch. `module.list` and `module.reload` exist, but nothing
 enables or disables a bundle yet, and adding that is a decision about what a disabled bundle means mid-session rather than a
 line of code.
+
+Hundred-and-seventieth: the writable bundle switch, and the decision it needed. `module.enable {name, enabled}` persists the
+choice beside `models.toml`, `module.list` reports `enabled`, and a session whose pins include a disabled module refuses
+`session.prompt` with `module <name> is disabled`.
+
+The decision: disabling applies to turns **started afterwards**. A running turn keeps the instance it has already resolved,
+because tearing a live instance down mid-turn is how a turn becomes a half-written file. An earlier version refused to disable
+while any turn ran; that was wrong for a different reason — it made the switch unusable on a busy daemon, and busy is when an
+operator most wants it.
+
+`gate_native` disables `skills`, asserts `module.list` reports it disabled, and re-enables it. The prompt refusal is implemented
+and recorded here but not gated: the gate's sessions pin the default set, so a disabled module never appears in a pin list the
+test builds.
+
+All three builds green.

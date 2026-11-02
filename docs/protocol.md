@@ -33,6 +33,12 @@ counts the prompts before it (0 means next). The prompt is appended to the
 transcript immediately as `session.prompted`; its own `turn.start` arrives when
 it runs. A queue deeper than eight answers a busy error rather than a queued one.
 
+`module.enable {name, enabled}` answers `{name, enabled}` and persists the switch
+beside `models.toml`; `module.list` reports each module's `enabled` flag. Disabling
+takes effect for turns **started afterwards** — a running turn keeps the instance
+it already resolved — and a session whose pins include a disabled module refuses
+`session.prompt` with `module <name> is disabled`.
+
 `settings.get {}` answers `{max_runs, debug}`; `settings.set {key, value}` validates
 against the known keys and persists them beside `models.toml`. Unknown keys and out
 of-range values are refused with a message rather than stored.

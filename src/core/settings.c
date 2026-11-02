@@ -20,6 +20,41 @@ static int path_for(const char *state_dir, char *out, size_t cap) {
 void wd_settings_defaults(wd_settings *settings) {
   settings->max_runs = 8;
   settings->debug = false;
+  settings->disabled_len = 0;
+}
+
+bool wd_settings_module_disabled(const wd_settings *settings, const char *name) {
+  if (settings == NULL || name == NULL) return false;
+  for (size_t i = 0; i < settings->disabled_len; i++)
+    if (strcmp(settings->disabled[i], name) == 0) return true;
+  return false;
+}
+
+int wd_settings_set_module(wd_settings *settings, const char *name, bool enabled,
+                           char **err) {
+  size_t found = settings->disabled_len;
+  for (size_t i = 0; i < settings->disabled_len; i++)
+    if (strcmp(settings->disabled[i], name) == 0) {
+      found = i;
+      break;
+    }
+  if (enabled) {
+    if (found == settings->disabled_len) return 0;
+    for (size_t i = found + 1; i < settings->disabled_len; i++)
+      memcpy(settings->disabled[i - 1], settings->disabled[i],
+             WD_SETTINGS_NAME_MAX);
+    settings->disabled_len--;
+    return 0;
+  }
+  if (found != settings->disabled_len) return 0;
+  if (settings->disabled_len >= WD_SETTINGS_DISABLED_MAX) {
+    if (err != NULL) *err = strdup("settings: too many disabled modules");
+    return -1;
+  }
+  snprintf(settings->disabled[settings->disabled_len], WD_SETTINGS_NAME_MAX,
+           "%s", name);
+  settings->disabled_len++;
+  return 0;
 }
 
 static void trim(char *text) {
@@ -45,6 +80,14 @@ int wd_settings_load(const char *state_dir, wd_settings *settings) {
     while (*key != '\0' && isspace((unsigned char)*key)) key++;
     trim(key);
     while (*value != '\0' && isspace((unsigned char)*value)) value++;
+    if (strncmp(key, "disabled.", 9) == 0) {
+      if (strcmp(value, "true") == 0) {
+        char *err = NULL;
+        wd_settings_set_module(settings, key + 9, false, &err);
+        free(err);
+      }
+      continue;
+    }
     char *err = NULL;
     wd_settings_apply(settings, key, value, &err);
     free(err);
@@ -94,6 +137,12 @@ int wd_settings_save(const char *state_dir, const wd_settings *settings) {
   int wrote = snprintf(text, sizeof(text), "max_runs = %ld\ndebug = %s\n",
                        settings->max_runs, settings->debug ? "true" : "false");
   ssize_t put = write(fd, text, (size_t)wrote);
+  for (size_t i = 0; i < settings->disabled_len; i++) {
+    char line[64];
+    int made = snprintf(line, sizeof(line), "disabled.%s = true\n",
+                        settings->disabled[i]);
+    if (made > 0) put = write(fd, line, (size_t)made);
+  }
   close(fd);
   if (put != (ssize_t)wrote || rename(temp, path) != 0) {
     unlink(temp);
