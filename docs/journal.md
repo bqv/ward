@@ -1732,3 +1732,20 @@ vacuous at the same time, which is worth remembering the next time a suite looks
 
 ASan caught the leak the new events introduced: the maps were built, emitted and never freed. Freed now; all three
 builds are clean.
+
+Hundred-and-thirtieth: the repair path, re-measured now that the tool events are real. The earlier diagnosis — "dispatch
+stops at judge and ends the turn with no tool.call" — cannot stand, because tool.call did not exist then. With the events
+in place the trace reads differently: the repair request is submitted, its answer parses as `tool=read`, the call is
+dispatched, and then the *next* provider request in the turn fails with "module returned invalid CBOR".
+
+That next request is the driver asking the provider again after the tool result, and its prompt still carries the "repair
+me" marker, so the fixture matches it and answers with the vague body a second time; the provider then reports a tool
+without arguments, core has already used its one repair, and something in that reply path hands the driver a payload that
+marshals to nothing.
+
+The fixture is the wrong shape for this: matching on request text cannot express "answer the first request one way and
+every later one another way", and tonight it has already produced two false trails that way. The fix is the same one that
+worked for the dispatch gate — count requests in the fake endpoint (a counter file) and answer by position — and the
+assertion belongs in the gate only after that.
+
+Reverted, tree green, and recorded with the trace.
