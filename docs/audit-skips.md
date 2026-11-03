@@ -47,3 +47,24 @@ Every row here was produced by reading the tree or by a gate that failed. When
 one closes, move it out rather than leaving a stale line — journal entry 171 is
 the example: it corrects an earlier claim that `ward_state_migrate` did not
 exist, because by the time it was re-read, it did.
+
+## core audit, 2026-11-03
+
+A read-only audit of `src/core/`, `src/proto/` and `src/cli/` (three subagents, none of which built or ran anything) found
+one class of bug we had already shipped once: a pointer whose owner had freed or rewritten it. Fixed in the same pass:
+the `turn.timings` map leak (turn.c, both emit sites), the `session.upgraded` record naming the new version as its `from`
+value (session.c), and `wd_jobring_data` returning a rotated buffer once the ring wrapped (jobring.c, which fed both
+`job.output` and the search index). Its test still passes.
+
+Left open, in the auditor's order of severity:
+
+- `deliver_steers` (turn.c) appends a second `prompt` key to an exact-sized map, so queued steering is dropped; folding it
+  into the payload is the fix.
+- `wd_put` (codec.c) drops `cbor_map_add`'s result, which is what made the above silent.
+- `wd_session_replay` (session.c) returns an emitted count when the callback stopped or the log was truncated.
+- `emit_provider_error`'s `reason` (turn.c) and `turn->steers[]` (turn.c teardown) leak.
+- the session header mismatch path (session.c) leaks `cwd` and `model`.
+- `src/cli/main.c` reads floats and bools through the wrong predicates — latent, since today's daemon sends the expected types.
+
+The audit found no double free, no use-after-free, no mutate-while-iterating defect and no sqlite or fd lifetime bug in those
+directories.

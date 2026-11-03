@@ -62,6 +62,17 @@ void wd_jobring_append(wd_jobring *ring, const char *data, size_t len) {
   memcpy(ring->buf + tail, data, first);
   if (len > first) memcpy(ring->buf, data + first, len - first);
   ring->len += len;
+  if (ring->head != 0) {
+    char *flat = malloc(ring->len > 0 ? ring->len : 1);
+    if (flat == NULL) return;
+    size_t lead = ring->cap - ring->head;
+    if (lead > ring->len) lead = ring->len;
+    memcpy(flat, ring->buf + ring->head, lead);
+    if (ring->len > lead) memcpy(flat + lead, ring->buf, ring->len - lead);
+    memcpy(ring->buf, flat, ring->len);
+    free(flat);
+    ring->head = 0;
+  }
 }
 
 const char *wd_jobring_data(const wd_jobring *ring) {

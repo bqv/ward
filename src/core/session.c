@@ -176,12 +176,12 @@ int wd_session_upgrade(wd_session *s, const char *name, const char *version,
                        uint64_t *seq_out) {
   if (name == NULL || version == NULL || name[0] == '\0' || version[0] == '\0')
     return -1;
-  const char *was = "";
+  char was[16] = "";
   bool found = false;
   for (size_t i = 0; i < s->pins_len; i++) {
     if (strcmp(s->pins[i].name, name) != 0) continue;
     if (strcmp(s->pins[i].version, version) == 0) return 0;
-    was = s->pins[i].version;
+    snprintf(was, sizeof(was), "%s", s->pins[i].version);
     snprintf(s->pins[i].version, sizeof(s->pins[i].version), "%s", version);
     found = true;
     break;

@@ -2143,6 +2143,7 @@ int wd_turn_resume_tool(wd_turn *turn, wd_turn_emit emit, void *ctx,
       wd_put(timing, "predicted_ms", wd_uint(predicted_ms));
       wd_put(timing, "cache_n", wd_uint(cache_n));
       (void)emit(ctx, "turn.timings", timing, err);
+      wd_free(timing);
     }
   }
   char *tool = wd_text_copy(wd_get(reply, "tool"));
@@ -2306,6 +2307,7 @@ int wd_turn_resume_http_body(wd_turn *turn, long status, const char *body,
       wd_put(timing, "predicted_ms", wd_uint(predicted_ms));
       wd_put(timing, "cache_n", wd_uint(cache_n));
       (void)emit(ctx, "turn.timings", timing, err);
+      wd_free(timing);
     }
   }
   char *tool = wd_text_copy(wd_get(reply, "tool"));
