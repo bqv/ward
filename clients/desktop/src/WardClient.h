@@ -233,6 +233,8 @@ public:
     Q_INVOKABLE void refreshApprovals();
     Q_INVOKABLE void refreshQueue();
     Q_INVOKABLE void refreshSettings();
+    Q_INVOKABLE void refreshJobs();
+    Q_INVOKABLE void followJob(const QString &jobId, qint64 from);
     Q_INVOKABLE void setSetting(const QString &key, const QVariant &value);
 
     Q_INVOKABLE void wardCall(const QString &method, const QVariantMap &params);
@@ -261,6 +263,7 @@ signals:
     void contextSizeChanged();
     void jobsChanged();
     void settingsChanged();
+    void jobOutput(const QString &jobId, const QString &text, qint64 next, bool dropped);
     void todosChanged();
     void goalChanged();
     void changedFilesChanged();
@@ -378,6 +381,7 @@ private:
     int m_contextSize = 0;
     QVariantList m_jobs;
     QVariantMap m_settings;
+    QString m_lastFollowJob;
 
     QVariantList m_todos;
     QVariantMap m_goal;

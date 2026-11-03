@@ -1,6 +1,7 @@
 #include "StatusStrip.h"
 
 #include "ClientFacade.h"
+#include "JobsDialog.h"
 #include "ShellChrome.h"
 #include "Theme.h"
 
@@ -857,6 +858,11 @@ StatusStrip::StatusStrip(ClientFacade *facade, QWidget *parent)
     // is a ring and a tooltip and the jobs chip's roster is a later slice; both
     // stay inert rather than opening an empty menu.
     m_access->setActivated([this]() { openAccessMenu(); });
+    m_jobs->setActivated([this]() {
+        auto *dialog = new JobsDialog(m_facade, this);
+        dialog->setAttribute(Qt::WA_DeleteOnClose);
+        dialog->show();
+    });
     if (QObject *transport = facade->transport()) {
         if (transport->metaObject()->indexOfSignal("dangerousPresetRequested(QString,QString)") >= 0)
             connect(transport, SIGNAL(dangerousPresetRequested(QString,QString)), this,

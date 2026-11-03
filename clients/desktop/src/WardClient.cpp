@@ -430,6 +430,7 @@ void WardClient::connectToDaemon()
     refreshApprovals();
     refreshQueue();
     refreshSettings();
+    refreshJobs();
     refreshPermissionPresets();
 }
 
@@ -720,6 +721,8 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
         }
         if (method == QLatin1String("settings.set"))
             emit railNotice(text, true);
+        if (method == QLatin1String("job.follow"))
+            emit jobOutput(m_lastFollowJob, QString(), 0, true);
         if (method == QLatin1String("attachment.add")) {
             for (int i = m_pendingAttachments.size() - 1; i >= 0; --i) {
                 if (m_pendingAttachments.at(i).toMap().value(QStringLiteral("name")).toString()
@@ -900,8 +903,24 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
         const QVariantMap session = result.value(QStringLiteral("session")).toMap();
         applySession(session);
     } else if (method == QLatin1String("job.list")) {
-        m_jobs = result.value(QStringLiteral("jobs")).toList();
+        QVariantList rows;
+        for (const QVariant &value : result.value(QStringLiteral("jobs")).toList()) {
+            const QVariantMap job = value.toMap();
+            rows.append(QVariantMap{
+                {QStringLiteral("id"), job.value(QStringLiteral("job"))},
+                {QStringLiteral("session"), job.value(QStringLiteral("session"))},
+                {QStringLiteral("label"), job.value(QStringLiteral("job"))},
+                {QStringLiteral("status"), job.value(QStringLiteral("state"))}});
+        }
+        m_jobs = rows;
         emit jobsChanged();
+    } else if (method == QLatin1String("job.follow")) {
+        QString text;
+        for (const QVariant &value : result.value(QStringLiteral("chunks")).toList())
+            text += value.toMap().value(QStringLiteral("text")).toString();
+        emit jobOutput(result.value(QStringLiteral("job")).toString(), text,
+                       qint64(result.value(QStringLiteral("next")).toULongLong()),
+                       result.value(QStringLiteral("dropped")).toBool());
     } else if (method == QLatin1String("schedule.list")) {
         m_scheduleTasks = result.value(QStringLiteral("schedules")).toList();
         m_scheduleLoading = false;
@@ -1072,6 +1091,7 @@ void WardClient::handleEvent(uint64_t sub, uint64_t seq, const QString &kind,
         m_steerCount = 0;
         m_steerAttempt = false;
         refreshQueue();
+        refreshJobs();
         m_turnOpen = false;
         m_busy = false;
         emit turnOpenChanged();
@@ -1196,7 +1216,23 @@ void WardClient::handleEvent(uint64_t sub, uint64_t seq, const QString &kind,
             emit contextChanged();
         }
     } else if (kind == QLatin1String("job.updated")) {
-        m_jobs = QVariantList{payload};
+        const QString jobId = payload.value(QStringLiteral("job")).toString();
+        bool merged = false;
+        for (int i = 0; i < m_jobs.size(); ++i) {
+            QVariantMap row = m_jobs.at(i).toMap();
+            if (row.value(QStringLiteral("id")).toString() != jobId)
+                continue;
+            row.insert(QStringLiteral("status"), payload.value(QStringLiteral("state")));
+            m_jobs[i] = row;
+            merged = true;
+            break;
+        }
+        if (!merged && !jobId.isEmpty()) {
+            m_jobs.append(QVariantMap{
+                {QStringLiteral("id"), jobId},
+                {QStringLiteral("label"), jobId},
+                {QStringLiteral("status"), payload.value(QStringLiteral("state"))}});
+        }
         emit jobsChanged();
     } else if (kind == QLatin1String("subagent.updated")) {
         const QVariantMap updated = payload;
@@ -1515,6 +1551,21 @@ void WardClient::loadEarlierHistory()
 }
 
 
+void WardClient::refreshJobs()
+{
+    if (m_fd >= 0)
+        sendRequest(QStringLiteral("job.list"));
+}
+
+void WardClient::followJob(const QString &jobId, qint64 from)
+{
+    if (m_fd < 0 || jobId.isEmpty())
+        return;
+    m_lastFollowJob = jobId;
+    sendRequest(QStringLiteral("job.follow"),
+                {{QStringLiteral("id"), jobId}, {QStringLiteral("from"), from}});
+}
+
 void WardClient::refreshSettings()
 {
     if (m_fd >= 0)
@@ -1734,6 +1785,7 @@ void WardClient::goalAction(const QString &action)
 void WardClient::killJob(const QString &jobId)
 {
     sendRequest(QStringLiteral("job.kill"), {{QStringLiteral("job"), jobId}});
+    refreshJobs();
 }
 
 void WardClient::refreshScheduleTasks()
@@ -2104,6 +2156,7 @@ QStringList WardClient::protocolMethods() const
             QStringLiteral("approval.respond"),
             QStringLiteral("subagent.prompt"), QStringLiteral("subagent.interrupt"),
             QStringLiteral("job.list"), QStringLiteral("job.kill"),
+            QStringLiteral("job.follow"),
             QStringLiteral("schedule.list"), QStringLiteral("schedule.set"),
             QStringLiteral("schedule.delete"), QStringLiteral("goal.set"),
             QStringLiteral("goal.clear"), QStringLiteral("terminal.open"),

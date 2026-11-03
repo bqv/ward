@@ -159,6 +159,8 @@ add_executable(ward-gui
     src/GoalRow.cpp
     src/FilesDock.h
     src/FilesDock.cpp
+    src/JobsDialog.h
+    src/JobsDialog.cpp
     src/PendingBand.h
     src/PendingBand.cpp
     src/TranscriptView.h
