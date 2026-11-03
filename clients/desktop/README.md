@@ -108,6 +108,7 @@ The client speaks ward's method names and event kinds, not an adapter vocabulary
 | trajectory | `turn.*`, `session.prompted`, `text.delta`, `tool.call/result` |
 | workspaces | synthetic groups by session cwd |
 | presets | `policy.list` / `policy.select`; chip normalises `id` to `value`; full-access requires the warning confirmation and marks the chip |
+| ACP | `ward-acp`, JSON-RPC 2.0 over stdio: initialize, session/new, session/prompt, session/cancel, session/update, request_permission |
 | jobs | `job.list`, `job.follow` retained output and `job.kill`; the jobs chip opens the viewer |
 | settings | `settings.get` / `settings.set`; Settings edits `max_runs` and `debug` |
 | queue | `session.prompt` -> `{queued, ahead}`; `session.queue` refreshes the authoritative rows |
@@ -137,6 +138,7 @@ document panes are copied from dsh-native. The ward-specific code is:
 |---|---|
 | `src/WardClient.{h,cpp}` | the ward transport: connect, handshake, framed CBOR requests, event routing, terminal, jobs, the facade surface |
 | `src/JobsDialog.{h,cpp}` | the jobs roster and retained-output viewer |
+| `tools/ward_acp.cpp` | the ACP face over the same WardClient transport |
 | `tools/ward_probe.cpp` | the display-free gate |
 | `CMakeLists.txt` | builds `wardwire` from ward's `src/proto` and `src/core/util.c` |
 

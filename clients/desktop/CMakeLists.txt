@@ -192,6 +192,15 @@ target_link_libraries(ward-gui PRIVATE
     PkgConfig::VTERM
 )
 
+add_executable(ward-acp
+    tools/ward_acp.cpp
+    src/WardClient.cpp
+    src/AcpClient.cpp
+    src/AcpCompat.cpp
+)
+target_link_libraries(ward-acp PRIVATE wardwire Qt6::Core Qt6::Gui Qt6::Network)
+target_include_directories(ward-acp PRIVATE src)
+
 add_executable(ward-gui-probe
     tools/ward_probe.cpp
     src/WardClient.cpp

@@ -86,6 +86,7 @@ NATIVE := $(BUILDDIR)/ward-native
 DESKTOP_BUILD ?= clients/desktop/build
 DESKTOP_PROBE := $(DESKTOP_BUILD)/ward-gui-probe
 DESKTOP_GUI := $(DESKTOP_BUILD)/ward-gui
+DESKTOP_ACP := $(DESKTOP_BUILD)/ward-acp
 BIN_OBJ := $(BUILDDIR)/src/cli/main.o $(BUILDDIR)/src/daemon/server.o
 NATIVE_OBJ := $(BUILDDIR)/clients/native/main.o
 CORE_LIB := $(BUILDDIR)/libward-core.a
@@ -158,6 +159,8 @@ $(DESKTOP_PROBE): FORCE
 	cmake --build $(DESKTOP_BUILD)
 
 $(DESKTOP_GUI): $(DESKTOP_PROBE)
+
+$(DESKTOP_ACP): $(DESKTOP_PROBE)
 
 FORCE:
 
@@ -238,7 +241,7 @@ $(BUILDDIR)/importer.wasm: tests/guest/importer.c
 	@mkdir -p $(@D)
 	$(WASI_CC) $(WASI_FLAGS) $< -o $@
 
-test: $(TEST_BINS) $(WARD) $(NATIVE) $(DESKTOP_PROBE) $(MODULE_WASM) $(GUEST_WASM)
+test: $(TEST_BINS) $(WARD) $(NATIVE) $(DESKTOP_PROBE) $(DESKTOP_ACP) $(MODULE_WASM) $(GUEST_WASM)
 	@set -u; \
 	fail=0; \
 	for t in $(TEST_BINS); do \
@@ -248,6 +251,7 @@ test: $(TEST_BINS) $(WARD) $(NATIVE) $(DESKTOP_PROBE) $(MODULE_WASM) $(GUEST_WAS
 	     WARD_NATIVE=$(abspath $(NATIVE)) \
 	     WARD_GUI_PROBE=$(abspath $(DESKTOP_PROBE)) \
 	     WARD_GUI=$(abspath $(DESKTOP_GUI)) \
+	     WARD_ACP=$(abspath $(DESKTOP_ACP)) \
 	     WARD_MODULE_DIR=$(abspath $(BUILDDIR)) \
 	     WARD_GUEST_DIR=$(abspath $(BUILDDIR)) \
 	     timeout $(TEST_TIMEOUT) $$t >$(BUILDDIR)/$$name.log 2>&1; then \
