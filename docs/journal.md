@@ -2291,3 +2291,15 @@ While measuring that, `enable_cache` turned out to write `enabled = true`, which
 now rejects (`unknown field enabled`). The cache had therefore never been used. The TOML is
 now just `[cache]` plus `directory`, and a warm process loads and starts the guest in about
 0.3 s instead of compiling for 4.8 s.
+
+Hundred-and-seventy-third: the FTS store exists and the judge has its capability. `wd_search` is a separate `search.db` with an
+FTS5 table over transcript text, session/seq/role/ts carried UNINDEXED, `before` as a seq cursor, bm25 ordering, snippets and a
+limit clamped at 200; `search_test` covers a hit, an empty result, paging without repeats and the clamp. It is **not wired to
+the daemon yet** — no emit hook, no method — so the client is still waiting.
+
+The judge guest now holds ward.cap for judge.score, which means its unit test must load it non-pure, grant the capability and
+answer the call; otherwise the guest traps on a missing handler.
+
+One flake seen and recorded: with the full suite running, `gate_native` failed once at the queue/steer assertions and passed when
+run alone and on the next full run. Under load its fixed 4 s provider delay is not always enough. The fix is to wait for an
+event rather than a delay — the same lesson as journal entries 156 to 168 — and it is not done.
