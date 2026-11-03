@@ -178,9 +178,15 @@ int main(void) {
   wd_free(created_result);
   cbor_item_t *first = wd_map(2);
   wd_put(first, "id", wd_text(queued_session));
-  wd_put(first, "text", wd_text("first prompt"));
+  wd_put(first, "text", wd_text("/write queued.txt parked"));
   cbor_item_t *first_result = NULL;
   assert(wd_client_call(&queuer, "session.prompt", first, &first_result) == 0);
+  cbor_item_t *parked_approval = wd_get(first_result, "approval");
+  assert(parked_approval != NULL);
+  uint64_t parked_call = 0;
+  uint64_t parked_epoch = 0;
+  assert(wd_uint_of(wd_get(parked_approval, "call"), &parked_call));
+  assert(wd_uint_of(wd_get(parked_approval, "epoch"), &parked_epoch));
   wd_free(first_result);
   cbor_item_t *second = wd_map(2);
   wd_put(second, "id", wd_text(queued_session));
