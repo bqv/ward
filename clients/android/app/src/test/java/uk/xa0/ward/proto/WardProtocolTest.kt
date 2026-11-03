@@ -96,6 +96,18 @@ class WardProtocolTest {
     }
 
     @Test
+    fun `floats from the host decode instead of killing the connection`() {
+        val double = byteArrayOf(
+            0xfb.toByte(), 0x3f, 0xf0.toByte(), 0, 0, 0, 0, 0, 0,
+        )
+        assertEquals(1.0, (CborCodec.decode(double) as Cbor.Float).value, 0.0)
+        val single = byteArrayOf(0xfa.toByte(), 0x3f, 0x80.toByte(), 0, 0)
+        assertEquals(1.0, (CborCodec.decode(single) as Cbor.Float).value, 0.0)
+        val half = byteArrayOf(0xf9.toByte(), 0x3c, 0x00)
+        assertEquals(1.0, (CborCodec.decode(half) as Cbor.Float).value, 0.0)
+    }
+
+    @Test
     fun `the codec round-trips every type in the ward subset`() {
         val value = cborMap(
             "text" to "hello".cbor(),
@@ -103,6 +115,7 @@ class WardProtocolTest {
             "negative" to Cbor.NInt(-3),
             "bool" to true.cbor(),
             "null" to Cbor.Null,
+            "float" to Cbor.Float(1.5),
             "bytes" to Cbor.Bytes(byteArrayOf(0, 1, 2, 255.toByte())),
             "array" to cborArray(1L.cbor(), 2L.cbor()),
         )
@@ -110,6 +123,7 @@ class WardProtocolTest {
         assertEquals("hello", decoded.text("text"))
         assertEquals(70000L, decoded.long("uint"))
         assertEquals(true, decoded.bool("bool"))
+        assertEquals(1.5, (decoded.get("float") as Cbor.Float).value, 0.0)
         assertTrue(decoded.get("null") === Cbor.Null)
         assertArrayEquals(byteArrayOf(0, 1, 2, 255.toByte()), decoded.bytes("bytes"))
         assertEquals(2, decoded.array("array")?.items?.size)

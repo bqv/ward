@@ -8,8 +8,9 @@ import java.io.ByteArrayOutputStream
 
 /**
  * The CBOR subset ward speaks: definite-length maps, arrays, text, byte strings,
- * unsigned and negative integers, booleans and null. No tags, no floating point
- * and no indefinite forms, which is exactly what `docs/protocol.md` freezes.
+ * unsigned and negative integers, booleans and null. Floats are read because the
+ * host's cost fields carry them, but this client never writes one. No tags and no
+ * indefinite forms, which is exactly what `docs/protocol.md` freezes.
  */
 sealed interface Cbor {
     data class UInt(val value: Long) : Cbor
@@ -19,6 +20,7 @@ sealed interface Cbor {
     data class Array(val items: List<Cbor>) : Cbor
     data class Map(val entries: List<Pair<String, Cbor>>) : Cbor
     data class Bool(val value: Boolean) : Cbor
+    data class Float(val value: Double) : Cbor
     data object Null : Cbor
 
     fun asMap(): Cbor.Map = this as? Cbor.Map ?: throw CborException("expected a map")
@@ -82,6 +84,13 @@ object CborCodec {
                 }
             }
             is Cbor.Bool -> out.write(if (value.value) 0xf5 else 0xf4)
+            is Cbor.Float -> {
+                out.write(0xfb)
+                val bits = java.lang.Double.doubleToLongBits(value.value)
+                for (shift in intArrayOf(56, 48, 40, 32, 24, 16, 8, 0)) {
+                    out.write((bits ushr shift).toInt() and 0xff)
+                }
+            }
             Cbor.Null -> out.write(0xf6)
         }
     }
@@ -154,6 +163,10 @@ object CborCodec {
                     20 -> Cbor.Bool(false)
                     21 -> Cbor.Bool(true)
                     22 -> Cbor.Null
+                    25 -> Cbor.Float(half(take(2)))
+                    26 -> Cbor.Float(java.lang.Float.intBitsToFloat(
+                        readBits(4).toInt()).toDouble())
+                    27 -> Cbor.Float(java.lang.Double.longBitsToDouble(readBits(8)))
                     else -> throw CborException("unsupported simple value $minor")
                 }
                 else -> throw CborException("unsupported major type $major")
@@ -173,6 +186,25 @@ object CborCodec {
             minor == 26 -> take(4).fold(0L) { acc, b -> (acc shl 8) or (b.toLong() and 0xff) }
             minor == 27 -> take(8).fold(0L) { acc, b -> (acc shl 8) or (b.toLong() and 0xff) }
             else -> throw CborException("indefinite CBOR is not part of the ward wire")
+        }
+
+        private fun readBits(count: Int): Long {
+            var bits = 0L
+            for (byte in take(count)) bits = (bits shl 8) or (byte.toLong() and 0xff)
+            return bits
+        }
+
+        private fun half(bytes: ByteArray): Double {
+            val bits = ((bytes[0].toInt() and 0xff) shl 8) or (bytes[1].toInt() and 0xff)
+            val sign = bits ushr 15
+            val exponent = (bits ushr 10) and 0x1f
+            val mantissa = bits and 0x3ff
+            val value = when {
+                exponent == 0 -> mantissa * Math.pow(2.0, -24.0)
+                exponent == 31 -> if (mantissa == 0) Double.POSITIVE_INFINITY else Double.NaN
+                else -> (mantissa + 1024) * Math.pow(2.0, (exponent - 25).toDouble())
+            }
+            return if (sign == 1) -value else value
         }
 
         private fun take(count: Int): ByteArray {

@@ -756,6 +756,7 @@ class WardBridge(
         is Cbor.UInt -> value
         is Cbor.NInt -> value
         is Cbor.Bool -> value
+        is Cbor.Float -> value
         is Cbor.Bytes -> Base64.getEncoder().encodeToString(value)
         Cbor.Null -> JSONObject.NULL
     }

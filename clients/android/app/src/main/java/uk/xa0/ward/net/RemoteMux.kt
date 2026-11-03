@@ -706,7 +706,7 @@ private class FollowTranslator(
             }
 
             "turn.end" -> {
-                val ended = (payload.long("turn") ?: turn.toLong()).toInt()
+                val ended = turn
                 val frames = mutableListOf<JSONObject>()
                 if (assistantStarted) {
                     frames += assistantStream("end", time)
