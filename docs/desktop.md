@@ -99,17 +99,10 @@ Unknown events are not dropped by the wire layer: every event reaches
 
 ## Parity gaps against dsh-native
 
-These are the things the desktop client had and ward-gui does not, or has not
-proven yet. They are reported to the ward session as well.
+No functional gaps remain. Three UI surfaces are compiled and reasoned but not
+clicked in a gate: the Settings pairing dialog, the Settings daemon section and
+the jobs dialog. `job.follow` is gated on the daemon side; the jobs dialog has
+not been driven against a real long-running turn, because the fixture roster is
+empty. The late-steer carry-over is gated and no longer labelled unmeasured.
 
-1. **Late steer measurement.** Steers ride the running turn's next provider
-   request; undelivered ones are now carried into the queue at turn end, but no
-   gate yet counts the extra turn. The client never invents an interruption:
-   true interruption is cancel plus queue.
 
-Deferred new sessions, workspaces-by-cwd, trajectory projection, the headless
-`--prompt` path, permission presets, directory and blob reads, the lightbox,
-composer attachment staging, the QUIC transport and a pairing CLI are now in.
-The in-window pairing dialog is in Settings; it runs `ward-pair` and stores the
-written paths. Queue and steer are in; the late-steer carry-over is implemented
-but still unmeasured on the ward side.
