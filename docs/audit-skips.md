@@ -23,6 +23,7 @@ it was suspected.
 | compaction and the prefix | `session.compact` still rewrites the head in place, which discards the cache the prefix stability work exists to protect (`docs/local-compat.md:50`) | branch by default through `wd_session_fork`; additive events |
 | module state handover | `ward_state_migrate` exists and is called (`src/wasm/host.c:734`, `:697`, `:717`), but **no shipped guest carries state**, so the acceptance is core-to-core | a stateful first-party guest, or the conformance guest as the only proof |
 | job output overflow | the ring's accounting is unit-tested; **no gate drives it past 64 KiB through a real turn**, because the fixture does not stream that much (journal 165) | a provider fixture that streams over the cap |
+| session search reindex | `session.search_text` and the FTS5 store are built and gated for new traffic only; **an existing state directory gets an empty index** because the one-shot reindex over `events.zst` is not written, and there is no core JSON reader to build it on (journal 174) | a reindex that replays each session's log through the same code that records it |
 | MCP, web search, recall | gates run **stub binaries** (`WARD_MCP_BIN`, `WARD_SEARCH_BIN`, `WARD_RECALL_BIN`); the wiring is proven, the tools are not | deliberate: those tools need host configuration the suite must not own |
 
 ## Client surfaces that are compiled but never exercised

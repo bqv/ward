@@ -2303,3 +2303,13 @@ answer the call; otherwise the guest traps on a missing handler.
 One flake seen and recorded: with the full suite running, `gate_native` failed once at the queue/steer assertions and passed when
 run alone and on the next full run. Under load its fixed 4 s provider delay is not always enough. The fix is to wait for an
 event rather than a delay — the same lesson as journal entries 156 to 168 — and it is not done.
+
+Hundred-and-seventy-fourth: search indexes new traffic only. The store, the method and the gates are in (`ba83f09`), and the index
+is written from the emit path so it cannot drift from the log. What is missing is the one-shot reindex for state directories
+written before today: those have an empty index, and `session.search_text` answers nothing for them, which a user reads as "no
+matches" rather than "not indexed".
+
+The reason it is not done: session logs are zstd-compressed JSON lines (`<state>/<session>/events.zst`) and **core has no JSON
+reader** — the README says so deliberately, and every other consumer goes through the CBOR codecs. A reindex therefore wants the
+event parser that replay already uses, exposed as an iteration API, rather than a second ad-hoc scanner; that is a core change
+with an authority argument, not a script.
