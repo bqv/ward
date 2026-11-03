@@ -126,8 +126,7 @@ static void enable_cache(wasm_config_t *config, const char *state_dir) {
   if (store == NULL || toml == NULL) goto done;
   if (wd_mkdir_p(store, 0700) != 0) goto done;
   char text[1024];
-  snprintf(text, sizeof(text), "[cache]\nenabled = true\ndirectory = \"%s\"\n",
-           store);
+  snprintf(text, sizeof(text), "[cache]\ndirectory = \"%s\"\n", store);
   if (write_file(toml, text) != 0) goto done;
   wasmtime_error_t *e = wasmtime_config_cache_config_load(config, toml);
   if (e != NULL) wasmtime_error_delete(e);

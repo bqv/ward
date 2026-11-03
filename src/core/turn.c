@@ -58,6 +58,9 @@ struct wd_turn {
   wd_instance *code;
   wd_module *judge_module;
   wd_module *code_module;
+  wd_module *python_module;
+  wd_instance *python;
+  char *module_dir;
   char trapped[WD_MAX_MODULE_NAME];
   char model_name[128];
   bool remote_ok;
@@ -84,6 +87,10 @@ struct wd_turn {
 static const wd_limits TURN_LIMITS = {.fuel = WD_TURN_FUEL,
                                       .max_memory = WD_TURN_MEMORY,
                                       .max_instances = 6};
+/* CPython's linear memory is much larger than a hand-written guest's. */
+static const wd_limits PYTHON_LIMITS = {.fuel = 1000000000ull,
+                                       .max_memory = 256 * 1024 * 1024,
+                                       .max_instances = 8};
 
 #define WD_TOOL_MAX (64u * 1024u)
 
@@ -724,8 +731,8 @@ static int web_search_run(wd_turn *turn, const uint8_t *in, size_t in_len,
   return tool_reply(reply, out, out_len);
 }
 
-static int python_run(wd_turn *turn, const uint8_t *in, size_t in_len,
-                      uint8_t **out, size_t *out_len) {
+static int python_run_exec(wd_turn *turn, const uint8_t *in, size_t in_len,
+                           uint8_t **out, size_t *out_len) {
   cbor_item_t *request = wd_decode(in, in_len);
   if (request == NULL)
     return tool_fail("python.run: parameters are not cbor", out, out_len);
@@ -759,6 +766,53 @@ static int python_run(wd_turn *turn, const uint8_t *in, size_t in_len,
     wd_put(reply, "text", wd_text(""));
   wd_proc_result_free(&result);
   return tool_reply(reply, out, out_len);
+}
+
+static wd_instance *python_guest(wd_turn *turn, char **err) {
+  if (turn->python != NULL) return turn->python;
+  if (turn->module_dir == NULL) {
+    *err = strdup("python: the module directory is missing");
+    return NULL;
+  }
+  wd_module_spec spec = {"python", NULL, 0, false};
+  turn->python_module = load_module(turn->engine, turn->module_dir,
+                                    "python.wasm", &spec, err);
+  if (turn->python_module == NULL) return NULL;
+  turn->python = wd_instance_new(turn->python_module, NULL, 0, &PYTHON_LIMITS,
+                                 NULL, NULL, err);
+  return turn->python;
+}
+
+static int python_run(wd_turn *turn, const uint8_t *in, size_t in_len,
+                      uint8_t **out, size_t *out_len) {
+  const char *mode = getenv("WARD_PYTHON");
+  if (mode != NULL && strcmp(mode, "exec") == 0)
+    return python_run_exec(turn, in, in_len, out, out_len);
+
+  char *err = NULL;
+  wd_instance *guest = python_guest(turn, &err);
+  if (guest == NULL) {
+    free(err);
+    return tool_fail("python.run: cannot load the python guest", out, out_len);
+  }
+  wd_instance_clear_output(guest);
+  uint8_t *raw = NULL;
+  size_t raw_len = 0;
+  if (wd_instance_call(guest, in, in_len, &raw, &raw_len, &err) != 0) {
+    free(err);
+    free(raw);
+    return tool_fail("python.run: the python guest failed", out, out_len);
+  }
+  cbor_item_t *answer = raw_len > 0 ? wd_decode(raw, raw_len) : NULL;
+  if (answer == NULL) {
+    free(raw);
+    return tool_fail("python.run: the python guest returned invalid cbor", out,
+                     out_len);
+  }
+  wd_free(answer);
+  *out = raw;
+  *out_len = raw_len;
+  return 0;
 }
 
 static int grep_run(wd_turn *turn, const uint8_t *in, size_t in_len,
@@ -1285,6 +1339,7 @@ wd_turn *wd_turn_new_pinned(wd_engine *engine, const char *module_dir,
     return NULL;
   }
   turn->engine = engine;
+  if (module_dir != NULL) turn->module_dir = strdup(module_dir);
   const char *endpoint = getenv("WARD_ENDPOINT");
   if (endpoint != NULL) turn->endpoint = strdup(endpoint);
   if (root != NULL) {
@@ -1398,6 +1453,8 @@ void wd_turn_free(wd_turn *turn) {
   wd_module_free(turn->judge_module);
   wd_instance_free(turn->code);
   wd_module_free(turn->code_module);
+  wd_instance_free(turn->python);
+  wd_module_free(turn->python_module);
   wd_judge_free(turn->judge_cache);
   if (turn->judge_event != NULL) wd_free(turn->judge_event);
   wd_instance_free(turn->eng);
@@ -1410,6 +1467,7 @@ void wd_turn_free(wd_turn *turn) {
   free(turn->park_reason);
   free(turn->root);
   free(turn->endpoint);
+  free(turn->module_dir);
   free(turn);
 }
 

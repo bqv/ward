@@ -553,8 +553,9 @@ resolved through pkg-config.
 Guests are built per language: C and C++ through `clang --target=wasm32-wasip1` against
 `wasi-sdk`, Zig through `zig build-lib -target wasm32-wasip1` (pin the Zig version; the language
 still breaks between releases), and the policy guest as a thin C module embedding Janet.
-The `python` guest additionally needs a cross-built `libpython` for `wasm32-wasip1` and a
-trimmed standard library zip.
+The `python` guest additionally needs a cross-built `libpython` for `wasm32-wasip1` with the
+stdlib it uses frozen into the module as C data; the frozen set is folded in with CPython's
+`Tools/build/freeze_modules.py`, so the guest needs no zipimport and no filesystem preopen.
 
 ```
 make -j4

@@ -2260,3 +2260,34 @@ shares the 2 GiB card with the embedder. The existing cache keys on tool and arg
 nothing after the first.
 
 Nothing is wired yet: `src/core/turn.c` is held by the CPython guest work, and the capability needs it.
+
+Hundred-and-seventy-third: the embedded CPython guest. `modules/python/python.c` links a
+CPython 3.13.18+ cross-build for `wasm32-wasip1` into a normal ward module, and `/py` now
+calls it through the same `python.run` capability, approval and reply shape as before. The
+host `python3 -I -c` path survives only behind `WARD_PYTHON=exec`.
+
+The standard library is frozen, not mounted. CPython's `Tools/build/freeze_modules.py` now
+carries `encodings.*`, `json.*`, `re.*`, `collections.*`, `contextlib`, `copyreg`, `enum`,
+`functools`, `heapq`, `keyword`, `linecache`, `operator`, `reprlib`, `token`, `tokenize`,
+`types` and `warnings` in addition to its bootstrap set. The guest initializes with
+`PyConfig_InitIsolatedConfig`, `use_frozen_modules = 1`, no zip path and no WASI preopen.
+`import json, re, math, time, os` works; the module is 30,527,331 bytes and `libpython` is
+44,209,974 bytes. Adding the frozen set cost about 1.1 MiB over the 28.2 MiB zip build.
+
+The gate runs `/py import json, re; print(6*7); print(json.dumps({"a": 1}));
+print(re.sub("a", "b", "banana"))`, approves it, and asserts `42`, `{"a": 1}` and `bbnbnb`.
+The daemon child gets a `PATH` that is every executable in `/usr/bin` except `python*`, so the
+pass is proof that the guest ran. A second `/py` turn exercises the warm path.
+
+Memory is the one number that needs care. With a cold wasmtime cache the first turn compiles
+the 30 MB module: daemon `VmHWM` goes from 45 MB to about 320 MB, and a second turn in the same
+process reaches about 337 MB because the compiler's arena is not returned. With a warm cache a
+fresh process is about 80 MB, of which CPython itself is a few MB. The default session cgroup
+is `memory.max = 2 GiB`, so the cold peak is about 16% of the budget. This box's cgroup2 mount
+is read-only, so the number is `/proc/<daemon>/status:VmHWM` rather than `memory.peak`; the
+threshold is the documented default, not a cgroup file I could set.
+
+While measuring that, `enable_cache` turned out to write `enabled = true`, which wasmtime 50
+now rejects (`unknown field enabled`). The cache had therefore never been used. The TOML is
+now just `[cache]` plus `directory`, and a warm process loads and starts the guest in about
+0.3 s instead of compiling for 4.8 s.

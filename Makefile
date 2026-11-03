@@ -34,6 +34,17 @@ WASI_OPT := $(if $(filter release,$(GUEST_PROFILE)),-O2,-O0 -g)
 WASI_FLAGS := --target=wasm32-wasip1 -nostdlib -Wl,--no-entry \
               -Wl,--export-memory $(WASI_OPT)
 
+# The embedded CPython guest is built from a separately cross-compiled
+# libpython.  `make python-wasi` in a CPython checkout produces these files;
+# see README "Python on WASI".
+PYTHON_WASI ?= .work/cpython-wasip1/dist
+PYTHON_LIB := $(PYTHON_WASI)/lib/libpython3.13.a
+PYTHON_MODULE_LIBS := $(PYTHON_WASI)/lib/libmpdec.a \
+                      $(PYTHON_WASI)/lib/libexpat.a \
+                      $(PYTHON_WASI)/lib/libHacl_Hash_SHA2.a
+PYTHON_HEADERS := $(PYTHON_WASI)/include/python3.13
+PYTHON_RT := $(shell $(WASI_CC) --target=wasm32-wasip1 --print-libgcc-file-name)
+
 CORE_SRC := \
   src/proto/frame.c \
   src/proto/codec.c \
@@ -83,7 +94,7 @@ WARD := $(BUILDDIR)/ward
 
 TEST_BINS := $(patsubst tests/%.c,$(BUILDDIR)/%,$(wildcard tests/*.c))
 
-MODULES := engine driver provider tools policy schedule skills judge code
+MODULES := engine driver provider tools policy schedule skills judge code python
 MODULE_WASM := $(addprefix $(BUILDDIR)/,$(addsuffix .wasm,$(MODULES)))
 
 GUESTS := echo wasi importer trap
@@ -98,6 +109,10 @@ check-deps:
 	@pkg-config --exists --print-errors 'libzstd >= 1.4'
 	@pkg-config --exists --print-errors 'libngtcp2 >= 1.0'
 	@test -n "$(WASI_CC)" || { echo "wasi-sdk not found via pkg-config" >&2; exit 1; }
+	@test -f "$(PYTHON_LIB)" || { \
+	  echo "libpython for wasm32-wasip1 not found at $(PYTHON_LIB)" >&2; \
+	  echo "build CPython with Tools/wasm/wasi.py and set PYTHON_WASI" >&2; \
+	  exit 1; }
 
 $(CORE_LIB): $(CORE_OBJ)
 	@mkdir -p $(@D)
@@ -198,6 +213,14 @@ $(BUILDDIR)/judge.wasm: modules/judge/judge.c modules/abi/wd_abi.h
 $(BUILDDIR)/code.wasm: modules/code/code.c modules/abi/wd_abi.h
 	@mkdir -p $(@D)
 	$(WASI_CC) $(WASI_FLAGS) -I modules/abi $< -o $@
+
+$(BUILDDIR)/python.wasm: modules/python/python.c modules/abi/wd_abi.h \
+                         $(PYTHON_LIB) $(PYTHON_MODULE_LIBS)
+	@mkdir -p $(@D)
+	$(WASI_CC) $(WASI_FLAGS) -I modules/abi -I $(PYTHON_HEADERS) $< \
+	  $(PYTHON_LIB) $(PYTHON_MODULE_LIBS) \
+	  -lc -ldl -lwasi-emulated-signal -lwasi-emulated-getpid \
+	  -lwasi-emulated-process-clocks -lpthread -lm $(PYTHON_RT) -o $@
 
 $(BUILDDIR)/echo.wasm: tests/guest/echo.c
 	@mkdir -p $(@D)

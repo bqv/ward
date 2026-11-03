@@ -209,11 +209,13 @@ session: note.txt (13 bytes)` — so the model knows what is there.
 64 KiB) and answers `{ok, status, text}`. The index, its embedding endpoint and its ranking
 belong to `dsh-recall`; ward only runs it.
 
-**Python.** `/py <program>` runs `python3 -I -c <program>` in the session's cwd through the
-worker's child runner — 15 s, 64 KiB — and answers `{ok, status, text}`. The policy asks for
-approval, because the interpreter can read anything the worker can. This is the host
-interpreter in the worker, not the embedded-CPython guest the design describes; the method and
-its shape stay when that guest lands.
+**Python.** `/py <program>` runs the program in the embedded `python` guest, a C module
+carrying a cross-built CPython 3.13 for `wasm32-wasip1`, and answers `{ok, status, text}`.
+The interpreter starts once inside the guest instance and the standard library needed by a
+turn (`encodings`, `json`, `re`, `collections`, `functools`, `types`, `warnings`, and the
+bootstrap set) is frozen into the module as C data; the guest has no preopens, no zipimport
+and no filesystem. The policy still asks for approval. `WARD_PYTHON=exec` keeps the old
+`python3 -I -c` worker path as a fallback, but it is not the default.
 
 **Judge-assisted policy.** `policy.check {tool, payload}` asks the policy guest for a rule
 decision; when that decision is `allow`, the `judge` guest may raise it to `ask` by classifying

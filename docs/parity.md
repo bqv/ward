@@ -33,15 +33,14 @@ behaviour, is marked `partial`.
 | module reload and migration | M5 | delivered | `modstate_test`, `gate_tool` reload assertions |
 | native client | M6 | delivered | `gate_native` — `ward-native` drives create, prompt and resume over the socket |
 | Android client | M6 | delivered | `clients/android` (project ward-android, app Ward) speaks the frozen protocol in Kotlin: an APK on the disposable handset created and listed a session over `adb reverse`, painted a `/read` turn, answered an approval, and replayed the transcript after force-stop and relaunch; its 1,308-test JVM suite passes. Known gaps (QUIC/pairing, workspaces, terminal routing, jobs/schedules/goals UI, subagent lineage, stubs, background approvals, queue/steer) are named in `clients/android/README.md`. `gate_native` covers the loopback TCP transport it uses |
-| python eval | M4 | **substituted** | named as a substitution in the journal; no embedded CPython |
+| python eval | M4 | delivered | `gate_tool` runs `/py print(6*7)` through the embedded CPython guest and gets `42` with `python3` removed from the daemon child's `PATH`; JSON and `re` are exercised in the same frozen module |
 | recall | M4 | delivered | `recall` module with a stubbed binary in `gate_tool` |
 | judge | M4 | **partial** | rules decide; the model backend is the substitution named in the journal |
 
 ## What this audit says about the project
 
-No row is missing now. Three are partial for reasons the journal names, and one
-is a substitution. Everything else is exercised by a
-gated binary that fails when the behaviour changes.
+No row is missing now. Two are partial for reasons the journal names. Everything
+else is exercised by a gated binary that fails when the behaviour changes.
 
 This audit had to be corrected after its first draft: I wrote it from memory and
 marked web search and MCP as unbuilt, when `gate_tool` already stubs and asserts

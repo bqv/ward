@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include <assert.h>
+#include <dirent.h>
 #include <errno.h>
 #include <signal.h>
 #include <stdbool.h>
@@ -269,6 +270,49 @@ static cbor_item_t *wait_event(client *c, const char *want, uint64_t *seq) {
   }
 }
 
+
+/* A PATH with every host tool except the Python interpreter.  The /py
+ * section must still print 42, so the embedded guest, not python3, ran. */
+static char *pythonless_path(void) {
+  char template[] = "/tmp/ward-no-python-XXXXXX";
+  char *dir = mkdtemp(template);
+  assert(dir != NULL);
+  DIR *tools = opendir("/usr/bin");
+  assert(tools != NULL);
+  struct dirent *entry;
+  while ((entry = readdir(tools)) != NULL) {
+    if (strncmp(entry->d_name, "python", 6) == 0) continue;
+    char from[1024];
+    char to[1024];
+    snprintf(from, sizeof(from), "/usr/bin/%s", entry->d_name);
+    snprintf(to, sizeof(to), "%s/%s", dir, entry->d_name);
+    struct stat st;
+    if (stat(from, &st) == 0 && S_ISREG(st.st_mode) &&
+        (st.st_mode & 0111) != 0)
+      (void)symlink(from, to);
+  }
+  closedir(tools);
+  return strdup(dir);
+}
+
+
+static long proc_status_kb(pid_t pid, const char *key) {
+  char path[64];
+  snprintf(path, sizeof(path), "/proc/%d/status", (int)pid);
+  FILE *file = fopen(path, "r");
+  if (file == NULL) return -1;
+  char line[256];
+  long value = -1;
+  while (fgets(line, sizeof(line), file) != NULL) {
+    if (strncmp(line, key, strlen(key)) == 0) {
+      sscanf(line + strlen(key), "%ld", &value);
+      break;
+    }
+  }
+  fclose(file);
+  return value;
+}
+
 int main(void) {
   alarm(120);
   const char *bin = getenv("WARD_BIN");
@@ -338,6 +382,7 @@ int main(void) {
                models) >= 0);
   fclose(models);
 
+  char *path_without_python = pythonless_path();
   int ready[2];
   assert(pipe(ready) == 0);
   pid_t pid = fork();
@@ -357,6 +402,7 @@ int main(void) {
     setenv("WARD_MODULE_DIR", modules, 1);
     setenv("WARD_TOOL_ROOT", root, 1);
     setenv("WARD_QUIC_BIND", "off", 1);
+    setenv("PATH", path_without_python, 1);
     prctl(PR_SET_PDEATHSIG, SIGTERM);
     execl(bin, "ward", "up", "--socket", sock, "--state", state, (char *)NULL);
     _exit(127);
@@ -1219,10 +1265,15 @@ int main(void) {
   turn_text(&a, last_turn, judged_text, sizeof(judged_text));
   assert(judged_text[0] != '\0');
 
+  printf("before python guest daemon VmHWM=%ld kB VmRSS=%ld kB\n",
+         proc_status_kb(pid, "VmHWM:"), proc_status_kb(pid, "VmRSS:"));
   cbor_item_t *py = NULL;
   cbor_item_t *py_prompt = wd_map(2);
   wd_put(py_prompt, "id", wd_text(session));
-  wd_put(py_prompt, "text", wd_text("/py print(6*7)"));
+  wd_put(py_prompt, "text",
+         wd_text("/py import json, re; print(6*7); "
+                 "print(json.dumps({\"a\": 1})); "
+                 "print(re.sub(\"a\", \"b\", \"banana\"))"));
   assert(request(&a, a.next_id++, "session.prompt", py_prompt, &py, NULL) == 0);
   cbor_item_t *py_approval = wd_get(py, "approval");
   assert(py_approval != NULL);
@@ -1243,6 +1294,39 @@ int main(void) {
   char py_text[4096];
   turn_text(&a, last_turn, py_text, sizeof(py_text));
   assert(strstr(py_text, "42") != NULL);
+  assert(strstr(py_text, "{\"a\": 1}") != NULL);
+  assert(strstr(py_text, "bbnbnb") != NULL);
+  printf("python guest daemon VmHWM=%ld kB VmRSS=%ld kB\n",
+         proc_status_kb(pid, "VmHWM:"), proc_status_kb(pid, "VmRSS:"));
+
+  /* The second turn hits the wasmtime compilation cache the daemon keeps
+   * under <state>/cache; this is the warm path a user sees. */
+  cbor_item_t *py2 = NULL;
+  cbor_item_t *py2_prompt = wd_map(2);
+  wd_put(py2_prompt, "id", wd_text(session));
+  wd_put(py2_prompt, "text", wd_text("/py print(6*7)"));
+  assert(request(&a, a.next_id++, "session.prompt", py2_prompt, &py2, NULL) == 0);
+  cbor_item_t *py2_approval = wd_get(py2, "approval");
+  assert(py2_approval != NULL);
+  uint64_t py2_call = 0;
+  uint64_t py2_epoch = 0;
+  assert(wd_uint_of(wd_get(py2_approval, "call"), &py2_call));
+  assert(wd_uint_of(wd_get(py2_approval, "epoch"), &py2_epoch));
+  wd_free(py2);
+  cbor_item_t *py2_answer = NULL;
+  cbor_item_t *py2_respond = wd_map(4);
+  wd_put(py2_respond, "session", wd_text(session));
+  wd_put(py2_respond, "call", wd_uint(py2_call));
+  wd_put(py2_respond, "epoch", wd_uint(py2_epoch));
+  wd_put(py2_respond, "allow", cbor_build_bool(true));
+  assert(request(&a, a.next_id++, "approval.respond", py2_respond, &py2_answer,
+                 NULL) == 0);
+  wd_free(py2_answer);
+  char py2_text[4096];
+  turn_text(&a, last_turn, py2_text, sizeof(py2_text));
+  assert(strstr(py2_text, "42") != NULL);
+  printf("warm python guest daemon VmHWM=%ld kB VmRSS=%ld kB\n",
+         proc_status_kb(pid, "VmHWM:"), proc_status_kb(pid, "VmRSS:"));
 
   cbor_item_t *mods = NULL;
   assert(request(&a, a.next_id++, "module.list", wd_map(0), &mods, NULL) == 0);
@@ -1299,6 +1383,7 @@ int main(void) {
 
   stop_server(endpoint);
   drop_test_cgroup(getenv("WARD_CGROUP"));
+  free(path_without_python);
   printf("tool gate passed: a write waited for an approval and was answered\n");
   return 0;
 }
