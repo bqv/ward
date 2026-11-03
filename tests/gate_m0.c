@@ -179,8 +179,12 @@ int main(void) {
     prctl(PR_SET_PDEATHSIG, SIGTERM);
     sweep_test_cgroups();
   char cgroup_base[128];
-    snprintf(cgroup_base, sizeof(cgroup_base),
-             "/sys/fs/cgroup/ward/test/gate-%d", (int)getpid());
+    const char *cgroup_override = getenv("WARD_GATE_CGROUP");
+    if (cgroup_override != NULL)
+      snprintf(cgroup_base, sizeof(cgroup_base), "%s", cgroup_override);
+    else
+      snprintf(cgroup_base, sizeof(cgroup_base),
+               "/sys/fs/cgroup/ward/test/gate-%d", (int)getpid());
     setenv("WARD_CGROUP", cgroup_base, 1);
     execl(bin, "ward", "up", "--socket", sock, "--state", state,
           (char *)NULL);

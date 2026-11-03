@@ -301,8 +301,12 @@ int main(void) {
     close(ready[1]);
     sweep_test_cgroups();
   char cgroup_base[128];
-    snprintf(cgroup_base, sizeof(cgroup_base),
-             "/sys/fs/cgroup/ward/test/gate-%d", (int)getpid());
+    const char *cgroup_override = getenv("WARD_GATE_CGROUP");
+    if (cgroup_override != NULL)
+      snprintf(cgroup_base, sizeof(cgroup_base), "%s", cgroup_override);
+    else
+      snprintf(cgroup_base, sizeof(cgroup_base),
+               "/sys/fs/cgroup/ward/test/gate-%d", (int)getpid());
     setenv("WARD_CGROUP", cgroup_base, 1);
     setenv("WARD_QUIC_BIND", "127.0.0.1:0", 1);
     prctl(PR_SET_PDEATHSIG, SIGTERM);
