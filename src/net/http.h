@@ -30,6 +30,7 @@ int wd_http_job_finish(wd_http_job *job, wd_http_response *out, char **err);
 void wd_http_job_cancel(wd_http_job *job);
 void wd_http_job_free(wd_http_job *job);
 bool wd_http_loopback(const char *url);
+void wd_http_set_unix_socket(const char *path);
 char *wd_http_auth_header(const char *url, const char *api_key);
 
 #endif

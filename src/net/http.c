@@ -41,6 +41,10 @@ char *wd_http_auth_header(const char *url, const char *api_key) {
   return line;
 }
 
+static const char *unix_socket_path;
+
+void wd_http_set_unix_socket(const char *path) { unix_socket_path = path; }
+
 bool wd_http_loopback(const char *url) {
   if (url == NULL) return false;
   const char *prefix = "http://127.0.0.1";
@@ -218,6 +222,8 @@ wd_http_job *wd_http_start(const char *url, const char *method, const char *body
         free(auth);
       }
       curl_easy_setopt(handle, CURLOPT_URL, url);
+      if (unix_socket_path != NULL)
+        curl_easy_setopt(handle, CURLOPT_UNIX_SOCKET_PATH, unix_socket_path);
       curl_easy_setopt(handle, CURLOPT_FOLLOWLOCATION, 0L);
       curl_easy_setopt(handle, CURLOPT_NOSIGNAL, 1L);
       curl_easy_setopt(handle, CURLOPT_TIMEOUT_MS, (long)timeout_ms);
