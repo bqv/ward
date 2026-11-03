@@ -2321,3 +2321,13 @@ test target sweep its own prefixes after the run, so the suite cleans up what it
 
 Lesson worth keeping: a leak in a test is still a leak. The suite had been green for hours while quietly filling the disk, and the
 first symptom was a compile error in an unrelated file.
+
+Hundred-and-seventy-sixth: the reindex is cheaper than I wrote in entry 174. I assumed it needed a JSON reader over `events.zst`;
+it does not. `wd_store` already exposes `items`/`len`, and `wd_session_history()` rebuilds a session's messages from its log, so
+the reindex can walk the store and index each history entry — same code path the turn uses, no second parser, no new API.
+
+Shape: on open, if the search table is empty and the store has sessions, walk `st.items`, call `wd_session_history(s, 0, &h)` and
+index each entry by role. Idempotent because it runs only when the table is empty, and a row count is enough to decide.
+
+Not written yet: the history item's role/content key names need checking against `session.c` before indexing, and that is the whole
+of the remaining work.
