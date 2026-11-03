@@ -50,6 +50,8 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
       if (wd_r_text(&r, tool, sizeof(tool), 0) != 0) return;
     } else if (wd_key_eq(kp, kn, "payload")) {
       if (wd_r_text(&r, payload, sizeof(payload), 0) != 0) return;
+    } else if (wd_key_eq(kp, kn, "score_bp")) {
+      if (wd_r_uint(&r, &score_bp) != 0) return;
     } else if (wd_r_skip(&r) != 0) {
       return;
     }

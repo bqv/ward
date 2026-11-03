@@ -320,6 +320,44 @@ static void json_escape(const char *in, char *out, size_t cap) {
   out[used] = '\0';
 }
 
+static uint32_t judge_model_score_text(const char *text) {
+  const char *base = getenv("WARD_JUDGE_ENDPOINT");
+  if (base == NULL || base[0] == '\0' || text == NULL) return 0;
+  static char body[8192];
+  static char escaped[6144];
+  json_escape(text, escaped, sizeof(escaped));
+  const char *model = getenv("WARD_JUDGE_MODEL");
+  snprintf(body, sizeof(body),
+           "{\"model\":\"%s\",\"state\":\"%s\",\"questions\":{\"risk\":"
+           "{\"type\":\"noul\",\"instructions\":\"Does this action risk "
+           "data loss or leaving this machine?\"}}}",
+           model != NULL ? model : "Kev-0.8B-Q8_0", escaped);
+  char url[512];
+  snprintf(url, sizeof(url), "%s/v1/systemone", base);
+  wd_http_response response;
+  char *err = NULL;
+  if (wd_http_request(url, "POST", body, NULL, 10000, 1u << 20, &response,
+                      &err) != 0) {
+    free(err);
+    return 0;
+  }
+  uint32_t bp = 0;
+  if (response.status == 200) {
+    const char *found = strstr((const char *)response.body, "\"score\"");
+    if (found != NULL) {
+      const char *colon = strchr(found, ':');
+      if (colon != NULL) bp = (uint32_t)(strtod(colon + 1, NULL) * 1000);
+    }
+  }
+  wd_http_response_free(&response);
+  return bp;
+}
+
+static uint32_t judge_model_score_for(const char *tool, const char *payload) {
+  (void)tool;
+  return judge_model_score_text(payload);
+}
+
 static uint32_t judge_model_score(const uint8_t *in, size_t in_len) {
   const char *base = getenv("WARD_JUDGE_ENDPOINT");
   if (base == NULL || base[0] == '\0') return 0;
@@ -1198,9 +1236,13 @@ static int judge_ask(void *ctx, const char *tool, const uint8_t *args,
   (void)args_len;
   judge_ctx *jc = ctx;
   if (jc->turn->judge == NULL) return -1;
-  cbor_item_t *request = wd_map(2);
+  bool scored_tool = strcmp(tool, "write") == 0 || strcmp(tool, "edit") == 0 ||
+                     strcmp(tool, "exec") == 0;
+  uint32_t score_bp = scored_tool ? judge_model_score_for(tool, jc->payload) : 0;
+  cbor_item_t *request = wd_map(3);
   wd_put(request, "tool", wd_text(tool));
   wd_put(request, "payload", wd_text(jc->payload));
+  wd_put(request, "score_bp", wd_uint(score_bp));
   size_t in_len = 0;
   uint8_t *in = encode_keep(request, &in_len);
   wd_free(request);
@@ -1276,48 +1318,6 @@ static int policy_check(wd_turn *turn, const uint8_t *in, size_t in_len,
   char *tool = wd_text_copy(wd_get(request, "tool"));
   char *payload = wd_text_copy(wd_get(request, "payload"));
   char *decision = wd_text_copy(wd_get(reply, "decision"));
-  if (turn->judge != NULL && tool != NULL && decision != NULL &&
-      strcmp(decision, "allow") == 0 &&
-      (strcmp(tool, "write") == 0 || strcmp(tool, "edit") == 0 ||
-       strcmp(tool, "exec") == 0)) {
-    uint32_t bp = judge_model_score(in, in_len);
-    if (bp > 0) {
-      cbor_item_t *scored = wd_map(3);
-      wd_put(scored, "tool", wd_text(tool));
-      wd_put(scored, "payload", wd_text(payload != NULL ? payload : ""));
-      wd_put(scored, "score_bp", wd_uint(bp));
-      size_t scored_len = 0;
-      uint8_t *scored_bytes = encode_keep(scored, &scored_len);
-      wd_free(scored);
-      if (scored_bytes != NULL) {
-        uint8_t *second = NULL;
-        size_t second_len = 0;
-        char *second_err = NULL;
-        if (wd_instance_call(turn->policy, scored_bytes, scored_len, &second,
-                             &second_len, &second_err) == 0) {
-          cbor_item_t *revised = wd_decode(second, second_len);
-          char *revised_decision =
-              revised != NULL ? wd_text_copy(wd_get(revised, "decision"))
-                              : NULL;
-          if (revised_decision != NULL &&
-              strcmp(revised_decision, "allow") != 0) {
-            free(*out);
-            *out = second;
-            *out_len = second_len;
-            free(decision);
-            decision = revised_decision;
-            revised_decision = NULL;
-            second = NULL;
-          }
-          free(revised_decision);
-          wd_free(revised);
-        }
-        free(second_err);
-        free(second);
-        free(scored_bytes);
-      }
-    }
-  }
   if (turn->judge != NULL && tool != NULL && decision != NULL &&
       strcmp(decision, "allow") == 0) {
     judge_ctx jc = {turn, payload != NULL ? payload : ""};
