@@ -2083,11 +2083,11 @@ static void handle_attachment_read_blob(wd_server *srv, wd_conn *conn,
     conn_arm(srv, conn);
     return;
   }
-  if (want > (1u << 20) || offset > (4u << 20)) {
+  if (want > (1u << 20) || offset > (1u << 30)) {
     free(session_id);
     free(name);
     conn_send_error(conn, id, WD_ERR_INVALID_PARAMS,
-                    "blob reads are capped at 1 MiB per call and 4 MiB total");
+                    "blob reads are capped at 1 MiB per call and 1 GiB of offset");
     conn_arm(srv, conn);
     return;
   }
@@ -2457,11 +2457,11 @@ static void handle_session_file_read_blob(wd_server *srv, wd_conn *conn,
     conn_arm(srv, conn);
     return;
   }
-  if (want > (1u << 20) || offset > (4u << 20)) {
+  if (want > (1u << 20) || offset > (1u << 30)) {
     free(session_id);
     free(path);
     conn_send_error(conn, id, WD_ERR_INVALID_PARAMS,
-                    "blob reads are capped at 1 MiB per call and 4 MiB total");
+                    "blob reads are capped at 1 MiB per call and 1 GiB of offset");
     conn_arm(srv, conn);
     return;
   }
@@ -4385,7 +4385,11 @@ static int setup_quic(wd_server *srv) {
     return -1;
   }
   srv->quic_port = wd_quic_port(srv->quic);
-  srv->quic_endpoint = endpoint_text(spec, srv->quic_port);
+  const char *advertise = getenv("WARD_QUIC_ADVERTISE");
+  srv->quic_endpoint =
+      endpoint_text(advertise != NULL && advertise[0] != '\0' ? advertise
+                                                               : spec,
+                    srv->quic_port);
   if (srv->quic_endpoint == NULL) return -1;
   struct epoll_event ev;
   memset(&ev, 0, sizeof(ev));
