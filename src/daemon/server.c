@@ -1144,6 +1144,32 @@ static cbor_item_t *dup_item(cbor_item_t *item) {
   return copy;
 }
 
+static void reindex_search(wd_server *srv) {
+  if (srv->search == NULL) return;
+  size_t existing = 0;
+  if (wd_search_rows(srv->search, &existing) != 0 || existing > 0) return;
+  for (size_t i = 0; i < srv->store.len; i++) {
+    wd_session *session = srv->store.items[i];
+    if (session == NULL) continue;
+    cbor_item_t *history = NULL;
+    if (wd_session_history(session, 0, &history) != 0 || history == NULL)
+      continue;
+    size_t count = cbor_array_size(history);
+    for (size_t k = 0; k < count; k++) {
+      cbor_item_t *entry = cbor_array_get(history, k);
+      char *role = wd_text_copy(wd_get(entry, "role"));
+      char *text = wd_text_copy(wd_get(entry, "text"));
+      if (role != NULL && text != NULL)
+        wd_search_index(srv->search, session->id, k + 1,
+                        role[0] != '\0' ? role : "user", NULL, text);
+      free(role);
+      free(text);
+      cbor_decref(&entry);
+    }
+    wd_free(history);
+  }
+}
+
 static void index_text(wd_server *srv, const char *session, uint64_t seq,
                        const char *role, const char *text) {
   if (srv == NULL || srv->search == NULL || text == NULL || text[0] == '\0')
@@ -1152,6 +1178,8 @@ static void index_text(wd_server *srv, const char *session, uint64_t seq,
   wd_now_text(when, sizeof(when));
   wd_search_index(srv->search, session, seq, role, when, text);
 }
+
+static void reindex_search(wd_server *srv);
 
 static int turn_emit(void *ctx, const char *event, cbor_item_t *payload,
                      char **err) {
@@ -4426,6 +4454,7 @@ int wd_up_run(const wd_up_config *cfg) {
     fprintf(stderr, "ward: cannot open state directory\n");
     goto cleanup;
   }
+  reindex_search(&srv);
   srv.listen_fd = setup_listener(srv.socket_path);
   if (srv.listen_fd < 0) {
     fprintf(stderr, "ward: cannot listen on %s: %s\n", srv.socket_path,

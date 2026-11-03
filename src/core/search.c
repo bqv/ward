@@ -141,6 +141,21 @@ size_t wd_search_query(wd_search *search, const char *query,
   return count;
 }
 
+int wd_search_rows(wd_search *search, size_t *out) {
+  if (search == NULL || out == NULL) return -1;
+  sqlite3_stmt *stmt = NULL;
+  if (sqlite3_prepare_v2(search->db, "SELECT COUNT(*) FROM transcript;", -1,
+                         &stmt, NULL) != SQLITE_OK)
+    return -1;
+  int rc = -1;
+  if (sqlite3_step(stmt) == SQLITE_ROW) {
+    *out = (size_t)sqlite3_column_int64(stmt, 0);
+    rc = 0;
+  }
+  sqlite3_finalize(stmt);
+  return rc;
+}
+
 void wd_search_hits_free(wd_search_hit *hits, size_t count) {
   if (hits == NULL) return;
   for (size_t i = 0; i < count; i++) {

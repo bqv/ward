@@ -31,6 +31,8 @@ size_t wd_search_query(wd_search *search, const char *query,
                        wd_search_hit *hits, size_t cap, uint64_t *next,
                        uint64_t *total);
 
+int wd_search_rows(wd_search *search, size_t *out);
+
 void wd_search_hits_free(wd_search_hit *hits, size_t count);
 
 #endif
