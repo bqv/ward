@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "net/http.h"
+#include "net/http_status.h"
 
 #include <curl/curl.h>
 #include <errno.h>
@@ -171,8 +172,8 @@ static size_t stream_header_cb(char *data, size_t size, size_t nmemb,
                                void *userdata) {
   stream_ctx *s = userdata;
   size_t n = size * nmemb;
-  if (!s->status_sent && n > 9 && strncmp(data, "HTTP/", 5) == 0) {
-    long status = strtol(data + 9, NULL, 10);
+  if (!s->status_sent && n > 5 && strncmp(data, "HTTP/", 5) == 0) {
+    long status = wd_http_status_line(data, n);
     if (status < 200) return n;
     uint32_t value = (uint32_t)status;
     uint8_t head[4] = {(uint8_t)(value & 0xff), (uint8_t)((value >> 8) & 0xff),
