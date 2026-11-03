@@ -46,7 +46,7 @@ for `/estate/*` and nothing else.
 
 ## Status
 
-The transport is in (`5aa0299`); the capability is not written. Nothing can be
+The transport and the reader are in, and `estate_test` gates the document over a fixture socket. What is still not exercised is the read against demesne itself: that was measured by hand. Nothing can be
 tested live until demesne 0.3.0 is deployed at `$XDG_RUNTIME_DIR/demesne.sock` —
 what owns `:55558` today is stadi 0.2.0, which has no `-socket`. The shape here is
 committed and stable, so the capability can be written against it and left

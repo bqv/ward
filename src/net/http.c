@@ -89,6 +89,8 @@ int wd_http_request(const char *url, const char *method, const char *body,
     free(auth);
   }
   curl_easy_setopt(handle, CURLOPT_URL, url);
+  if (unix_socket_path != NULL)
+    curl_easy_setopt(handle, CURLOPT_UNIX_SOCKET_PATH, unix_socket_path);
   curl_easy_setopt(handle, CURLOPT_FOLLOWLOCATION, 0L);
   curl_easy_setopt(handle, CURLOPT_NOSIGNAL, 1L);
   curl_easy_setopt(handle, CURLOPT_TIMEOUT_MS, (long)timeout_ms);
