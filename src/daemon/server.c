@@ -931,6 +931,17 @@ static void handle_session_search(wd_server *srv, wd_conn *conn, uint64_t id,
   conn_arm(srv, conn);
 }
 
+static char *resolve_model_id(wd_server *srv, const char *wanted) {
+  if (wanted == NULL || wanted[0] == '\0') return NULL;
+  if (wd_models_find(srv->models, wanted) != NULL) return strdup(wanted);
+  for (size_t i = 0; i < wd_models_count(srv->models); i++) {
+    const wd_model *model = wd_models_at(srv->models, i);
+    if (model->model != NULL && strcmp(model->model, wanted) == 0)
+      return strdup(model->id);
+  }
+  return NULL;
+}
+
 static void handle_session_create(wd_server *srv, wd_conn *conn, uint64_t id,
                                   cbor_item_t *params) {
   char *cwd = wd_text_copy(wd_get(params, "cwd"));
@@ -957,6 +968,14 @@ static void handle_session_create(wd_server *srv, wd_conn *conn, uint64_t id,
   }
   if (model == NULL && srv->default_model != NULL)
     model = strdup(srv->default_model);
+  if (model != NULL && wd_models_count(srv->models) > 0 &&
+      wd_models_find(srv->models, model) == NULL) {
+    char *resolved = resolve_model_id(srv, model);
+    if (resolved != NULL) {
+      free(model);
+      model = resolved;
+    }
+  }
   if (model != NULL && wd_models_count(srv->models) > 0 &&
       wd_models_find(srv->models, model) == NULL) {
     free(cwd);
