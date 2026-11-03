@@ -130,7 +130,7 @@ static int wd_r_text_ptr(wd_r *r, const uint8_t **p, uint32_t *n) {
     r->failed = 1;
     return -1;
   }
-  if (r->at + len > r->len) {
+  if (r->at > r->len || len > r->len - r->at) {
     r->failed = 1;
     return -1;
   }
@@ -144,7 +144,7 @@ static int wd_r_text(wd_r *r, char *out, uint32_t cap, uint32_t *len) {
   const uint8_t *p = 0;
   uint32_t n = 0;
   if (wd_r_text_ptr(r, &p, &n) != 0) return -1;
-  if (n + 1 > cap) {
+  if (n >= cap) {
     r->failed = 1;
     return -1;
   }
