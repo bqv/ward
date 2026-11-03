@@ -261,6 +261,8 @@ test: $(TEST_BINS) $(WARD) $(NATIVE) $(DESKTOP_PROBE) $(DESKTOP_ACP) $(MODULE_WA
 	    echo FAILED; fail=1; tail -n 20 $(BUILDDIR)/$$name.log; \
 	  fi; \
 	done; \
+	rm -rf /tmp/ward-turn-* /tmp/ward-tool-* /tmp/ward-quic-* /tmp/ward-trace-* \
+	       /tmp/ward-trap-* /tmp/ward-search-* /tmp/ward-files-* 2>/dev/null; \
 	exit $$fail
 
 install: $(WARD)

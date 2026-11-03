@@ -2313,3 +2313,11 @@ The reason it is not done: session logs are zstd-compressed JSON lines (`<state>
 reader** — the README says so deliberately, and every other consumer goes through the CBOR codecs. A reindex therefore wants the
 event parser that replay already uses, exposed as an iteration API, rather than a second ad-hoc scanner; that is a core change
 with an authority argument, not a script.
+
+Hundred-and-seventy-fifth: the gates were littering /tmp, and it finally broke a build. Each gate mkdtemps a root and leaves it
+behind; after a few hundred runs that was 1,084 directories and about 4 GB on a 7.8 GB tmpfs, and the ASan build failed with
+"No space left on device" in a C++ compile that had nothing to do with the change under test. I removed the backlog and made the
+test target sweep its own prefixes after the run, so the suite cleans up what it creates.
+
+Lesson worth keeping: a leak in a test is still a leak. The suite had been green for hours while quietly filling the disk, and the
+first symptom was a compile error in an unrelated file.
