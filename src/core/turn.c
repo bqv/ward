@@ -1277,6 +1277,48 @@ static int policy_check(wd_turn *turn, const uint8_t *in, size_t in_len,
   char *payload = wd_text_copy(wd_get(request, "payload"));
   char *decision = wd_text_copy(wd_get(reply, "decision"));
   if (turn->judge != NULL && tool != NULL && decision != NULL &&
+      strcmp(decision, "allow") == 0 &&
+      (strcmp(tool, "write") == 0 || strcmp(tool, "edit") == 0 ||
+       strcmp(tool, "exec") == 0)) {
+    uint32_t bp = judge_model_score(in, in_len);
+    if (bp > 0) {
+      cbor_item_t *scored = wd_map(3);
+      wd_put(scored, "tool", wd_text(tool));
+      wd_put(scored, "payload", wd_text(payload != NULL ? payload : ""));
+      wd_put(scored, "score_bp", wd_uint(bp));
+      size_t scored_len = 0;
+      uint8_t *scored_bytes = encode_keep(scored, &scored_len);
+      wd_free(scored);
+      if (scored_bytes != NULL) {
+        uint8_t *second = NULL;
+        size_t second_len = 0;
+        char *second_err = NULL;
+        if (wd_instance_call(turn->policy, scored_bytes, scored_len, &second,
+                             &second_len, &second_err) == 0) {
+          cbor_item_t *revised = wd_decode(second, second_len);
+          char *revised_decision =
+              revised != NULL ? wd_text_copy(wd_get(revised, "decision"))
+                              : NULL;
+          if (revised_decision != NULL &&
+              strcmp(revised_decision, "allow") != 0) {
+            free(*out);
+            *out = second;
+            *out_len = second_len;
+            free(decision);
+            decision = revised_decision;
+            revised_decision = NULL;
+            second = NULL;
+          }
+          free(revised_decision);
+          wd_free(revised);
+        }
+        free(second_err);
+        free(second);
+        free(scored_bytes);
+      }
+    }
+  }
+  if (turn->judge != NULL && tool != NULL && decision != NULL &&
       strcmp(decision, "allow") == 0) {
     judge_ctx jc = {turn, payload != NULL ? payload : ""};
     bool consulted = false;
@@ -1455,8 +1497,8 @@ wd_turn *wd_turn_new_pinned(wd_engine *engine, const char *module_dir,
   turn->skills_module = load_pinned(engine, module_dir, pins, pins_len, "skills",
                                     &skills_spec, err);
   if (turn->skills_module == NULL) goto fail;
-  static const char *const judge_caps[] = {"judge.score", NULL};
-  wd_module_spec judge_spec = {"judge", judge_caps, 1, false};
+  static const char *const judge_caps[] = {NULL};
+  wd_module_spec judge_spec = {"judge", judge_caps, 0, true};
   static const char *const code_caps[] = {NULL};
   wd_module_spec code_spec = {"code", code_caps, 0, true};
   turn->judge_module = load_pinned(engine, module_dir, pins, pins_len, "judge",
@@ -1484,9 +1526,8 @@ wd_turn *wd_turn_new_pinned(wd_engine *engine, const char *module_dir,
   turn->skills = wd_instance_new(turn->skills_module, skills_caps, 5,
                                  &TURN_LIMITS, turn_capability, turn, err);
   if (turn->skills == NULL) goto fail;
-  static const char *const judge_granted[] = {"judge.score", NULL};
-  turn->judge = wd_instance_new(turn->judge_module, judge_granted, 1,
-                                &TURN_LIMITS, NULL, NULL, err);
+  turn->judge = wd_instance_new(turn->judge_module, no_caps, 0, &TURN_LIMITS,
+                                NULL, NULL, err);
   if (turn->judge == NULL) goto fail;
   turn->code = wd_instance_new(turn->code_module, no_caps, 0, &TURN_LIMITS,
                                NULL, NULL, err);
