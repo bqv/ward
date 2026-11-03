@@ -83,7 +83,7 @@ fun SetupScreen(
     quicPairError: String? = null,
 ) {
     val colors = DshTheme.colors
-    var url by rememberSaveable { mutableStateOf(initialUrl.ifBlank { "tcp://127.0.0.1:45872" }) }
+    var url by rememberSaveable { mutableStateOf(initialUrl.ifBlank { "tcp://127.0.0.1:9273" }) }
     var lanUrl by rememberSaveable { mutableStateOf(initialLanUrl) }
     var username by rememberSaveable { mutableStateOf(initialUsername) }
     var password by rememberSaveable { mutableStateOf("") }
@@ -130,7 +130,7 @@ fun SetupScreen(
             DshTextField(
                 value = url,
                 onValueChange = { url = it },
-                placeholder = "tcp://127.0.0.1:45872",
+                placeholder = "tcp://127.0.0.1:9273",
                 label = "Daemon",
                 keyboardType = KeyboardType.Uri,
                 imeAction = ImeAction.Done,
@@ -138,7 +138,7 @@ fun SetupScreen(
             )
             Text(
                 text = "Use the loopback TCP door ward prints, forwarded to this phone with " +
-                    "adb reverse tcp:45872 tcp:45872. A plain host:port is accepted too.",
+                    "adb reverse tcp:9273 tcp:9273. A plain host:port is accepted too.",
                 style = DshType.micro,
                 color = colors.labelCaption,
             )

@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
 import java.io.IOException
@@ -77,9 +78,9 @@ class WardConnection(
         connectLock.withLock {
             if (_state.value == WardConnectionState.OPEN) return
             _state.value = WardConnectionState.CONNECTING
-            val created = openTransport()
+            val created = withContext(Dispatchers.IO) { openTransport() }
             try {
-                handshake(created)
+                withContext(Dispatchers.IO) { handshake(created) }
             } catch (error: Throwable) {
                 runCatching { created.close() }
                 _state.value = WardConnectionState.CLOSED
