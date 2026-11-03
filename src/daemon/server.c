@@ -653,8 +653,12 @@ static void handle_stats_session(wd_server *srv, wd_conn *conn, uint64_t id,
   wd_put(result, "tokens_estimated",
          cbor_build_bool(stats.predicted_tokens == 0));
   if (priced) {
-    double prompt_tokens = (double)stats.prompt_bytes / 4.0;
-    double text_tokens = (double)stats.text_bytes / 4.0;
+    double prompt_tokens = stats.prompt_tokens > 0
+                               ? (double)stats.prompt_tokens
+                               : (double)stats.prompt_bytes / 4.0;
+    double text_tokens = stats.predicted_tokens > 0
+                             ? (double)stats.predicted_tokens
+                             : (double)stats.text_bytes / 4.0;
     double in_cost = prompt_tokens * in_price / 1e6;
     double out_cost = text_tokens * out_price / 1e6;
     wd_put(result, "cost_in", cbor_build_float8(in_cost));
