@@ -51,6 +51,9 @@ int main(int argc, char **argv)
                                     QStringLiteral("id"));
     QCommandLineOption confirmDangerOption(QStringList{QStringLiteral("confirm-danger")},
                                            QStringLiteral("answer a dangerous preset warning automatically"));
+    QCommandLineOption searchOption(QStringList{QStringLiteral("search")},
+                                    QStringLiteral("run session.search_text and print the hits"),
+                                    QStringLiteral("query"));
     parser.addOption(socketOption);
     parser.addOption(cwdOption);
     parser.addOption(promptOption);
@@ -64,6 +67,7 @@ int main(int argc, char **argv)
     parser.addOption(listOption);
     parser.addOption(presetOption);
     parser.addOption(confirmDangerOption);
+    parser.addOption(searchOption);
     parser.process(app);
 
     WardClient client(parser.value(socketOption));
@@ -88,6 +92,7 @@ int main(int argc, char **argv)
     const bool list = parser.isSet(listOption);
     const bool preset = parser.isSet(presetOption);
     const bool confirmDanger = parser.isSet(confirmDangerOption);
+    const bool search = parser.isSet(searchOption);
 
     QObject::connect(&client, &WardClient::lastErrorChanged, &app, [&]() {
         if (read || blob || list || preset)
@@ -105,9 +110,21 @@ int main(int argc, char **argv)
         if (kind == QLatin1String("turn.end"))
             app.quit();
         if (kind == QLatin1String("replay.end") && !parser.isSet(promptOption)
-                && !terminal && !read && !blob && !list && !preset
+                && !terminal && !read && !blob && !list && !preset && !search
                 && !parser.isSet(sessionOption))
             app.quit();
+    });
+    QObject::connect(&client, &WardClient::searchChanged, &app, [&]() {
+        if (!search || client.searchLoading())
+            return;
+        for (const QVariant &value : client.searchResults()) {
+            const QVariantMap hit = value.toMap();
+            QTextStream(stdout) << hit.value(QStringLiteral("session")).toString()
+                                << " " << hit.value(QStringLiteral("seq")).toString()
+                                << " " << hit.value(QStringLiteral("snippet")).toString()
+                                << "\n";
+        }
+        app.quit();
     });
     QObject::connect(&client, &WardClient::dangerousPresetRequested, &app,
                      [&](const QString &id, const QString &warning) {
@@ -198,6 +215,11 @@ int main(int argc, char **argv)
         }
         if (client.state() != WardClient::Ready || prompted)
             return;
+        if (search) {
+            prompted = true;
+            client.searchSessions(parser.value(searchOption));
+            return;
+        }
         if (preset) {
             prompted = true;
             presetStarted = true;

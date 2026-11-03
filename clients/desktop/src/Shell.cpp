@@ -3,6 +3,7 @@
 #include "ChangesDialog.h"
 #include "SettingsDialog.h"
 #include "JobsDialog.h"
+#include "SearchDialog.h"
 
 #include "AcpClient.h"
 #include "AcpPage.h"
@@ -1445,6 +1446,12 @@ void Shell::openRailOverflowMenu()
     QAction *newSession = menu->addAction(Chrome::menuText(QStringLiteral("New session")));
     connect(newSession, &QAction::triggered, this,
             [this]() { callRailTransport("createSession"); });
+    QAction *search = menu->addAction(Chrome::menuText(QStringLiteral("Search messages")));
+    connect(search, &QAction::triggered, this, [this]() {
+        auto *dialog = new SearchDialog(m_facade, this);
+        dialog->setAttribute(Qt::WA_DeleteOnClose);
+        dialog->show();
+    });
 
     QAction *group = menu->addAction(Chrome::menuText(QStringLiteral("Group by workspace")));
     group->setCheckable(true);

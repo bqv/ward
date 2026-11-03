@@ -63,6 +63,10 @@ public:
     Q_PROPERTY(QVariantList jobs READ jobs NOTIFY jobsChanged)
     Q_PROPERTY(QVariantMap settings READ settings NOTIFY settingsChanged)
     Q_PROPERTY(QVariantList modules READ modules NOTIFY modulesChanged)
+    Q_PROPERTY(QVariantList searchResults READ searchResults NOTIFY searchChanged)
+    Q_PROPERTY(bool searchLoading READ searchLoading NOTIFY searchChanged)
+    Q_PROPERTY(bool searchHasMore READ searchHasMore NOTIFY searchChanged)
+    Q_PROPERTY(QString searchQuery READ searchQuery NOTIFY searchChanged)
 
     Q_PROPERTY(QVariantList todos READ todos NOTIFY todosChanged)
     Q_PROPERTY(QVariantMap goal READ goal NOTIFY goalChanged)
@@ -136,6 +140,10 @@ public:
     QVariantList jobs() const { return m_jobs; }
     QVariantMap settings() const { return m_settings; }
     QVariantList modules() const { return m_modules; }
+    QVariantList searchResults() const { return m_searchResults; }
+    bool searchLoading() const { return m_searchLoading; }
+    bool searchHasMore() const { return m_searchHasMore; }
+    QString searchQuery() const { return m_searchQuery; }
 
     QVariantList todos() const { return m_todos; }
     QVariantMap goal() const { return m_goal; }
@@ -237,6 +245,8 @@ public:
     Q_INVOKABLE void refreshSettings();
     Q_INVOKABLE void refreshJobs();
     Q_INVOKABLE void refreshModules();
+    Q_INVOKABLE void searchSessions(const QString &query);
+    Q_INVOKABLE void searchMore();
     Q_INVOKABLE void setModuleEnabled(const QString &name, bool enabled);
     Q_INVOKABLE void followJob(const QString &jobId, qint64 from);
     Q_INVOKABLE void setSetting(const QString &key, const QVariant &value);
@@ -268,6 +278,7 @@ signals:
     void jobsChanged();
     void settingsChanged();
     void modulesChanged();
+    void searchChanged();
     void jobOutput(const QString &jobId, const QString &text, qint64 next, bool dropped);
     void todosChanged();
     void goalChanged();
@@ -387,6 +398,12 @@ private:
     QVariantList m_jobs;
     QVariantMap m_settings;
     QVariantList m_modules;
+    QVariantList m_searchResults;
+    bool m_searchLoading = false;
+    bool m_searchHasMore = false;
+    bool m_searchAppend = false;
+    QString m_searchQuery;
+    qint64 m_searchNext = 0;
     QString m_lastFollowJob;
 
     QVariantList m_todos;

@@ -722,6 +722,10 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
         if (method == QLatin1String("settings.set")
             || method == QLatin1String("module.enable"))
             emit railNotice(text, true);
+        if (method == QLatin1String("session.search_text")) {
+            m_searchLoading = false;
+            emit searchChanged();
+        }
         if (method == QLatin1String("job.follow"))
             emit jobOutput(m_lastFollowJob, QString(), 0, true);
         if (method == QLatin1String("attachment.add")) {
@@ -819,6 +823,24 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
             m_busy = false;
             emit busyChanged();
         }
+    } else if (method == QLatin1String("session.search_text")) {
+        QVariantList rows = m_searchAppend ? m_searchResults : QVariantList();
+        for (const QVariant &value : result.value(QStringLiteral("hits")).toList()) {
+            const QVariantMap hit = value.toMap();
+            rows.append(QVariantMap{
+                {QStringLiteral("session"), hit.value(QStringLiteral("session"))},
+                {QStringLiteral("seq"), hit.value(QStringLiteral("seq"))},
+                {QStringLiteral("role"), hit.value(QStringLiteral("role"))},
+                {QStringLiteral("text"), hit.value(QStringLiteral("text"))},
+                {QStringLiteral("snippet"), hit.value(QStringLiteral("snippet"))},
+                {QStringLiteral("score"), hit.value(QStringLiteral("score"))},
+                {QStringLiteral("ts"), hit.value(QStringLiteral("ts"))}});
+        }
+        m_searchResults = rows;
+        m_searchNext = result.value(QStringLiteral("next")).toLongLong();
+        m_searchHasMore = m_searchNext > 0;
+        m_searchLoading = false;
+        emit searchChanged();
     } else if (method == QLatin1String("module.list")) {
         QVariantList rows;
         for (const QVariant &value : result.value(QStringLiteral("modules")).toList()) {
@@ -1568,6 +1590,38 @@ void WardClient::loadEarlierHistory()
 }
 
 
+void WardClient::searchSessions(const QString &query)
+{
+    m_searchQuery = query.trimmed();
+    m_searchResults.clear();
+    m_searchHasMore = false;
+    m_searchNext = 0;
+    if (m_fd < 0 || m_searchQuery.size() < 2) {
+        m_searchLoading = false;
+        emit searchChanged();
+        return;
+    }
+    m_searchLoading = true;
+    m_searchAppend = false;
+    emit searchChanged();
+    sendRequest(QStringLiteral("session.search_text"),
+                {{QStringLiteral("query"), m_searchQuery},
+                 {QStringLiteral("limit"), 50}});
+}
+
+void WardClient::searchMore()
+{
+    if (m_fd < 0 || m_searchNext <= 0 || m_searchLoading)
+        return;
+    m_searchLoading = true;
+    m_searchAppend = true;
+    emit searchChanged();
+    sendRequest(QStringLiteral("session.search_text"),
+                {{QStringLiteral("query"), m_searchQuery},
+                 {QStringLiteral("limit"), 50},
+                 {QStringLiteral("before"), m_searchNext}});
+}
+
 void WardClient::refreshModules()
 {
     if (m_fd >= 0)
@@ -2180,6 +2234,7 @@ QStringList WardClient::protocolMethods() const
             QStringLiteral("settings.get"), QStringLiteral("settings.set"),
             QStringLiteral("session.upgrade"), QStringLiteral("prompt.preview"),
             QStringLiteral("session.undo"), QStringLiteral("session.search"),
+            QStringLiteral("session.search_text"),
             QStringLiteral("session.checkpoint"),
             QStringLiteral("model.list"), QStringLiteral("model.select"),
             QStringLiteral("policy.list"), QStringLiteral("policy.select"),

@@ -161,6 +161,8 @@ add_executable(ward-gui
     src/FilesDock.cpp
     src/JobsDialog.h
     src/JobsDialog.cpp
+    src/SearchDialog.h
+    src/SearchDialog.cpp
     src/PendingBand.h
     src/PendingBand.cpp
     src/TranscriptView.h
