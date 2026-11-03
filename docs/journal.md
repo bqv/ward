@@ -2243,3 +2243,20 @@ An earlier version checked only the pins: the gate created a session with `skill
 thing to settle, and until it is, the switch changes what `module.list` reports but does not stop a turn.
 
 All three builds green.
+
+Hundred-and-seventy-first: correction to entry ninety-seven. It said `ward_state_migrate` "does not exist in the host". That
+was true when written and is not true now: `wd_instance_state_migrate` is implemented (`src/wasm/host.c:734`) and is called
+from the migration path (`:697`, `:717`), with `ward_state_export` and `ward_state_import` beside it. The frozen ABI in
+`docs/modules.md` and the host now agree, so the freeze is not an aspiration with a hole in it any more.
+
+What is still true, and is the honest status: **no shipped guest carries state.** Every guest is instantiated per prompt and
+destroyed at `turn.end`, so "upgrade a stateful module mid-session with no data loss" is proven by a conformance guest and by
+core-to-core tests, not by any first-party module. That is an absence of a stateful module, not of the mechanism.
+
+Hundred-and-seventy-second: the judge's model backend is decided. Owner's call, after the numbers: a **`judge.score`
+capability**, not a direct call from core, so the judgement stays in the guest and the I/O stays in core; and it is consulted
+**only when the rule says `allow` and the tool is `write`, `edit` or `exec`**, because Kev costs 1.3-2.8 s per decision and
+shares the 2 GiB card with the embedder. The existing cache keys on tool and arguments, so repeated identical calls cost
+nothing after the first.
+
+Nothing is wired yet: `src/core/turn.c` is held by the CPython guest work, and the capability needs it.
