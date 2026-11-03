@@ -20,7 +20,30 @@ static void write_file(const char *path, const char *text) {
   close(fd);
 }
 
+static void host_listing_bounded_by_root(void) {
+  char home[] = "/tmp/ward-host-XXXXXX";
+  assert(mkdtemp(home) != NULL);
+  char sub[256];
+  snprintf(sub, sizeof(sub), "%s/repos", home);
+  assert(mkdir(sub, 0755) == 0);
+  wd_file_entry *entries = NULL;
+  size_t len = 0;
+  bool truncated = false;
+  char *err = NULL;
+  assert(wd_file_list(home, "", 100, &entries, &len, &truncated, &err) == 0);
+  assert(len == 1 && entries[0].kind == WD_FILE_DIR);
+  assert(strcmp(entries[0].name, "repos") == 0);
+  wd_file_entries_free(entries, len);
+
+  entries = NULL;
+  len = 0;
+  assert(wd_file_list(home, "/etc", 100, &entries, &len, &truncated, &err) != 0);
+  assert(entries == NULL && len == 0);
+  free(err);
+}
+
 int main(void) {
+  host_listing_bounded_by_root();
   char root[] = "/tmp/ward-files-XXXXXX";
   assert(mkdtemp(root) != NULL);
   char inside[256];

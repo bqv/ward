@@ -70,6 +70,11 @@ with `data` as a CBOR byte string — the same cwd-rooted and regular-file rules
 most 1 MiB per call and 4 MiB of offset in total, so a binary file is read in
 bounded chunks rather than one unbounded response.
 
+`host.list {path}` answers `{entries, truncated}` with directory entries only, bounded to
+`$HOME`: it exists so a client can choose a *new* workspace before any session has a cwd,
+and it refuses a path outside the home directory exactly as the session listing refuses one
+outside its cwd. It lists names, never contents.
+
 `session.file_list {id, path}` answers `{path, entries, truncated}` where each entry
 is `{name, kind, size}` with `kind` one of `file`, `dir`, `other`; `name` is relative
 to the requested directory, and `truncated` says the 1000-entry cap was reached.

@@ -2572,6 +2572,43 @@ static void handle_session_file_read_blob(wd_server *srv, wd_conn *conn,
 }
 
 
+static void handle_host_list(wd_server *srv, wd_conn *conn, uint64_t id,
+                             cbor_item_t *params) {
+  char *path = wd_text_copy(wd_get(params, "path"));
+  const char *home = getenv("HOME");
+  if (home == NULL || home[0] == '\0') home = "/home";
+  wd_file_entry *entries = NULL;
+  size_t len = 0;
+  bool truncated = false;
+  char *err = NULL;
+  int rc = wd_file_list(home, path, 1000, &entries, &len, &truncated, &err);
+  free(path);
+  if (rc != 0) {
+    conn_send_error(conn, id, WD_ERR_INVALID_PARAMS,
+                    err != NULL ? err : "cannot list the directory");
+    free(err);
+    conn_arm(srv, conn);
+    return;
+  }
+  free(err);
+  cbor_item_t *list = wd_array((uint64_t)len);
+  for (size_t i = 0; i < len; i++) {
+    if (entries[i].kind != WD_FILE_DIR) continue;
+    cbor_item_t *item = wd_map(2);
+    wd_put(item, "name", wd_text(entries[i].name));
+    wd_put(item, "kind", wd_text("dir"));
+    bool pushed = cbor_array_push(list, item);
+    cbor_decref(&item);
+    if (!pushed) break;
+  }
+  wd_file_entries_free(entries, len);
+  cbor_item_t *result = wd_map(2);
+  wd_put(result, "entries", list);
+  wd_put(result, "truncated", cbor_build_bool(truncated));
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
 static void handle_session_file_list(wd_server *srv, wd_conn *conn, uint64_t id,
                                      cbor_item_t *params) {
   char *session_id = wd_text_copy(wd_get(params, "id"));
@@ -3931,6 +3968,8 @@ static void handle_request(wd_server *srv, wd_conn *conn, uint64_t id,
     handle_policy_select(srv, conn, id, params);
   } else if (strcmp(method, "module.enable") == 0) {
     handle_module_enable(srv, conn, id, params);
+  } else if (strcmp(method, "host.list") == 0) {
+    handle_host_list(srv, conn, id, params);
   } else if (strcmp(method, "estate.card") == 0) {
     handle_estate_card(srv, conn, id, params);
   } else if (strcmp(method, "session.search_text") == 0) {
