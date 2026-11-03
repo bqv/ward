@@ -7,6 +7,7 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
+#include <netdb.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
@@ -48,16 +49,26 @@ static int connect_tcp(const char *target) {
   if (host_len == 0 || host_len >= sizeof(host)) return -1;
   memcpy(host, target, host_len);
   host[host_len] = '\0';
-  struct sockaddr_in addr;
-  memset(&addr, 0, sizeof(addr));
-  addr.sin_family = AF_INET;
-  addr.sin_port = htons((uint16_t)atoi(colon + 1));
-  if (inet_pton(AF_INET, host, &addr.sin_addr) != 1) return -1;
-  int fd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
-  if (fd < 0) return -1;
-  if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
-    fprintf(stderr, "ward: no daemon at %s: %s\n", target, strerror(errno));
+  struct addrinfo hints;
+  memset(&hints, 0, sizeof(hints));
+  hints.ai_family = AF_UNSPEC;
+  hints.ai_socktype = SOCK_STREAM;
+  struct addrinfo *found = NULL;
+  if (getaddrinfo(host, colon + 1, &hints, &found) != 0 || found == NULL) {
+    fprintf(stderr, "ward: cannot resolve %s\n", host);
+    return -1;
+  }
+  int fd = -1;
+  for (struct addrinfo *at = found; at != NULL; at = at->ai_next) {
+    fd = socket(at->ai_family, at->ai_socktype | SOCK_CLOEXEC, at->ai_protocol);
+    if (fd < 0) continue;
+    if (connect(fd, at->ai_addr, at->ai_addrlen) == 0) break;
     close(fd);
+    fd = -1;
+  }
+  freeaddrinfo(found);
+  if (fd < 0) {
+    fprintf(stderr, "ward: no daemon at %s: %s\n", target, strerror(errno));
     return -1;
   }
   return fd;
