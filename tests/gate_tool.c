@@ -457,6 +457,20 @@ int main(void) {
   free(chosen_model);
   wd_free(chosen);
 
+  cbor_item_t *by_name = NULL;
+  cbor_item_t *set_name = wd_map(2);
+  wd_put(set_name, "id", wd_text(session));
+  wd_put(set_name, "model", wd_text("qwen3"));
+  catalog_ok = false;
+  assert(request(&a, a.next_id++, "session.set_model", set_name, &by_name,
+                 &catalog_ok) == 0);
+  assert(catalog_ok);
+  char *resolved_name =
+      wd_text_copy(wd_get(wd_get(by_name, "session"), "model"));
+  assert(resolved_name != NULL && strcmp(resolved_name, "local:qwen") == 0);
+  free(resolved_name);
+  wd_free(by_name);
+
   cbor_item_t *rejected = NULL;
   cbor_item_t *bad = wd_map(2);
   wd_put(bad, "id", wd_text(session));
