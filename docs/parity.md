@@ -35,7 +35,7 @@ behaviour, is marked `partial`.
 | Android client | M6 | delivered | `clients/android` (project ward-android, app Ward) speaks the frozen protocol in Kotlin: an APK on the disposable handset created and listed a session over `adb reverse`, painted a `/read` turn, answered an approval, and replayed the transcript after force-stop and relaunch; its 1,308-test JVM suite passes. Known gaps (QUIC/pairing, workspaces, terminal routing, jobs/schedules/goals UI, subagent lineage, stubs, background approvals, queue/steer) are named in `clients/android/README.md`. `gate_native` covers the loopback TCP transport it uses |
 | python eval | M4 | delivered | `gate_tool` runs `/py print(6*7)` through the embedded CPython guest and gets `42` with `python3` removed from the daemon child's `PATH`; JSON and `re` are exercised in the same frozen module |
 | recall | M4 | delivered | `recall` module with a stubbed binary in `gate_tool` |
-| judge | M4 | **partial** | rules decide; the model backend is the substitution named in the journal |
+| judge | M4 | delivered | rules decide, and the model backend is wired: `judge.score` posts to a decision endpoint, the score travels into the guest as input (the guest stays pure), and `gate_judge` proves a `/write` under `full-access` parks because the fixture scored it 0.9, while `gate_native` proves the same write proceeds when no endpoint is configured |
 
 ## What this audit says about the project
 

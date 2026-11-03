@@ -12,7 +12,7 @@ it was suspected.
 | thing | what ships instead | who knows | closing it |
 |---|---|---|---|
 | embedded CPython (`python` row) | `/py` runs host `python3 -I` in the worker (`src/core/turn.c:727`), 15 s / 64 KiB, approval required | `docs/parity.md:36`, `docs/protocol.md:215`, journal 54 | in progress: frozen-stdlib `wasm32-wasip1` build, ~29 MiB, no preopen (journal 173) |
-| judge model backend | rules decide; `modules/judge/judge.c` is rule-shaped, nothing calls Kev | parity `judge` row, journal 51-55 | decided: `judge.score` capability, consulted only when the rule allows and the tool is write/edit/exec (journal 172); unwired |
+| judge model backend | rules decide, and the score is wired: `judge.score` posts to `$WARD_JUDGE_ENDPOINT/v1/systemone` and the guest reads it as input | journal 172, `gate_judge` | needs a native decision model behind the endpoint — `/v1/systemone` answers only for models whose `output_modalities` include `decisions`, and the box's `d1-2B-Q8_0-Decision` is not verified against this build |
 | tokenizer tenant | token counts come from provider `timings` when present; otherwise a byte estimate flagged by `tokens_estimated` | journal, `src/daemon/server.c:653` | build the tenant; until then the flag is the contract |
 
 ## Partial, by design or by omission
