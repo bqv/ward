@@ -676,8 +676,19 @@ int main(void) {
   uint64_t compact_through = 0;
   assert(wd_uint_of(wd_get(compacted, "through"), &compact_through));
   assert(compact_through > 0);
-  free(summary);
+  bool compact_branched = false;
+  assert(wd_bool_of(wd_get(compacted, "branched"), &compact_branched));
+  assert(compact_branched);
+  char *compact_child = wd_text_copy(wd_get(compacted, "session"));
+  char *compact_parent = wd_text_copy(wd_get(compacted, "parent"));
+  assert(compact_child != NULL && compact_parent != NULL);
+  assert(strcmp(compact_child, session) != 0);
+  assert(strcmp(compact_parent, session) == 0);
   wd_free(compacted);
+
+  free(compact_child);
+  free(compact_parent);
+  free(summary);
 
   cbor_item_t *checked = NULL;
   cbor_item_t *check_params = wd_map(2);
