@@ -81,7 +81,7 @@ int wd_estate_card_read(const char *socket_path, const char *group,
     return -1;
   }
   char url[256];
-  snprintf(url, sizeof(url), "http://demesne/estate/card%s%s",
+  snprintf(url, sizeof(url), "http://127.0.0.1/estate/card%s%s",
            group != NULL && group[0] != '\0' ? "?group=" : "",
            group != NULL && group[0] != '\0' ? group : "");
   wd_http_set_unix_socket(socket_path);
