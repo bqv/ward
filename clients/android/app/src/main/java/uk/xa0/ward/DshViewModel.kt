@@ -6806,7 +6806,7 @@ class DshViewModel(application: Application) : AndroidViewModel(application) {
             subagentMode = subagent?.second?.takeIf { it.isNotBlank() },
             usage = parseSessionStats(projections),
             lastUsedModel = parseHostModelSelection(projections.obj("modelSelection"))?.lastUsed,
-            agentPreset = item.str("agentPreset").takeIf { it.isNotBlank() },
+            agentPreset = projections.str("agentPreset").takeIf { it.isNotBlank() },
         ).withCatalog(held)
     }
 
