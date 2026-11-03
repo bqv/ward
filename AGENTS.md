@@ -36,12 +36,16 @@ Three tenants are on notice (tokenizer, judge, recall); the README says why.
 ## Where the work stands
 
 M0 to M3 are complete and gated. M4 is nine rows of eleven: the judge's model backend and an
-embedded CPython are the gaps, and both are named as substitutions in the journal. M5 has every
-piece except the last: versions, reload, pinning, upgrade, handover between instances and
-demotion are built and measured; a turn now resolves through its pins, but nothing persists a
-guest's state across a turn, so there is nothing to hand over yet and the acceptance line is
-"proven with a fixture" rather than "the session moved". The design for the remaining piece is
-in the journal, entry seventy.
+embedded CPython are the gaps, both named as substitutions in the journal. The judge backend is
+now decided — a `judge.score` capability called by the guest, consulted only when the rule
+allows and the tool is write, edit or exec — and not yet wired (journal entry one hundred and
+seventy-two). The CPython guest is in progress: a frozen-stdlib `wasm32-wasip1` build at about
+29 MiB with no preopen, awaiting the embed. M5 has every piece except the last: versions,
+reload, pinning, upgrade, handover between instances and demotion are built and measured, and
+`ward_state_migrate` now exists in the host and is called by the migration path (journal entry
+one hundred and seventy-one corrects an earlier note that said otherwise). What is still missing
+is a shipped guest that carries state, so nothing persists across a turn in practice and the
+acceptance line remains "proven with a fixture" rather than "the session moved".
 
 The history — every slice, every trap, and the resume notes for M5 — is in `docs/journal.md`.
 Read it before changing anything that looks arbitrary.
