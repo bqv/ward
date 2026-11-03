@@ -1874,6 +1874,11 @@ fun ChatScreen(vm: DshViewModel) {
                 vm.signOut()
             },
             onDismiss = { showAbout = false },
+            onPairQuic = {
+                vm.pairForQuic(ui.activeUrl.ifBlank { ui.baseUrl })
+            },
+            quicPairing = ui.quicPairing,
+            quicPairError = ui.quicPairError,
             // The same session facts the Settings sheet used to print, from the
             // same two sources: the roster row and the session header.
             sessionTitle = current?.title.orEmpty(),

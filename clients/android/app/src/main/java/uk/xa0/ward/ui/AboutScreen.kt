@@ -104,6 +104,9 @@ fun AboutContent(
     socketConnected: Boolean,
     onSignOut: () -> Unit,
     onDismiss: () -> Unit,
+    onPairQuic: (() -> Unit)? = null,
+    quicPairing: Boolean = false,
+    quicPairError: String? = null,
     /**
      * The open session's facts, moved here from the Settings sheet's own Session
      * block. All defaulted so the page still renders for a caller with no session
@@ -504,6 +507,26 @@ fun AboutContent(
             contentAlignment = Alignment.Center,
         ) {
             Text("Sign out and forget credentials", style = DshType.labelLarge, color = colors.error)
+        }
+        if (onPairQuic != null) {
+            Spacer(Modifier.height(12.dp))
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickableNoRipple(onClick = { if (!quicPairing) onPairQuic() }),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    if (quicPairing) "Pairing this phone…" else "Pair this phone for QUIC",
+                    style = DshType.labelLarge,
+                    color = colors.accent,
+                )
+            }
+            quicPairError?.let {
+                Spacer(Modifier.height(6.dp))
+                Text(it, style = DshType.bodySmall, color = colors.error)
+            }
         }
     }
 }
