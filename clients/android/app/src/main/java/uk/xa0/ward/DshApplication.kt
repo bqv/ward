@@ -2,6 +2,9 @@ package uk.xa0.ward
 
 import android.app.Application
 import android.os.Process
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import uk.xa0.ward.data.ConfigStore
 import uk.xa0.ward.diag.ScrollDiag
 import uk.xa0.ward.extension.runtime.ExtensionRuntime
@@ -56,6 +59,11 @@ class DshApplication : Application() {
      * why a reading that stops being renewed is the honest outcome rather than a bug.
      */
     val widgets by lazy { WidgetPublisher(this) }
+
+    /** The shared Htop seat; one screen per process, re-pointed at the open session. */
+    val htop by lazy {
+        HtopTerminal(client, configStore, CoroutineScope(SupervisorJob() + Dispatchers.Default))
+    }
 
     override fun onCreate() {
         super.onCreate()

@@ -21,6 +21,12 @@ import uk.xa0.ward.term.encodeHostShellSessions
  */
 data class DshConfig(
     val baseUrl: String = "",
+    /** SHA-256 pin of the paired daemon's leaf certificate, lowercase hex. */
+    val quicPin: String = "",
+    /** PEM certificate `device.enrol` issued to this phone. */
+    val quicCertificatePem: String = "",
+    /** PKCS#8 PEM private key generated with that certificate request. */
+    val quicPrivateKeyPem: String = "",
     /**
      * An optional second door to the same host, on the local network.
      *
@@ -208,6 +214,9 @@ class ConfigStore(context: Context) {
 
     fun load(): DshConfig = DshConfig(
         baseUrl = prefs.getString(KEY_BASE_URL, "").orEmpty(),
+        quicPin = prefs.getString(KEY_QUIC_PIN, "").orEmpty(),
+        quicCertificatePem = prefs.getString(KEY_QUIC_CERT, "").orEmpty(),
+        quicPrivateKeyPem = prefs.getString(KEY_QUIC_KEY, "").orEmpty(),
         lanUrl = prefs.getString(KEY_LAN_URL, "").orEmpty(),
         username = prefs.getString(KEY_USERNAME, "").orEmpty(),
         password = prefs.getString(KEY_PASSWORD, "").orEmpty(),
@@ -251,6 +260,9 @@ class ConfigStore(context: Context) {
     fun save(config: DshConfig) {
         prefs.edit()
             .putString(KEY_BASE_URL, config.baseUrl)
+            .putString(KEY_QUIC_PIN, config.quicPin)
+            .putString(KEY_QUIC_CERT, config.quicCertificatePem)
+            .putString(KEY_QUIC_KEY, config.quicPrivateKeyPem)
             .putString(KEY_LAN_URL, config.lanUrl)
             .putString(KEY_USERNAME, config.username)
             .putString(KEY_PASSWORD, config.password)
@@ -286,6 +298,9 @@ class ConfigStore(context: Context) {
 
     private companion object {
         const val KEY_BASE_URL = "base_url"
+        const val KEY_QUIC_PIN = "quic_pin"
+        const val KEY_QUIC_CERT = "quic_cert_pem"
+        const val KEY_QUIC_KEY = "quic_key_pem"
         const val KEY_LAN_URL = "lan_url"
         const val KEY_USERNAME = "username"
         const val KEY_PASSWORD = "password"

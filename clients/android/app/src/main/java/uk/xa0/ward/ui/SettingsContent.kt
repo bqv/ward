@@ -39,6 +39,7 @@ import uk.xa0.ward.diag.diagDrag
 import uk.xa0.ward.AgentPresetOption
 import uk.xa0.ward.ModelOption
 import uk.xa0.ward.PermissionOption
+import uk.xa0.ward.WardHostSettings
 import uk.xa0.ward.SessionItem
 import uk.xa0.ward.WorkspaceItem
 import uk.xa0.ward.data.BusyEnter
@@ -163,6 +164,11 @@ fun SettingsContent(
     settingsWriteError: String? = null,
     /** One changed field, as (namespace, field, value). Null leaves the rows unwired. */
     onSettingWrite: ((String, String, String) -> Unit)? = null,
+    wardSettings: WardHostSettings? = null,
+    wardSettingsLoading: Boolean = false,
+    wardSettingsError: String? = null,
+    wardSettingSaving: String? = null,
+    onWardSettingWrite: ((String, String) -> Unit)? = null,
     /**
      * The profile's plugin bundles and their per-bundle switches, all defaulted
      * for the same reason as the host settings above: a caller that has not wired
@@ -255,6 +261,15 @@ fun SettingsContent(
             onWrite = onSettingWrite,
         )
 
+        SectionHeading("Ward host")
+        WardHostSection(
+            settings = wardSettings,
+            loading = wardSettingsLoading,
+            error = wardSettingsError,
+            saving = wardSettingSaving,
+            onWrite = onWardSettingWrite,
+        )
+
         SectionHeading("Models")
         ModelsSection(models, providerOrder)
 
@@ -297,6 +312,47 @@ fun SettingsContent(
             workspaces = workspaces,
             loading = sessionsLoading,
             onUnarchive = onUnarchive,
+        )
+    }
+}
+
+
+@Composable
+private fun WardHostSection(
+    settings: WardHostSettings?,
+    loading: Boolean,
+    error: String?,
+    saving: String?,
+    onWrite: ((String, String) -> Unit)?,
+) {
+    if (error != null) {
+        SectionErrorNote(error)
+    }
+    val doc = settings
+    if (doc == null) {
+        SectionNote(if (loading) "Reading Ward's settings…" else "Ward's settings were not read.")
+        return
+    }
+    SettingsRow(
+        title = "Concurrent runs",
+        description = "How many turns Ward may run at once",
+    ) {
+        SettingsStepper(
+            value = doc.maxRuns,
+            min = 1,
+            max = 64,
+            enabled = onWrite != null && saving != "max_runs",
+            onChange = { onWrite?.invoke("max_runs", it.toString()) },
+        )
+    }
+    SettingsRow(
+        title = "Debug logging",
+        description = "Ward's own verbose log switch",
+    ) {
+        Switch(
+            checked = doc.debug,
+            enabled = onWrite != null && saving != "debug",
+            onCheckedChange = { onWrite?.invoke("debug", if (it) "true" else "false") },
         )
     }
 }

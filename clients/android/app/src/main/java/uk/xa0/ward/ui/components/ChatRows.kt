@@ -1765,6 +1765,23 @@ fun GoalBar(
             )
         }
 
+        goal.blockedReason
+            ?.takeIf { goal.phase == "blocked" && it.isNotBlank() }
+            ?.let { reason ->
+                Text(
+                    text = reason,
+                    style = DshType.micro,
+                    color = colors.labelSecondary,
+                    maxLines = if (collapsed) 1 else 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(
+                        start = DshSpacing.lg,
+                        end = 30.dp,
+                        bottom = DshSpacing.md,
+                    ),
+                )
+            }
+
         if (!collapsed) {
             Column(
                 Modifier

@@ -27,6 +27,7 @@ import uk.xa0.ward.ui.SetupScreen
 import uk.xa0.ward.ui.StartupScreen
 import uk.xa0.ward.ui.LightboxController
 import uk.xa0.ward.ui.LightboxOverlay
+import uk.xa0.ward.ui.LinkChoiceHost
 import uk.xa0.ward.ui.LocalLightbox
 import uk.xa0.ward.ui.markdown.LocalImageLoad
 import uk.xa0.ward.ui.theme.DshTheme
@@ -168,6 +169,9 @@ class MainActivity : ComponentActivity() {
                                     onCheckCertificate = vm::checkCertificate,
                                     onTrustCertificate = vm::trustCertificate,
                                     onForgetCertificate = vm::forgetCertificate,
+                                    onPairQuic = vm::pairForQuic,
+                                    quicPairing = ui.quicPairing,
+                                    quicPairError = ui.quicPairError,
                                 )
                             }
 
@@ -185,6 +189,8 @@ class MainActivity : ComponentActivity() {
                                 onClose = lightbox::close,
                             )
                         }
+
+                        LinkChoiceHost()
                     }
                 }
             }

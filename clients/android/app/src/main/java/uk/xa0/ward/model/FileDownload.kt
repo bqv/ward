@@ -102,7 +102,7 @@ const val DOWNLOAD_WINDOW_BYTES = 2 * 1024 * 1024
  * designed to hand over in one piece; anything above it is refused with its size rather
  * than silently cut short.
  */
-const val MAX_DOWNLOAD_BYTES = 32 * 1024 * 1024
+const val MAX_DOWNLOAD_BYTES = 1 shl 30
 
 /**
  * Every byte of one file, window by window.
@@ -133,7 +133,12 @@ suspend fun readWholeFile(
     val total = size?.takeIf { it >= 0 }?.toLong()
     if (total != null && total > ceiling) return DownloadResult.Refused(tooLarge(path, total, ceiling))
 
-    val out = ByteArrayOutputStream(if (total != null) total.toInt() else 64 * 1024)
+    // The 1 GiB ceiling follows the daemon's offset ceiling. Do not reserve the
+    // whole file up front: a large download grows the buffer as windows arrive
+    // rather than turning a size header into an immediate gigabyte allocation.
+    val out = ByteArrayOutputStream(
+        minOf(total?.toInt() ?: 64 * 1024, 8 * 1024 * 1024),
+    )
     var offset = 0L
     while (true) {
         // Cancellation lands here, between windows: the call in flight is a blocking

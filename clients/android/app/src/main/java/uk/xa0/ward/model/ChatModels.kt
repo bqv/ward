@@ -137,6 +137,8 @@ sealed interface ChatEntry {
          * Null for every other notice.
          */
         val jobId: String? = null,
+        val localAnchorSeq: Int = -1,
+        val localOrder: Long = 0L,
     ) : ChatEntry
 }
 

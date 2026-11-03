@@ -13,6 +13,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import org.json.JSONObject
 import uk.xa0.ward.data.DshConfig
+import uk.xa0.ward.data.LocalWorkspaceStore
 import uk.xa0.ward.proto.Cbor
 import uk.xa0.ward.proto.WardConnection
 import uk.xa0.ward.proto.WardConnectionException
@@ -74,6 +75,7 @@ class DshClient(context: Context) {
 
     val cookieJar = PersistentCookieJar(context)
     val trust = CertTrust()
+    val workspaces = LocalWorkspaceStore(context)
 
     @Volatile var config: DshConfig = DshConfig()
         private set
@@ -97,7 +99,11 @@ class DshClient(context: Context) {
     fun applyConfig(next: DshConfig) {
         val previous = config
         config = next
-        if (next.baseUrl != previous.baseUrl) {
+        if (next.baseUrl != previous.baseUrl ||
+            next.quicPin != previous.quicPin ||
+            next.quicCertificatePem != previous.quicCertificatePem ||
+            next.quicPrivateKeyPem != previous.quicPrivateKeyPem
+        ) {
             muxInstance?.shutdown()
             muxInstance = null
             mux = null
@@ -130,9 +136,14 @@ class DshClient(context: Context) {
     private suspend fun ensureConnection(): WardConnection {
         val target = config.baseUrl.trim()
         if (target.isEmpty()) throw DshUnreachableException("No ward address is configured")
-        val current = connection ?: WardConnection(target).also {
+        val current = connection ?: WardConnection(
+            target,
+            quicPin = config.quicPin,
+            quicCertificatePem = config.quicCertificatePem,
+            quicPrivateKeyPem = config.quicPrivateKeyPem,
+        ).also {
             connection = it
-            bridge = WardBridge(it)
+            bridge = WardBridge(it, workspaces)
         }
         current.connect()
         return current
@@ -202,7 +213,7 @@ class DshClient(context: Context) {
         withContext(Dispatchers.IO) {
             try {
                 ensureConnection()
-                val active = bridge ?: WardBridge(ensureConnection()).also { bridge = it }
+                val active = bridge ?: WardBridge(ensureConnection(), workspaces).also { bridge = it }
                 active.call(method, args)
             } catch (error: WardRpcException) {
                 throw DshRpcException(error.name, error.message, JSONObject().put("wardCode", error.code))
@@ -214,7 +225,7 @@ class DshClient(context: Context) {
     suspend fun rpcBytes(method: String, args: JSONObject = JSONObject()): ByteArray =
         withContext(Dispatchers.IO) {
             ensureConnection()
-            val active = bridge ?: WardBridge(ensureConnection()).also { bridge = it }
+            val active = bridge ?: WardBridge(ensureConnection(), workspaces).also { bridge = it }
             active.callBytes(method, args)
         }
 
@@ -241,6 +252,11 @@ class DshClient(context: Context) {
     }
 
     suspend fun hostQueueInbox(session: String): JSONObject? = bridge?.hostQueueInbox(session)
+
+    suspend fun wardSettings(): JSONObject = bridge?.wardSettings() ?: JSONObject()
+
+    suspend fun setWardSetting(key: String, value: String): JSONObject =
+        bridge?.setWardSetting(key, value) ?: JSONObject()
 
     companion object {
         private const val TAG = "WardRoute"

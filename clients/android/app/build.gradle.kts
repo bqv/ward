@@ -134,6 +134,16 @@ dependencies {
     implementation("com.caverock:androidsvg-aar:1.4")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
+    // A pure-JVM QUIC client for ward's raw stream transport. Cronet speaks
+    // HTTP/1.1-H3 URL requests, not an arbitrary ALPN stream, so it cannot carry
+    // ward's frame protocol.
+    implementation("tech.kwik:kwik:0.10.1") {
+        // Kwik 0.10.1's POM names a JPMS-classifier artifact that is not
+        // published; the same library is on Maven Central without it.
+        exclude(group = "io.whitfin", module = "siphash")
+    }
+    implementation("io.whitfin:siphash:2.0.0")
+
     // The module's first test source set. The terminal's VT parser and its
     // attachment/sequence rules are verified against bytes here, because the device
     // half of this feature cannot be exercised from a build box.

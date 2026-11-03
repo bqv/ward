@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -76,6 +77,10 @@ fun SetupScreen(
     onCheckCertificate: (String) -> Unit = {},
     onTrustCertificate: (String, X509Certificate) -> Unit = { _, _ -> },
     onForgetCertificate: (String) -> Unit = {},
+    /** Enrol this phone over the TCP door above, then switch to its QUIC endpoint. */
+    onPairQuic: ((String) -> Unit)? = null,
+    quicPairing: Boolean = false,
+    quicPairError: String? = null,
 ) {
     val colors = DshTheme.colors
     var url by rememberSaveable { mutableStateOf(initialUrl.ifBlank { "tcp://127.0.0.1:45872" }) }
@@ -145,15 +150,31 @@ fun SetupScreen(
                     color = colors.error,
                 )
             }
+            quicPairError?.let {
+                Text(text = it, style = DshType.bodySmall, color = colors.error)
+            }
 
             DshPrimaryButton(
                 text = when {
                     busy -> startupStep?.let { StartupCopy.title(it) } ?: "Connecting…"
                     else -> "Connect"
                 },
-                enabled = !busy && !submitting && url.isNotBlank(),
+                enabled = !busy && !submitting && !quicPairing && url.isNotBlank(),
                 onClick = submit,
             )
+
+            if (onPairQuic != null) {
+                TextButton(
+                    enabled = !busy && !quicPairing && url.isNotBlank(),
+                    onClick = { onPairQuic(url) },
+                ) {
+                    Text(
+                        text = if (quicPairing) "Pairing this phone…" else "Pair this phone for QUIC",
+                        style = DshType.bodySmall,
+                        color = colors.link,
+                    )
+                }
+            }
 
             if (busy) {
                 Text(

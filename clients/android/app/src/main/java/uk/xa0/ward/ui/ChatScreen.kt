@@ -883,6 +883,11 @@ fun ChatScreen(vm: DshViewModel) {
         ?: (ui.pendingSession?.preset ?: ui.currentAgentPreset).takeIf { it.isNotBlank() }
         ?: ui.agentPresetOptions.firstOrNull { it.isDefault }?.name
         ?: ui.agentPresetOptions.firstOrNull()?.name
+    val openPresetLabel = current?.agentPreset?.takeIf { it.isNotBlank() }?.let { id ->
+        ui.agentPresetOptions.firstOrNull { it.id == id }
+            ?.let { agentPresetLabel(it.id, it.name) }
+            ?: agentPresetLabel(id, "")
+    }
     val showPresetChip = isHero && blankSeat && presetLabel != null
     // A one-shot subagent's inbox is not its own to mutate — the web's
     // `queueMutable = subagent === null || mode === 'continuable'`.
@@ -1034,6 +1039,7 @@ fun ChatScreen(vm: DshViewModel) {
                         // a list held from the last visit would offer switches for
                         // a composition that is no longer loaded.
                         vm.loadPlugins()
+                        vm.loadWardSettings()
                         scope.launch { drawerState.close() }
                     },
                     onAbout = {
@@ -1087,7 +1093,8 @@ fun ChatScreen(vm: DshViewModel) {
                     }
                 },
                 tabs = tabItems,
-                showTabs = !isHero,
+                showTabs = !isHero || extensionTabs.isNotEmpty(),
+                presetLabel = openPresetLabel.takeIf { !isHero },
                 filesOpen = showFiles,
                 // The Files panel resolves every path against a session
                 // (`agentId`), so on the pending seat there is nothing to list. The
@@ -1781,6 +1788,11 @@ fun ChatScreen(vm: DshViewModel) {
             settingsSaving = ui.settingsSaving,
             settingsWriteError = ui.settingsWriteError,
             onSettingWrite = vm::writeHostSetting,
+            wardSettings = ui.wardSettings,
+            wardSettingsLoading = ui.wardSettingsLoading,
+            wardSettingsError = ui.wardSettingsError,
+            wardSettingSaving = ui.wardSettingSaving,
+            onWardSettingWrite = vm::writeWardSetting,
             // The profile's plugin bundles, read when the sheet opens (see
             // `onSettings`). No switch is drawn until a read lands, and a toggle
             // never flips the drawn value itself: the view model reloads after
@@ -2280,6 +2292,7 @@ private fun ChatHeader(
      */
     parent: SubagentParent? = null,
     onParent: () -> Unit = {},
+    presetLabel: String? = null,
     modifier: Modifier = Modifier,
 ) {
     val colors = DshTheme.colors
@@ -2366,6 +2379,10 @@ private fun ChatHeader(
             // indicator, and the drawer's per-session caret is the complete tree.
             if (lineage != null && lineage.running > 0) {
                 LineageChip(lineage, onLineage)
+                Spacer(Modifier.width(HEADER_SEAT_GAP))
+            }
+            if (presetLabel != null) {
+                AgentPresetChip(label = presetLabel, onClick = null)
                 Spacer(Modifier.width(HEADER_SEAT_GAP))
             }
             // The right panel's seat, which on the web is a header utility. It
@@ -3111,13 +3128,19 @@ private fun HeroBody(
  * with a hub glyph, the preset's display name, and a disclosure chevron.
  */
 @Composable
-private fun AgentPresetChip(label: String, onClick: () -> Unit) {
+private fun AgentPresetChip(label: String, onClick: (() -> Unit)? = null) {
     val colors = DshTheme.colors
     Row(
         Modifier
             .height(28.dp)
             .clip(RoundedCornerShape(DshRadius.thumb))
-            .clickableNoRipple(onClick = onClick)
+            .then(
+                if (onClick != null) {
+                    Modifier.clickableNoRipple(onClick = onClick)
+                } else {
+                    Modifier.semantics { contentDescription = "Agent preset: $label" }
+                },
+            )
             .padding(horizontal = DshSpacing.md),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -3135,13 +3158,15 @@ private fun AgentPresetChip(label: String, onClick: () -> Unit) {
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        Spacer(Modifier.width(DshSpacing.xxs))
-        Icon(
-            Icons.Rounded.ExpandMore,
-            contentDescription = null,
-            tint = colors.labelCaption,
-            modifier = Modifier.size(12.dp),
-        )
+        if (onClick != null) {
+            Spacer(Modifier.width(DshSpacing.xxs))
+            Icon(
+                Icons.Rounded.ExpandMore,
+                contentDescription = null,
+                tint = colors.labelCaption,
+                modifier = Modifier.size(12.dp),
+            )
+        }
     }
 }
 

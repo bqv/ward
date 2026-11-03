@@ -21,8 +21,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
 import java.io.IOException
-import java.net.InetSocketAddress
-import java.net.Socket
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 
@@ -32,15 +30,18 @@ class WardConnectionException(message: String, cause: Throwable? = null) : IOExc
 
 /**
  * One ward protocol connection: the frame reader, the request/response ledger and
- * the session subscriptions, over a loopback TCP socket or a plain host:port.
+ * the session subscriptions, over a TCP reverse tunnel or a pinned QUIC stream.
  *
- * The protocol has one socket and many logical streams. Reads are serialised by
- * the single reader coroutine; writes are serialised by [sendLock]. A request is
- * answered by id, an event by subscription, and neither waits for the other.
+ * The protocol has one byte stream and many logical streams. Reads are serialised
+ * by the single reader coroutine; writes are serialised by [sendLock]. A request
+ * is answered by id, an event by subscription, and neither waits for the other.
  */
 class WardConnection(
     private val target: String,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+    private val quicPin: String? = null,
+    private val quicCertificatePem: String? = null,
+    private val quicPrivateKeyPem: String? = null,
 ) {
     private data class Pending(
         val method: String,
@@ -57,7 +58,7 @@ class WardConnection(
     private val connectLock = Mutex()
     private val sendLock = Mutex()
 
-    @Volatile private var socket: Socket? = null
+    @Volatile private var transport: WardTransport? = null
     @Volatile private var reader: Job? = null
     @Volatile private var closed = false
 
@@ -76,7 +77,7 @@ class WardConnection(
         connectLock.withLock {
             if (_state.value == WardConnectionState.OPEN) return
             _state.value = WardConnectionState.CONNECTING
-            val created = openSocket()
+            val created = openTransport()
             try {
                 handshake(created)
             } catch (error: Throwable) {
@@ -85,7 +86,7 @@ class WardConnection(
                 throw if (error is WardConnectionException) error else
                     WardConnectionException("ward handshake failed: ${error.message}", error)
             }
-            socket = created
+            transport = created
             _state.value = WardConnectionState.OPEN
             reader = scope.launch { readLoop(created) }
         }
@@ -95,8 +96,8 @@ class WardConnection(
         closed = true
         reader?.cancel()
         reader = null
-        runCatching { socket?.close() }
-        socket = null
+        runCatching { transport?.close() }
+        transport = null
         failAll(WardConnectionException("ward connection closed"))
         subscriptions.values.forEach { it.close() }
         subscriptions.clear()
@@ -104,11 +105,11 @@ class WardConnection(
     }
 
     fun restart() {
-        val stopping = socket
+        val stopping = transport
         reader?.cancel()
         reader = null
         runCatching { stopping?.close() }
-        socket = null
+        transport = null
         failAll(WardConnectionException("ward connection restarted"))
         subscriptions.values.forEach { it.close() }
         subscriptions.clear()
@@ -179,33 +180,34 @@ class WardConnection(
     }
 
     private suspend fun send(type: Int, sub: Long, seq: Long, body: Cbor) {
-        val active = socket ?: throw WardConnectionException("ward is not connected")
+        val active = transport ?: throw WardConnectionException("ward is not connected")
         sendLock.withLock {
             try {
-                active.getOutputStream().writeFrame(type, sub, seq, body)
+                active.output.writeFrame(type, sub, seq, body)
             } catch (error: IOException) {
                 throw WardConnectionException("ward write failed: ${error.message}", error)
             }
         }
     }
 
-    private fun openSocket(): Socket {
-        val parsed = parseTarget(target)
-        val socket = Socket()
-        socket.tcpNoDelay = true
-        socket.connect(InetSocketAddress(parsed.first, parsed.second), 15_000)
-        socket.soTimeout = 10_000
-        return socket
+    private fun openTransport(): WardTransport {
+        val (host, port, quic) = parseWardTarget(target)
+        return if (quic) {
+            QuicWardTransport(host, port, quicPin.orEmpty(), quicCertificatePem, quicPrivateKeyPem)
+        } else {
+            TcpWardTransport(host, port)
+        }
     }
 
-    private fun handshake(active: Socket) {
+    private fun handshake(active: WardTransport) {
         val hello = cborMap(
             "v" to WARD_PROTOCOL_VERSION.cbor(),
             "client" to "ward-android/0.1.0".cbor(),
             "caps" to cborArray("events".cbor()),
         )
-        active.getOutputStream().writeFrame(WardFrameType.HELLO, 0, 0, hello)
-        val welcome = WardFrames.read(active.getInputStream())
+        active.setReadTimeout(10_000)
+        active.output.writeFrame(WardFrameType.HELLO, 0, 0, hello)
+        val welcome = WardFrames.read(active.input)
         if (welcome.type != WardFrameType.WELCOME) {
             throw WardConnectionException("the daemon answered ${welcome.type}, not a welcome")
         }
@@ -217,12 +219,12 @@ class WardConnection(
         serverName = body.text("server").orEmpty()
         authScope = body.map("auth")?.text("scope").orEmpty()
         maxBody = body.map("limits")?.long("body") ?: WARD_MAX_BODY.toLong()
-        active.soTimeout = 0
+        active.setReadTimeout(0)
     }
 
-    private fun readLoop(active: Socket) {
+    private fun readLoop(active: WardTransport) {
         try {
-            val input = active.getInputStream()
+            val input = active.input
             while (!closed) {
                 val frame = WardFrames.read(input)
                 when (frame.type) {
@@ -280,7 +282,7 @@ class WardConnection(
         val body = CborCodec.decode(frame.body).asMap()
         body.long("replay")?.let { sub ->
             body.long("from")?.let { from ->
-                val active = socket ?: return
+                val active = transport ?: return
                 scope.launch {
                     runCatching {
                         sendControl(cborMap("replay" to sub.cbor(), "from" to from.cbor()))
@@ -299,29 +301,7 @@ class WardConnection(
         subscriptions.remove(sub)?.close()
     }
 
-    private fun parseTarget(raw: String): Pair<String, Int> {
-        val trimmed = raw.trim()
-        val withoutScheme = when {
-            trimmed.startsWith("tcp://", ignoreCase = true) -> trimmed.substring(6)
-            trimmed.startsWith("http://", ignoreCase = true) -> trimmed.substring(7)
-            trimmed.startsWith("https://", ignoreCase = true) ->
-                throw WardConnectionException("ward speaks its own TLS/QUIC protocol, not HTTPS; use tcp://host:port over adb reverse")
-            trimmed.startsWith("quic://", ignoreCase = true) ->
-                throw WardConnectionException("QUIC pairing is not wired into this build; use the loopback TCP door")
-            trimmed.startsWith("unix://", ignoreCase = true) ->
-                throw WardConnectionException("an Android app cannot open a Unix socket; use the loopback TCP door")
-            else -> trimmed
-        }.trimEnd('/')
-        val colon = withoutScheme.lastIndexOf(':')
-        if (colon <= 0 || colon == withoutScheme.length - 1) {
-            throw WardConnectionException("ward address must be host:port (or tcp://host:port)")
-        }
-        val host = withoutScheme.substring(0, colon).trim('[', ']')
-        val port = withoutScheme.substring(colon + 1).toIntOrNull()
-            ?: throw WardConnectionException("ward address has no usable port")
-        if (port !in 1..65535) throw WardConnectionException("ward address port is out of range")
-        return host to port
-    }
+
 }
 
 class WardSubscription internal constructor(

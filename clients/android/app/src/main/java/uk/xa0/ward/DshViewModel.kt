@@ -30,6 +30,7 @@ import uk.xa0.ward.data.DshConfig
 import uk.xa0.ward.data.DraftStore
 import uk.xa0.ward.data.ThemeMode
 import uk.xa0.ward.model.AccountBalance
+import uk.xa0.ward.proto.WardPairing
 import uk.xa0.ward.model.DrawerGrouping
 import uk.xa0.ward.model.ApprovalAnswer
 import uk.xa0.ward.diag.ScrollDiag
@@ -285,6 +286,8 @@ data class SessionItem(
      * `next`, which is what the *next* turn will run.
      */
     val lastUsedModel: ModelRef? = null,
+    /** The preset this session actually runs, when the host served one. */
+    val agentPreset: String? = null,
 )
 
 /**
@@ -468,6 +471,7 @@ data class GoalState(
     val phase: String,
     val maxRounds: Int?,
     val roundsStarted: Int = 0,
+    val blockedReason: String? = null,
 ) {
     val visible: Boolean get() = phase != "complete" && objective.isNotBlank()
 }
@@ -719,6 +723,9 @@ data class PendingQuestionSet(
  */
 data class DraftRestore(val text: String, val nonce: Long)
 
+/** Ward's own two settings keys; not DSH's namespaced settings document. */
+data class WardHostSettings(val maxRuns: Int = 8, val debug: Boolean = false)
+
 data class UiState(
     val phase: AppPhase = AppPhase.LOADING,
     val busy: Boolean = false,
@@ -738,6 +745,10 @@ data class UiState(
      */
     val startupStep: StartupStep? = StartupStep.FINDING_HOST,
     val error: String? = null,
+    /** A phone enrolment is in flight. */
+    val quicPairing: Boolean = false,
+    /** The enrolment's own refusal, kept apart from the connect banner. */
+    val quicPairError: String? = null,
     /**
      * The banner's failure is an expired/refused session rather than a failed
      * action, so it offers a way out ("Sign in again") instead of only Dismiss.
@@ -1107,6 +1118,12 @@ data class UiState(
     val hostSettingsLoading: Boolean = false,
     /** The read's own failure wording, or the reason there was no read. */
     val hostSettingsError: String? = null,
+    /** Ward's host settings document, read on the Settings sheet's open. */
+    val wardSettings: WardHostSettings? = null,
+    val wardSettingsLoading: Boolean = false,
+    val wardSettingsError: String? = null,
+    /** `max_runs` or `debug` while its write is in flight. */
+    val wardSettingSaving: String? = null,
     /**
      * The running-turn label the host's force-compact plugin publishes, or null
      * when it should be the app's own "Deep diving...".
@@ -1370,6 +1387,7 @@ class DshViewModel(application: Application) : AndroidViewModel(application) {
 
     /** The one in-flight `settings/describe`; the General panel and the tab both read it. */
     private var settingsJob: Job? = null
+    private var wardSettingsJob: Job? = null
 
     /** The one in-flight `pluginManager/listBundles`, from the sheet's open or a toggle. */
     private var pluginsJob: Job? = null
@@ -3529,6 +3547,51 @@ class DshViewModel(application: Application) : AndroidViewModel(application) {
 
     // ------------------------------------------------------------------ setup
 
+    /**
+     * Enrol this phone over the daemon's local TCP door, then switch the saved
+     * route to the QUIC endpoint that `device.pair` handed back.
+     *
+     * The entered address is the bootstrap, not the final address: `device.pair`
+     * is local-only by design, and the QUIC endpoint it returns is where the
+     * issued certificate is actually used.
+     */
+    fun pairForQuic(tcpAddress: String) {
+        if (_ui.value.quicPairing) return
+        val bootstrap = tcpAddress.trim()
+        if (bootstrap.isEmpty()) {
+            _ui.value = _ui.value.copy(quicPairError = "Enter the daemon's TCP address first.")
+            return
+        }
+        if (bootstrap.startsWith("quic://", ignoreCase = true)) {
+            _ui.value = _ui.value.copy(
+                quicPairError = "Pair over the TCP address; the QUIC endpoint is chosen by the daemon.",
+            )
+            return
+        }
+        _ui.value = _ui.value.copy(quicPairing = true, quicPairError = null)
+        viewModelScope.launch {
+            runCatching { WardPairing.pair(bootstrap) }
+                .onSuccess { paired ->
+                    val config = configStore.load().copy(
+                        baseUrl = paired.quicAddress,
+                        quicPin = paired.pin,
+                        quicCertificatePem = paired.certificatePem,
+                        quicPrivateKeyPem = paired.privateKeyPem,
+                    )
+                    configStore.save(config)
+                    _ui.value = _ui.value.copy(quicPairing = false, quicPairError = null)
+                    applySetupConfig(config)
+                }
+                .onFailure { error ->
+                    _ui.value = _ui.value.copy(
+                        quicPairing = false,
+                        quicPairError = error.message?.takeIf { it.isNotBlank() }
+                            ?: "The phone could not be paired.",
+                    )
+                }
+        }
+    }
+
     fun saveSetup(baseUrl: String, lanUrl: String, username: String, password: String, manualCookie: String) {
         // The authority behind the setup screen's own latch: a connect already in
         // flight owns this action, and a second one would post the same
@@ -3729,6 +3792,65 @@ class DshViewModel(application: Application) : AndroidViewModel(application) {
      * the document already held, because the write path is CAS-guarded — a stale
      * revision is refused by the host and re-read here rather than applied blind.
      */
+    fun loadWardSettings() {
+        if (wardSettingsJob?.isActive == true) return
+        wardSettingsJob = viewModelScope.launch {
+            _ui.value = _ui.value.copy(wardSettingsLoading = true, wardSettingsError = null)
+            runCatching { client.wardSettings() }
+                .onSuccess { value ->
+                    _ui.value = _ui.value.copy(
+                        wardSettings = WardHostSettings(
+                            maxRuns = value.optInt("max_runs", 8).coerceIn(1, 64),
+                            debug = value.optBoolean("debug", false),
+                        ),
+                        wardSettingsLoading = false,
+                    )
+                }
+                .onFailure { error ->
+                    _ui.value = _ui.value.copy(
+                        wardSettingsLoading = false,
+                        wardSettingsError = error.message ?: "Could not read Ward's settings.",
+                    )
+                }
+        }
+    }
+
+    fun writeWardSetting(key: String, value: String) {
+        if (_ui.value.wardSettingSaving != null) return
+        _ui.value = _ui.value.copy(wardSettingSaving = key, wardSettingsError = null)
+        viewModelScope.launch {
+            runCatching { client.setWardSetting(key, value) }
+                .onSuccess {
+                    // settings.set answers the accepted key/value, not the whole
+                    // document; re-read so the row shows what the daemon stored.
+                    val fresh = runCatching { client.wardSettings() }.getOrNull()
+                    val next = if (fresh != null) {
+                        WardHostSettings(
+                            maxRuns = fresh.optInt("max_runs", _ui.value.wardSettings?.maxRuns ?: 8)
+                                .coerceIn(1, 64),
+                            debug = fresh.optBoolean("debug", _ui.value.wardSettings?.debug ?: false),
+                        )
+                    } else {
+                        val current = _ui.value.wardSettings ?: WardHostSettings()
+                        when (key) {
+                            "max_runs" -> current.copy(
+                                maxRuns = value.toIntOrNull()?.coerceIn(1, 64) ?: current.maxRuns,
+                            )
+                            "debug" -> current.copy(debug = value == "true")
+                            else -> current
+                        }
+                    }
+                    _ui.value = _ui.value.copy(wardSettings = next, wardSettingSaving = null)
+                }
+                .onFailure { error ->
+                    _ui.value = _ui.value.copy(
+                        wardSettingSaving = null,
+                        wardSettingsError = error.message ?: "Ward refused the change.",
+                    )
+                }
+        }
+    }
+
     fun loadHostSettings() {
         if (settingsJob?.isActive == true) return
         settingsJob = viewModelScope.launch {
@@ -6057,7 +6179,7 @@ class DshViewModel(application: Application) : AndroidViewModel(application) {
                 if (event !is StreamEvent.Item) return@collect
                 val value = event.value
                 when (value.str("type")) {
-                    "baseline" -> {
+                    "baseline", "replace" -> {
                         val payload = value.obj("value") ?: JSONObject()
                         val items = payload.arr("items") ?: JSONArray()
                         val archived = toStringSet(payload.arr("archivedSessionIds"))
@@ -6684,6 +6806,7 @@ class DshViewModel(application: Application) : AndroidViewModel(application) {
             subagentMode = subagent?.second?.takeIf { it.isNotBlank() },
             usage = parseSessionStats(projections),
             lastUsedModel = parseHostModelSelection(projections.obj("modelSelection"))?.lastUsed,
+            agentPreset = item.str("agentPreset").takeIf { it.isNotBlank() },
         ).withCatalog(held)
     }
 
@@ -8600,6 +8723,9 @@ class DshViewModel(application: Application) : AndroidViewModel(application) {
                     phase = snapshot.str("phase"),
                     maxRounds = if (snapshot.has("maxGoalRounds")) snapshot.int("maxGoalRounds") else null,
                     roundsStarted = projection.int("roundsStarted"),
+                    blockedReason = snapshot.obj("blockedReason")
+                        ?.let { it.str("message").ifBlank { it.str("code") } }
+                        ?.takeIf { it.isNotBlank() },
                 )
             }
         } else {

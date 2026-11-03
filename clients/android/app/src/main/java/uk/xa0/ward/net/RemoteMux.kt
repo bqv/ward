@@ -472,11 +472,23 @@ class RemoteMux(
                 }
             }
             val rows = JSONArray()
+            val registry = client.workspaces.entries()
+            val placed = HashSet<String>()
+            registry.forEach { entry ->
+                placed += entry.path
+                rows.put(JSONObject()
+                    .put("workspaceId", entry.path)
+                    .put("path", entry.path)
+                    .put("title", entry.title)
+                    .put("sessionIds", JSONArray(groups[entry.path].orEmpty())))
+            }
             groups.forEach { (path, ids) ->
+                if (path in placed) return@forEach
                 rows.put(JSONObject()
                     .put("workspaceId", path)
                     .put("path", path)
-                    .put("title", path.trimEnd('/').substringAfterLast('/').ifEmpty { path })
+                    .put("title", client.workspaces.titleOf(path)
+                        ?: path.trimEnd('/').substringAfterLast('/').ifEmpty { path })
                     .put("sessionIds", JSONArray(ids)))
             }
             val value = JSONObject()

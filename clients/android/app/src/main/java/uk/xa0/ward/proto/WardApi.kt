@@ -309,6 +309,17 @@ class WardApi(private val connection: WardConnection) {
         connection.call("module.list", Cbor.Map(emptyList())).array("modules")?.items
             ?.mapNotNull { it as? Cbor.Map }.orEmpty()
 
+    suspend fun settingsGet(): Cbor = connection.call("settings.get", cborMap())
+
+    suspend fun settingsSet(key: String, value: String): Cbor =
+        connection.call("settings.set", cborMap("key" to key.cbor(), "value" to value.cbor()))
+
+    suspend fun enableModule(name: String, enabled: Boolean): Cbor =
+        connection.call(
+            "module.enable",
+            cborMap("name" to name.cbor(), "enabled" to enabled.cbor()),
+        )
+
     suspend fun reloadModule(name: String): Cbor =
         connection.call("module.reload", cborMap("name" to name.cbor()))
 

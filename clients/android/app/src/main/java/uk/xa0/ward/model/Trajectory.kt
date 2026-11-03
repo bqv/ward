@@ -393,7 +393,7 @@ private val WHITESPACE = Regex("\\s+")
 /**
  * Folds the transcript rows into the trajectory ledger.
  *
- * @param entries the reducer's seq-ascending snapshot
+ * @param entries the reducer's display-ordered snapshot
  * @param endedTurns turns the host has closed; the newest open turn is marked
  *   so the screen can show it as still running
  * @param toolParents the wire's PTC parent links
@@ -407,10 +407,10 @@ fun buildTrajectory(
     toolParents: Map<String, String> = emptyMap(),
 ): TrajectoryModel {
     if (entries.isEmpty()) return TrajectoryModel(endedTurns = endedTurns)
-    val ordered = entries.sortedBy { it.seq }
+    val ordered = entries
     val owners = resolveTurnOwners(ordered)
 
-    // Sections are created on first touch, and the rows arrive seq-ascending, so
+    // Sections are created on first touch, and the rows arrive in display order, so
     // encounter order is already the web's `firstCellIndex` order.
     val sections = LinkedHashMap<String, TurnBuilder>()
     var index = 0

@@ -6,7 +6,16 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
+import androidx.compose.foundation.layout.Row
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
 import java.net.URI
+import uk.xa0.ward.ui.theme.DshTheme
+import uk.xa0.ward.ui.theme.DshType
 
 fun isWebLink(url: String): Boolean {
     val candidate = url.trim()
@@ -19,13 +28,64 @@ fun isWebLink(url: String): Boolean {
     return !parsed.host.isNullOrBlank()
 }
 
+private val pendingLink = androidx.compose.runtime.mutableStateOf<String?>(null)
+
 fun openLink(context: Context, url: String) {
     if (isWebLink(url)) {
-        val launched = launch(context, InternalBrowserActivity.intent(context, url))
-        if (!launched) unavailable(context, url)
+        pendingLink.value = url.trim()
         return
     }
     openExternally(context, url)
+}
+
+@Composable
+fun LinkChoiceHost() {
+    val url = pendingLink.value ?: return
+    val context = LocalContext.current
+    val colors = DshTheme.colors
+    AlertDialog(
+        onDismissRequest = { pendingLink.value = null },
+        containerColor = colors.bgBase,
+        title = {
+            Text("Open link", color = colors.labelPrimary, style = DshType.titleMedium)
+        },
+        text = {
+            Text(
+                text = url,
+                style = DshType.bodyMedium,
+                color = colors.labelSecondary,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    pendingLink.value = null
+                    if (!launch(context, InternalBrowserActivity.intent(context, url))) {
+                        unavailable(context, url)
+                    }
+                },
+            ) {
+                Text("In app", color = colors.accent)
+            }
+        },
+        dismissButton = {
+            Row {
+                TextButton(
+                    onClick = {
+                        pendingLink.value = null
+                        openExternally(context, url)
+                    },
+                ) {
+                    Text("External app", color = colors.labelSecondary)
+                }
+                TextButton(onClick = { pendingLink.value = null }) {
+                    Text("Cancel", color = colors.labelSecondary)
+                }
+            }
+        },
+    )
 }
 
 fun openExternally(context: Context, url: String) {

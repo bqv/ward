@@ -73,7 +73,7 @@ sealed interface DisplayRow {
  * LazyColumn key, which throws. Assigning every row to exactly one turn keeps a
  * turn to a single span and a single summary.
  *
- * `entries` must be seq-ascending. [DisplayRow.Live] is appended last because the
+ * `entries` must be in display order. [DisplayRow.Live] is appended last because the
  * transcript renders with `reverseLayout`, where last means the visual bottom.
  */
 fun buildDisplayRows(

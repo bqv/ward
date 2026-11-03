@@ -54,7 +54,20 @@ adb -s <serial> reverse tcp:45872 tcp:45872
 On first launch the setup screen defaults to `tcp://127.0.0.1:45872`; a bare
 `host:port` is accepted. The daemon's own `ready` line and its TCP listener are
 the authority: there is no login and no cookie because authentication is the
-transport's `SO_PEERCRED` check (or, for QUIC later, a client certificate).
+transport's `SO_PEERCRED` check. The setup screen also offers **Pair this phone
+for QUIC**: it calls `device.pair` over that TCP bootstrap, generates a PKCS#10
+request, redeems the token over QUIC, and saves the endpoint, pin, certificate
+and key. The QUIC endpoint in `device.pair` must be reachable from the phone,
+so run the daemon with a LAN bind and an explicit advertisement, pinning the
+port:
+
+```sh
+WARD_QUIC_BIND=0.0.0.0:45873 WARD_QUIC_ADVERTISE=192.168.1.110:45873 \
+  ./out/ward up ...
+```
+
+An unpaired peer gets nowhere: `device.enrol` is the only method allowed before
+the client certificate exists.
 
 ## The protocol layer
 
@@ -64,7 +77,9 @@ transport's `SO_PEERCRED` check (or, for QUIC later, a client certificate).
 |---|---|
 | `Cbor.kt` | the documented CBOR subset, definite lengths and the 64-bit unsigned form ward's own encoder emits |
 | `WardProtocol.kt` | the 22-byte little-endian frame, event/session objects, errors and limits |
-| `WardConnection.kt` | socket, `hello`/`welcome`, one reader, request-id ledger, `session.resume` subscriptions, replay and reconnect |
+| `WardConnection.kt` | `hello`/`welcome`, one reader, request-id ledger, `session.resume` subscriptions, replay and reconnect |
+| `WardTransport.kt` | the TCP byte stream and the pinned Kwik QUIC stream; certificate pin and client certificate |
+| `WardPairing.kt` | `device.pair`, PKCS#10 CSR generation, `device.enrol` and the saved pair |
 | `WardApi.kt` | every method in the frozen table, from `session.*` to `device.*`, with ward's parameter names |
 
 `net/DshClient.kt` and `net/RemoteMux.kt` keep the surface the copied screens
@@ -100,9 +115,9 @@ indefinite forms are refused on decode.
   `session.file_read`, and windows binary reads through `session.file_read_blob`;
   the byte windows are reassembled into the multipart shape the copied panel
   already parses;
-- workspaces: ward has no registry, so the drawer groups the roster by each
-  session's `cwd` — one client-owned Workspace per directory, refreshed as the
-  roster changes;
+- workspaces: ward has no host registry, so the client owns a persisted registry
+  (create, rename, delete, manual order) and derives membership from each
+  session's `cwd`; an empty registered Workspace survives a restart;
 - jobs: `job.list` is polled into the copied roster and `job.kill` addresses the
   turn. Expanding a row calls `job.follow {id, from}`: the client advances from
   the returned `next`, treats `dropped` and a cursor behind the first chunk as a
@@ -112,8 +127,12 @@ indefinite forms are refused on decode.
   expression and next fire time; `schedule.delete` removes one;
 - goals: durable `goal.set`/`goal.cleared` events become the goal projection the
   copied composure already draws;
-- modules and plugins: `module.list` is the bundle list, with a read-only switch
-  because ward reloads the registry as one set; `module.reload` is available;
+- modules and plugins: `module.list` is the bundle list; `module.enable` is the
+  writable per-module switch, and a disabled module refuses a new turn with the
+  daemon's own message;
+- settings: Ward's `settings.get`/`settings.set` document is a **Ward host**
+  section with `max_runs` (1–64) and `debug`; it is separate from the DSH
+  namespaced document the copied General rows read;
 - queue: the dock reads `session.queue {id}` from the daemon, so a queued prompt
   sent by another client is visible here too. The client keeps only its own
   submit ids to retire optimistic echoes; it no longer mirrors queue content;
@@ -132,6 +151,14 @@ indefinite forms are refused on decode.
   left at zero rather than invented;
 - subagents: `subagent.updated` records the parent link and publishes the child
   row before the next roster pull;
+- terminal selection: long-press starts a cell selection, dragging extends it,
+  and Copy puts the selected grid text on the clipboard; the Shell and Htop tabs
+  share the surface;
+- Htop: a built-in tab opens (or adopts) one `ward-htop-` terminal in the open
+  session and sends `exec htop`; Ward has no host-shell seat, so this runs in the
+  session the reader is looking at;
+- links: a web-link tap raises one app-wide chooser — In app, External app,
+  Cancel; custom-scheme links still go straight to the system;
 - live status: turn boundaries publish the same `api-session/status` fact the
   copied drawer and composer already consume.
 
@@ -141,14 +168,12 @@ These are the differences a reader will still notice against the DSH client.
 They are the report sent to the coordinating session, kept here so the
 repository and the message cannot drift.
 
-- **QUIC and device pairing are not in the app.** `device.pair`/`enrol` are
-  wrapped, but the phone has no QUIC client, no CSR generation, no client
-  certificate and no QR surface. The loopback TCP door over `adb reverse` is the
-  supported path.
-- **A Unix socket cannot be opened from an Android app.** The daemon's strongest
-  `SO_PEERCRED` door is a desktop/local path; the phone uses TCP.
-- **No host Workspace registry.** The drawer's groups are derived from `cwd`, so
-  membership and manual ordering are client-owned rather than host state.
+- **Workspaces are client-owned.** The registry survives a restart on this phone,
+  but it is not host state: another device does not see the same titles, empty
+  Workspaces or manual order.
+- **The QUIC endpoint must be reachable.** Pairing returns the daemon's advertised
+  endpoint and pin; if the daemon advertises `127.0.0.1`, the phone cannot use it
+  and must fall back to the TCP door over `adb reverse`.
 - **There is no Host shell seat.** Ward has no archived, unconfined host-shell
   session to bootstrap; the session seat is the only terminal seat offered.
 - **Job overflow through a real turn is unmeasured.** `job.follow` is wired and
@@ -156,13 +181,14 @@ repository and the message cannot drift.
   job and on the freed-run error. No gate drives the ring past 64 KiB through the
   daemon because the fixture provider does not stream that much, so the client
   treats `dropped` as a gap rather than claiming the overflow path is proven.
-- **Ward has no settings document or writable plugin switch.** `settings/describe`
-  answers an empty document and the plugin switch is read-only; module reload is
-  the one management action offered. The slash-command catalogue is supplied by
-  the client for the commands ward's `skills` guest serves.
-- **Binary reads are bounded.** `session.file_read_blob` caps one call at 1 MiB
-  and 4 MiB total; the app reassembles multiple windows, but a larger file is
-  refused by the daemon rather than truncated.
+- **Ward's settings document is not DSH's.** It carries `max_runs` and `debug`,
+  so the copied General rows still show their local fallbacks; Ward's own section
+  is the only host-backed settings surface.
+- **Binary reads are bounded per response by the daemon.** `session.file_read_blob`
+  caps one call at 1 MiB because a CBOR response has to fit; the offset ceiling
+  is now 1 GiB, so the client's 2 MiB windows can walk a whole large file. The
+  app refuses above 1 GiB and buffers a download in memory, which is the next
+  place to add a file-backed sink if a real file that size appears.
 
 ## Device evidence
 
@@ -178,8 +204,14 @@ Built and installed on the disposable handset `91e25acb`, with
   and the tool result;
 - the Files panel listed `/tmp` through `session.file_list` and read file text
   and byte windows through the file methods;
-- the drawer grouped four sessions under one `tmp` Workspace, derived from the
-  roster's cwd;
+- the drawer grouped four sessions under one `tmp` Workspace; the persistent
+  registry's title/order/empty-Workspace path is covered by unit evidence, not a
+  device capture yet;
+- the Htop tab opened (and re-adopted) a `ward-htop-` PTY in the smoke session and
+  painted live `htop` output;
+- the Settings sheet drew a Ward host section and the plugin list showed its
+  per-module switch; the four-preset access chip and a write approval were
+  exercised earlier;
 - the composer's stat pills read `2 turns · 2 steps` from `stats.session`;
 - a `/write` parked in a session the app was not following raised its card from
   `approval.list`; **Allow once** resolved it and the turn continued, which is
@@ -194,5 +226,5 @@ The protocol gates live in
 bytes, frame round-trip, CBOR subset and refusals) and
 `app/src/test/java/uk/xa0/ward/proto/WardLiveTest.kt` (create, list, resume,
 rename, archive, file read/list/blob, the four-preset `policy.list`, the
-daemon-owned `session.queue` and `job.follow` on a parked job and a freed run
-against a live daemon).
+daemon-owned `session.queue`, `job.follow` on a parked job and a freed run, and
+phone pairing followed by a pinned QUIC connection against a live daemon).

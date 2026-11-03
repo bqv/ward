@@ -51,6 +51,7 @@ import uk.xa0.ward.ContextBreakdown
 import uk.xa0.ward.ModelOption
 import uk.xa0.ward.PermissionOption
 import uk.xa0.ward.SessionItem
+import uk.xa0.ward.WardHostSettings
 import uk.xa0.ward.WorkspaceItem
 import uk.xa0.ward.extension.runtime.ExtensionsUiState
 import uk.xa0.ward.extension.runtime.InboxExtension
@@ -107,6 +108,12 @@ fun SettingsSheet(
     settingsSaving: String? = null,
     settingsWriteError: String? = null,
     onSettingWrite: ((String, String, String) -> Unit)? = null,
+    /** Ward's own `{max_runs, debug}` document, separate from DSH's namespaced one. */
+    wardSettings: WardHostSettings? = null,
+    wardSettingsLoading: Boolean = false,
+    wardSettingsError: String? = null,
+    wardSettingSaving: String? = null,
+    onWardSettingWrite: ((String, String) -> Unit)? = null,
     /** The profile's plugin bundles and their switches; read when the sheet opens. */
     plugins: List<PluginBundle> = emptyList(),
     pluginsLoading: Boolean = false,
@@ -163,6 +170,11 @@ fun SettingsSheet(
             settingsSaving = settingsSaving,
             settingsWriteError = settingsWriteError,
             onSettingWrite = onSettingWrite,
+            wardSettings = wardSettings,
+            wardSettingsLoading = wardSettingsLoading,
+            wardSettingsError = wardSettingsError,
+            wardSettingSaving = wardSettingSaving,
+            onWardSettingWrite = onWardSettingWrite,
             plugins = plugins,
             pluginsLoading = pluginsLoading,
             pluginsError = pluginsError,

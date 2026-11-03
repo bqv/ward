@@ -60,7 +60,11 @@ class TranscriptReducer {
     /** Synthetic keys for optimistic rows: above every real seq, so they sort last. */
     private var pendingSeq = Int.MAX_VALUE - 1024
 
-    private var localSeq = Int.MAX_VALUE - 16
+    private val localNotices = mutableListOf<ChatEntry.Notice>()
+
+    private var localSeq = 0
+
+    private var localOrder = 0L
 
     /** Turns the host has closed with `turn/end`; only these may fold. */
     private val endedTurns = mutableSetOf<Int>()
@@ -172,7 +176,9 @@ class TranscriptReducer {
         liveBlocks.clear()
         pending.clear()
         pendingSeq = Int.MAX_VALUE - 1024
-        localSeq = Int.MAX_VALUE - 16
+        localNotices.clear()
+        localSeq = 0
+        localOrder = 0L
         endedTurns.clear()
         turnStarts.clear()
         turnEnds.clear()
@@ -299,7 +305,23 @@ class TranscriptReducer {
         }
     }
 
-    fun snapshot(): List<ChatEntry> = entries.values.toList() + pending.values
+    fun snapshot(): List<ChatEntry> {
+        val notices = localNotices.sortedWith(compareBy({ it.localAnchorSeq }, { it.localOrder }))
+        val rows = ArrayList<ChatEntry>(entries.size + notices.size + pending.size)
+        var notice = 0
+        for (entry in entries.values) {
+            while (notice < notices.size && notices[notice].localAnchorSeq < entry.seq) {
+                rows += notices[notice++]
+            }
+            rows += entry
+            while (notice < notices.size && notices[notice].localAnchorSeq == entry.seq) {
+                rows += notices[notice++]
+            }
+        }
+        while (notice < notices.size) rows += notices[notice++]
+        rows += pending.values
+        return rows
+    }
 
     fun header(): SessionHeader? = header
 
@@ -320,7 +342,7 @@ class TranscriptReducer {
     fun throughSeq(): Int = cursor
 
     /** Oldest durable seq held; the `beforeSeq` of the next back-fill. */
-    fun oldestSeq(): Int? = entries.firstKey().takeIf { it < LOCAL_NOTICE_SEQ_FLOOR }
+    fun oldestSeq(): Int? = entries.firstEntry()?.key
 
     /** The PTC parent links seen so far, for `buildToolCallTree`. */
     fun toolParents(): Map<String, String> = ptcParents.links()
@@ -381,13 +403,16 @@ class TranscriptReducer {
     }
 
     fun addLocalNotice(kind: String, text: String, detail: String?, time: Long) {
-        localSeq += 1
-        entries[localSeq] = ChatEntry.Notice(
+        localSeq -= 1
+        localOrder += 1
+        localNotices += ChatEntry.Notice(
             seq = localSeq,
             kind = kind,
             text = text,
             detail = detail,
             time = time,
+            localAnchorSeq = maxOf(cursor, entries.lastEntry()?.key ?: 0),
+            localOrder = localOrder,
         )
     }
 
@@ -1203,5 +1228,3 @@ fun eventLabel(type: String): String {
  */
 private val JOB_NAME = Regex("background job\\s+([A-Za-z0-9_-]+)")
 private val JOB_EXIT = Regex("exit code:\\s*(\\d+)")
-
-private const val LOCAL_NOTICE_SEQ_FLOOR: Int = Int.MAX_VALUE - 1_000

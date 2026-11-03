@@ -6,6 +6,7 @@ package uk.xa0.ward.net
 
 import org.json.JSONArray
 import org.json.JSONObject
+import uk.xa0.ward.data.LocalWorkspaceStore
 import uk.xa0.ward.proto.Cbor
 import uk.xa0.ward.proto.WardApi
 import uk.xa0.ward.proto.WardConnection
@@ -24,7 +25,10 @@ import java.util.concurrent.ConcurrentHashMap
  * ward does not serve answers an empty shape or a named refusal rather than
  * inventing state.
  */
-class WardBridge(private val connection: WardConnection) {
+class WardBridge(
+    private val connection: WardConnection,
+    private val workspaces: LocalWorkspaceStore? = null,
+) {
     private val api = WardApi(connection)
 
     private data class ModelRoute(val provider: String, val model: String, val catalogId: String)
@@ -94,6 +98,40 @@ class WardBridge(private val connection: WardConnection) {
         queuedRpcIds.getOrPut(sessionId) { mutableListOf() } += text to rpcId
     }
 
+    suspend fun wardSettings(): JSONObject = (api.settingsGet().toJson() as? JSONObject) ?: JSONObject()
+
+    suspend fun setWardSetting(key: String, value: String): JSONObject =
+        (api.settingsSet(key, value).toJson() as? JSONObject) ?: JSONObject()
+
+    private fun createWorkspace(request: JSONObject): JSONObject {
+        val path = request.optString("path")
+        val entry = workspaces?.add(path) ?: LocalWorkspaceStore.Entry("", "")
+        return JSONObject()
+            .put("created", entry.path.isNotEmpty())
+            .put("workspace", JSONObject()
+                .put("workspaceId", entry.path)
+                .put("path", entry.path)
+                .put("title", entry.title))
+    }
+
+    private fun renameWorkspace(request: JSONObject): JSONObject {
+        val id = request.optString("workspaceId")
+        workspaces?.rename(id, request.optString("title"))
+        return JSONObject().put("workspaceId", id).put("title", request.optString("title"))
+    }
+
+    private fun deleteWorkspace(request: JSONObject): JSONObject {
+        val id = request.optString("workspaceId")
+        workspaces?.delete(id)
+        return JSONObject().put("workspaceId", id).put("deleted", true)
+    }
+
+    private fun moveWorkspace(request: JSONObject): JSONObject {
+        val before = request.optString("beforeWorkspaceId").takeIf { it.isNotEmpty() }
+        val ids = workspaces?.move(request.optString("workspaceId"), before).orEmpty()
+        return JSONObject().put("workspaceIds", JSONArray(ids))
+    }
+
     suspend fun call(method: String, args: JSONObject): Any? {
         val request = args.optJSONObject("request")
             ?: args.optJSONObject("_request")
@@ -161,6 +199,10 @@ class WardBridge(private val connection: WardConnection) {
 
             "session/selectModel" -> selectModel(request)
 
+            "workspace/create" -> createWorkspace(request)
+            "workspace/rename" -> renameWorkspace(request)
+            "workspace/delete" -> deleteWorkspace(request)
+            "workspace/insertBefore" -> moveWorkspace(request)
             "workspace/archiveSession" -> {
                 val id = request.optString("sessionId").ifEmpty { request.optString("id") }
                 JSONObject().put("sessionId", api.archive(id, true).id)
@@ -272,10 +314,10 @@ class WardBridge(private val connection: WardConnection) {
             "pluginManager/listBundles" -> JSONArray(api.listModules().map { moduleRow(it) })
             "pluginManager/setBundleEnabled" -> {
                 val name = request.optString("name")
-                if (request.optBoolean("enabled", false) && name.isNotEmpty()) {
-                    api.reloadModule(name).toJson()
-                } else {
+                if (name.isEmpty()) {
                     JSONObject()
+                } else {
+                    api.enableModule(name, request.optBoolean("enabled", false)).toJson()
                 }
             }
             "commands/list" -> wardCommands()
@@ -605,14 +647,14 @@ class WardBridge(private val connection: WardConnection) {
     private fun moduleRow(item: Cbor.Map): JSONObject {
         val name = item.text("name").orEmpty()
         val valid = item.bool("valid") != false
+        val enabled = item.bool("enabled") ?: valid
         val row = JSONObject()
             .put("name", name)
             .put("version", item.text("version").orEmpty())
             .put("meta", JSONObject().put("title", name))
-            .put("enabled", valid)
+            .put("enabled", enabled)
             .put("installed", true)
             .put("optional", false)
-            .put("readOnlyReason", "ward reloads modules as one registry; there is no per-module switch")
         if (!valid) {
             row.put("error", JSONObject()
                 .put("code", "invalid")

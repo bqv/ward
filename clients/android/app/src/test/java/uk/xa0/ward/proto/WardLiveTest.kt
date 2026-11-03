@@ -126,4 +126,47 @@ class WardLiveTest {
     }
 
 
+    @Test
+    fun `a paired phone reaches the daemon over quic`() = runBlocking {
+        val endpoint = System.getenv("WARD_TEST_ENDPOINT") ?: return@runBlocking
+        if (!endpoint.startsWith("tcp://")) return@runBlocking
+        val paired = WardPairing.pair(endpoint)
+        val quic = WardConnection(
+            paired.quicAddress,
+            quicPin = paired.pin,
+            quicCertificatePem = paired.certificatePem,
+            quicPrivateKeyPem = paired.privateKeyPem,
+        )
+        try {
+            quic.connect()
+            assertTrue("the enrolled certificate must be accepted", quic.isOpen())
+            assertTrue("the QUIC welcome must name the daemon", quic.serverName.isNotEmpty())
+            WardApi(quic).listSessions()
+        } finally {
+            quic.close()
+        }
+    }
+
+
+    @Test
+    fun `ward settings get and set reach the daemon`() = runBlocking {
+        val endpoint = System.getenv("WARD_TEST_ENDPOINT") ?: return@runBlocking
+        val connection = WardConnection(endpoint)
+        connection.connect()
+        val api = WardApi(connection)
+        try {
+            val before = api.settingsGet()
+            val maxRuns = before.long("max_runs")
+            assertTrue("settings.get must carry max_runs", maxRuns != null && maxRuns in 1L..64L)
+            assertTrue("settings.get must carry debug", before.bool("debug") != null)
+            val set = api.settingsSet("max_runs", maxRuns.toString())
+            assertEquals("max_runs", set.text("key"))
+            assertEquals(maxRuns.toString(), set.text("value"))
+            assertEquals(maxRuns, api.settingsGet().long("max_runs"))
+        } finally {
+            connection.close()
+        }
+    }
+
+
 }

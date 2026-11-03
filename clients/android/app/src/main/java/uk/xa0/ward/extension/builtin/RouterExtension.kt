@@ -68,6 +68,7 @@ object BuiltInExtensions {
     val all: List<DshExtension> = listOf(
         UsageExtension(),
         RouterExtension(),
+        HtopExtension(),
     )
 }
 

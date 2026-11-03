@@ -3,6 +3,8 @@ package uk.xa0.ward.ui
 import android.util.Log
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -36,6 +38,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextMeasurer
@@ -51,6 +54,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.runtime.collectAsState
+import kotlinx.coroutines.withTimeoutOrNull
 import uk.xa0.ward.R
 import uk.xa0.ward.DshViewModel
 import uk.xa0.ward.TerminalPhase
@@ -72,8 +76,10 @@ import uk.xa0.ward.term.TerminalIssue
 import uk.xa0.ward.term.TerminalKey
 import uk.xa0.ward.term.TerminalKeys
 import uk.xa0.ward.term.TerminalSeat
+import uk.xa0.ward.term.TerminalSelection
 import uk.xa0.ward.term.TermWidth
 import uk.xa0.ward.term.gridCells
+import uk.xa0.ward.term.selectedText
 import uk.xa0.ward.term.terminalIssueFact
 import uk.xa0.ward.ui.theme.DshRadius
 import uk.xa0.ward.ui.theme.DshSpacing
@@ -295,7 +301,7 @@ private fun terminalChipLabel(item: TerminalInfo, screenTitle: String): String {
 }
 
 @Composable
-private fun BarAction(label: String, onClick: () -> Unit, enabled: Boolean = true) {
+internal fun BarAction(label: String, onClick: () -> Unit, enabled: Boolean = true) {
     val colors = DshTheme.colors
     Text(
         text = label,
@@ -403,7 +409,7 @@ private fun TerminalPlaceholder(state: TerminalUiState, onRetry: () -> Unit) {
  * the effect of the same two numbers the draw uses.
  */
 @Composable
-private fun TerminalSurface(
+internal fun TerminalSurface(
     emulator: TerminalEmulator,
     revision: Long,
     cellSize: TerminalCellSize,
@@ -449,11 +455,14 @@ private fun TerminalSurface(
     // hardware key or a focus loss. It is 1dp and transparent — the grid is drawn
     // behind it — but it is the view the IME actually talks to.
     var editor by remember { mutableStateOf<TerminalInputView?>(null) }
+    var selection by remember { mutableStateOf<TerminalSelection?>(null) }
+    val clipboard = LocalClipboardManager.current
 
     // Focus and keyboard on entry, and again if the view is ever rebuilt. The old
     // panel did this with a `FocusRequester` on its hidden field; a native View is
     // focused through the View API instead.
     LaunchedEffect(editor) { editor?.showKeyboard() }
+    LaunchedEffect(emulator) { selection = null }
 
     Column(Modifier.fillMaxSize()) {
         BoxWithConstraints(
@@ -514,7 +523,7 @@ private fun TerminalSurface(
                     // revision it draws. Without that key this lambda would be
                     // remembered against an unchanged emulator instance and a
                     // repainting `htop` would freeze on its first frame.
-                    onDraw = remember(emulator, revision, cellWidth, cellHeight, palette, baseStyle, measurer) {
+                    onDraw = remember(emulator, revision, cellWidth, cellHeight, palette, baseStyle, measurer, selection) {
                         {
                             drawTerminalGrid(
                                 emulator = emulator,
@@ -525,6 +534,8 @@ private fun TerminalSurface(
                                 defaultBg = colors.bgBase,
                                 cellWidth = cellWidth,
                                 cellHeight = cellHeight,
+                                selection = selection,
+                                selectionColor = colors.accent.copy(alpha = 0.28f),
                             )
                         }
                     },
@@ -557,8 +568,75 @@ private fun TerminalSurface(
                 Box(
                     Modifier
                         .fillMaxSize()
-                        .clickableNoRipple { editor?.showKeyboard() },
+                        .clickableNoRipple {
+                            selection = null
+                            editor?.showKeyboard()
+                        }
+                        .pointerInput(cellWidth, cellHeight) {
+                            fun rowAt(offset: Offset) =
+                                (offset.y / cellHeight).toInt().coerceIn(0, emulator.rows - 1)
+
+                            fun colAt(offset: Offset) =
+                                (offset.x / cellWidth).toInt().coerceIn(0, emulator.columns - 1)
+
+                            awaitEachGesture {
+                                val down = awaitFirstDown(requireUnconsumed = false)
+                                var anyPressed = true
+                                val longPressed = withTimeoutOrNull(
+                                    viewConfiguration.longPressTimeoutMillis,
+                                ) {
+                                    var eligible = true
+                                    while (eligible) {
+                                        val active = awaitPointerEvent().changes.filter { it.pressed }
+                                        anyPressed = active.isNotEmpty()
+                                        eligible = active.size == 1 && active[0].id == down.id &&
+                                            (active[0].position - down.position).getDistance() <=
+                                            viewConfiguration.touchSlop
+                                    }
+                                    false
+                                }
+                                if (longPressed == null) {
+                                    val row = rowAt(down.position)
+                                    val col = colAt(down.position)
+                                    selection = TerminalSelection(
+                                        anchorRow = row,
+                                        anchorCol = col,
+                                        focusRow = row,
+                                        focusCol = col,
+                                    )
+                                    while (true) {
+                                        val event = awaitPointerEvent()
+                                        val change = event.changes.firstOrNull { it.id == down.id }
+                                            ?: break
+                                        change.consume()
+                                        if (!change.pressed) break
+                                        selection = selection?.copy(
+                                            focusRow = rowAt(change.position),
+                                            focusCol = colAt(change.position),
+                                        )
+                                    }
+                                } else {
+                                    while (anyPressed) {
+                                        anyPressed = awaitPointerEvent().changes.any { it.pressed }
+                                    }
+                                }
+                            }
+                        },
                 )
+                if (selection?.isEmpty == false) {
+                    Row(
+                        Modifier.align(Alignment.TopEnd).padding(DshSpacing.sm),
+                        horizontalArrangement = Arrangement.spacedBy(DshSpacing.xs),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        KeyCap("Copy") {
+                            val text = emulator.selectedText(selection!!)
+                            if (text.isNotEmpty()) clipboard.setText(AnnotatedString(text))
+                            selection = null
+                        }
+                        KeyCap("\u00d7") { selection = null }
+                    }
+                }
             }
         }
         TerminalKeyRow(
@@ -658,6 +736,8 @@ private fun DrawScope.drawTerminalGrid(
     defaultBg: Color,
     cellWidth: Float,
     cellHeight: Float,
+    selection: TerminalSelection?,
+    selectionColor: Color,
 ) {
     val columns = emulator.columns
     // Exactly the rows the viewport can show, with no partial row past its bottom
@@ -693,6 +773,18 @@ private fun DrawScope.drawTerminalGrid(
                 color = runColor,
                 topLeft = Offset(runStart * cellWidth, rowTop),
                 size = Size((columns - runStart) * cellWidth, cellHeight),
+            )
+        }
+
+        if (selection != null && row >= selection.startRow && row <= selection.endRow) {
+            val first = if (row == selection.startRow) selection.startCol else 0
+            val last = if (row == selection.endRow) selection.endCol else columns - 1
+            val left = first.coerceIn(0, columns - 1)
+            val right = last.coerceIn(left, columns - 1)
+            drawRect(
+                color = selectionColor,
+                topLeft = Offset(left * cellWidth, rowTop),
+                size = Size((right - left + 1) * cellWidth, cellHeight),
             )
         }
 
