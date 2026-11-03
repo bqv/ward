@@ -98,3 +98,27 @@ are unverified findings; none were applied.
 - `src/net/http.c:44` **medium** — the unix-socket path is a process global holding a borrowed pointer.
 - `modules/policy/policy.c:31` **medium** — rule strings live in 8-byte buffers, so a longer rule yields no decision at all.
 - `modules/schedule/schedule.c:90` **medium** — `from_ms` accumulates digits into uint64 unchecked.
+
+## daemon audit, 2026-11-03
+
+Verified against `6f023cd` (4827 lines). The shipped use-after-free at `:3377` is confirmed fixed: `err` is strdup'd before
+`run_after` takes and frees it. Unverified findings, none applied:
+
+- `server.c:2497` **medium** — `job.follow` builds its window from `wd_jobring_data()` + skip, an invariant `jobring.c` no longer
+  holds after a rebase is missed; `run_free`'s indexer at `:3080` has the same assumption, so both are only correct because
+  `jobring_append` now rebases. Add `wd_jobring_copy(ring, skip, dst, take)` rather than relying on that.
+- `server.c:2502` **medium** — inverted capacity: `wd_map(3 + (pushed ? 0 : 1))` is 3 where four pairs are added, so `dropped` is
+  silently missing from every successful reply. Should be `(pushed ? 1 : 0)`.
+- `server.c:2869,2862,2910` **medium** — `run_new`'s error paths `free(run)` and lose the 64 KiB ring; `:2910` also never releases
+  the device lock, so that slot is gone for the daemon's life. Needs a fail label releasing lock, ring, then run.
+- `server.c:594` **medium** — `session.set_model` builds a payload map it never uses or frees.
+- `server.c:1866` **medium** — empty-name branch returns without freeing `name`.
+- `server.c:3156` **medium** — `run_after`'s pending branch returns without freeing `err` it owns.
+- `server.c:3392` **medium, uncertain** — a failed `wd_turn_pending` after a kind-1 pause leaves the run parked with the device lock
+  held; the branch looks unreachable today.
+- `server.c:1956,1964` **low** — a failed `cbor_array_push` breaks out and leaks the remaining elements.
+- Outside the six categories: **ten `conn_send_error` sites return without `conn_arm`** (`:1682,1695,1714,1730,1827,1835,1842,1851,
+  :1983,2191`), so the error frame can sit queued on AF_UNIX until the client sends again. And `resolve_model_id` returns the
+  first entry whose model name matches, not the only one — the commit message overstates it.
+
+Nothing found for dangling pointers, libcbor ownership, error strings outliving their frame, or iteration while mutating.
