@@ -143,6 +143,7 @@ SettingsDialog::SettingsDialog(ClientFacade *facade, QWidget *parent)
                            theme->dim(), Chrome::uiFont(theme->fontData()));
     layout->addWidget(m_pairNote);
     m_pair = pushButton(this, QStringLiteral("Pair a device"));
+    m_pair->setObjectName(QStringLiteral("pairDevice"));
     layout->addWidget(m_pair, 0, Qt::AlignLeft);
 
     layout->addSpacing(theme->space3());

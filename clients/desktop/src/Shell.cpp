@@ -2,6 +2,7 @@
 
 #include "ChangesDialog.h"
 #include "SettingsDialog.h"
+#include "JobsDialog.h"
 
 #include "AcpClient.h"
 #include "AcpPage.h"
@@ -42,7 +43,9 @@
 #include <QInputDialog>
 #include <QKeyEvent>
 #include <QMenu>
+#include <QInputDialog>
 #include <QMessageBox>
+#include <QPushButton>
 #include <QMoveEvent>
 #include <QPainter>
 #include <QPalette>
@@ -1146,6 +1149,51 @@ void Shell::closePage(const QString &page)
     }
 
     focusChatComposer();
+}
+
+void Shell::uiGate()
+{
+    showSettingsDialog();
+    if (m_settingsDialog != nullptr) {
+        m_settingsDialog->showDialog();
+        QApplication::processEvents();
+        printf("ui-gate: settings %d\n", m_settingsDialog->isVisible() ? 1 : 0);
+    }
+    bool pairingSeen = false;
+    if (QPushButton *pair = m_settingsDialog != nullptr
+                                ? m_settingsDialog->findChild<QPushButton *>(
+                                      QStringLiteral("pairDevice"))
+                                : nullptr) {
+        QTimer::singleShot(50, this, [&pairingSeen]() {
+            for (QWidget *widget : QApplication::topLevelWidgets()) {
+                if (auto *dialog = qobject_cast<QInputDialog *>(widget)) {
+                    pairingSeen = true;
+                    dialog->reject();
+                    break;
+                }
+            }
+        });
+        pair->click();
+        printf("ui-gate: pairing %d\n", pairingSeen ? 1 : 0);
+    }
+    auto *jobs = new JobsDialog(m_facade, this);
+    jobs->show();
+    QApplication::processEvents();
+    printf("ui-gate: jobs %d\n", jobs->isVisible() ? 1 : 0);
+    QTimer::singleShot(50, this, []() {
+        for (QWidget *widget : QApplication::topLevelWidgets()) {
+            if (auto *box = qobject_cast<QMessageBox *>(widget)) {
+                box->done(QMessageBox::Yes);
+                break;
+            }
+        }
+    });
+    m_facade->setPermissionPreset(QStringLiteral("full-access"));
+    QTimer::singleShot(300, this, []() {
+        printf("ui-gate: ok\n");
+        fflush(stdout);
+        QCoreApplication::exit(0);
+    });
 }
 
 void Shell::showSettingsDialog()

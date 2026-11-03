@@ -58,6 +58,11 @@ private:
     /// dependencies that can disagree about when a derived label changed.
     void refresh();
 
+private slots:
+    void onDangerousPresetRequested(const QString &id, const QString &warning);
+
+private:
+
     // ---- the three chip menus (plan §5 stage 1: "QMenu for the three strip
     // chips") -------------------------------------------------------------
     //
@@ -70,7 +75,6 @@ private:
     void openModelMenu();
     void openEffortMenu();
     void openAccessMenu();
-    void onDangerousPresetRequested(const QString &id, const QString &warning);
     int fillModelMenu();
     int fillAccessMenu();
     void chooseModel(const QString &value);

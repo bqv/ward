@@ -360,6 +360,9 @@ int main(int argc, char *argv[])
         QStringLiteral("ward daemon socket: a Unix path or tcp://host:port"
                        " (default $WARD_SOCKET, then ward's default socket path)."),
         QStringLiteral("path"));
+    QCommandLineOption uiGateOption(
+        QStringList{QStringLiteral("ui-gate")},
+        QStringLiteral("Open settings, jobs and the full-access confirmation offscreen, then exit."));
     QCommandLineOption webUrlOption(
         QStringList{QStringLiteral("web-url")},
         QStringLiteral("Origin of the web UI shown by the trapdoor"
@@ -370,6 +373,7 @@ int main(int argc, char *argv[])
     parser.addOption(promptOption);
     parser.addOption(transportOption);
     parser.addOption(socketOption);
+    parser.addOption(uiGateOption);
     parser.addOption(webUrlOption);
     parser.process(app);
 
@@ -484,6 +488,8 @@ int main(int argc, char *argv[])
     shell.show();
 
     startTransport(dsh, acp, ward, useDsh, useWard);
+    if (parser.isSet(uiGateOption))
+        QTimer::singleShot(2000, &shell, &Shell::uiGate);
 
     // Scriptable path: wait for the session, send one prompt, then leave once
     // the turn settles. This is what makes the client testable without a

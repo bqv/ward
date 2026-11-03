@@ -59,7 +59,10 @@ list (success and an escape refusal for each), then starts ward-gui offscreen wi
 rather than using `popen`, so a stalled probe fails the gate and a killed gate
 does not leave a server behind. `make test` builds the probe and runs the gate.
 In a sandbox that cannot write `/sys/fs/cgroup`, run the gate directly with
-`WARD_GATE_CGROUP=off`.
+`WARD_GATE_CGROUP=off`. `ward-gui --ui-gate` also runs offscreen and opens the
+Settings dialog, the pairing entry point, the jobs dialog and the full-access
+confirmation; `gate_desktop` asserts the Settings and jobs surfaces and the
+confirmation marker.
 
 The gate also exposed a daemon failure rather than only a client one: a
 subscriber that closed right after `turn.end` could kill the daemon with

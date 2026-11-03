@@ -248,12 +248,24 @@ int main(void) {
   snprintf(blocked_path, sizeof(blocked_path), "%s/blocked.txt", root);
   assert(access(blocked_path, F_OK) != 0);
 
+  const char *ui_gui = getenv("WARD_GUI");
+  if (ui_gui != NULL) {
+    setenv("QT_QPA_PLATFORM", "offscreen", 1);
+    char ui_out[8192];
+    char *ui_argv[] = {(char *)ui_gui, (char *)"--transport", (char *)"ward",
+                       (char *)"--ui-gate", NULL};
+    assert(run_capture(sock, ui_gui, ui_argv, ui_out, sizeof(ui_out)) == 0);
+    assert(strstr(ui_out, "ui-gate: settings 1") != NULL);
+    assert(strstr(ui_out, "ui-gate: jobs 1") != NULL);
+    assert(strstr(ui_out, "ui-gate: ok") != NULL);
+  }
+
   kill(pid, SIGTERM);
   int status = 0;
   waitpid(pid, &status, 0);
   stop_server(endpoint);
   if (strcmp(cgroup_base, "off") != 0) drop_test_cgroup(cgroup_base);
 
-  printf("desktop gate passed: ward-gui drove a session over UDS, TCP, a terminal, reads, a directory list, presets and a headless prompt\n");
+  printf("desktop gate passed: ward-gui drove a session over UDS, TCP, a terminal, reads, a directory list, presets, a headless prompt and the offscreen dialogs\n");
   return 0;
 }

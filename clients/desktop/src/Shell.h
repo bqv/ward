@@ -106,6 +106,8 @@ public:
     /// their pages are written against.
     Shell(ClientFacade *facade, const ShellPanes &panes, QWidget *parent = nullptr);
 
+    Q_INVOKABLE void uiGate();
+
     /// The retained panes, for the coordinator's visible run and for the slices
     /// that will give them inputs. The rail is no longer a retained pane: it is
     /// a real widget over the C++ rows model (stage 3b).
