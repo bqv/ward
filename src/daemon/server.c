@@ -4454,7 +4454,6 @@ int wd_up_run(const wd_up_config *cfg) {
     fprintf(stderr, "ward: cannot open state directory\n");
     goto cleanup;
   }
-  reindex_search(&srv);
   srv.listen_fd = setup_listener(srv.socket_path);
   if (srv.listen_fd < 0) {
     fprintf(stderr, "ward: cannot listen on %s: %s\n", srv.socket_path,
@@ -4477,6 +4476,7 @@ int wd_up_run(const wd_up_config *cfg) {
     }
   }
   srv.labels = wd_labels_open(srv.state_dir, &labels_err);
+  reindex_search(&srv);
   if (srv.labels == NULL) {
     fprintf(stderr, "ward: labels: %s\n",
             labels_err != NULL ? labels_err : "cannot open labels.db");

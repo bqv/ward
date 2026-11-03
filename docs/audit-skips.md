@@ -23,7 +23,7 @@ it was suspected.
 | compaction and the prefix | `session.compact` still rewrites the head in place, which discards the cache the prefix stability work exists to protect (`docs/local-compat.md:50`) | branch by default through `wd_session_fork`; additive events |
 | module state handover | `ward_state_migrate` exists and is called (`src/wasm/host.c:734`, `:697`, `:717`), but **no shipped guest carries state**, so the acceptance is core-to-core | a stateful first-party guest, or the conformance guest as the only proof |
 | job output overflow | the ring's accounting is unit-tested; **no gate drives it past 64 KiB through a real turn**, because the fixture does not stream that much (journal 165) | a provider fixture that streams over the cap |
-| session search reindex | built (`94cb54c`): at startup, when the search table is empty, the daemon indexes each existing session's history through `wd_session_history`. **Ungated** — nothing yet starts a daemon on a state directory written before search existed | a gate that runs a daemon, writes a prompt, stops it, deletes `search.db`, starts it again and searches |
+| session search reindex | built and gated (`gate_reindex`): start a daemon, prompt, stop, delete `search.db`, start again and the old session is searchable | done |
 | MCP, web search, recall | gates run **stub binaries** (`WARD_MCP_BIN`, `WARD_SEARCH_BIN`, `WARD_RECALL_BIN`); the wiring is proven, the tools are not | deliberate: those tools need host configuration the suite must not own |
 
 ## Client surfaces that are compiled but never exercised
