@@ -56,17 +56,32 @@ static char *classify(const char *tool, const char *payload) {
   return verdict;
 }
 
+static int score_zero(void *ctx, const char *capability, const uint8_t *in,
+                      size_t in_len, uint8_t **out, size_t *out_len,
+                      char **err) {
+  (void)ctx;
+  (void)in;
+  (void)in_len;
+  (void)err;
+  if (strcmp(capability, "judge.score") != 0) return -1;
+  cbor_item_t *reply = wd_map(1);
+  wd_put(reply, "score_bp", wd_uint(0));
+  *out = wd_encode(reply, out_len);
+  return *out != NULL ? 0 : -1;
+}
+
 int main(void) {
   wd_engine *engine = wd_engine_new(NULL);
   assert(engine != NULL);
   size_t len = 0;
   uint8_t *bytes = read_file("judge.wasm", &len);
-  static const char *const no_caps[] = {NULL};
-  wd_module_spec spec = {"judge", no_caps, 0, true};
+  static const char *const judge_caps[] = {"judge.score", NULL};
+  wd_module_spec spec = {"judge", judge_caps, 1, false};
   char *err = NULL;
   wd_module *module = wd_module_load(engine, &spec, bytes, len, &err);
   assert(module != NULL);
-  instance = wd_instance_new(module, no_caps, 0, &LIMITS, NULL, NULL, &err);
+  instance = wd_instance_new(module, judge_caps, 1, &LIMITS, score_zero,
+                            NULL, &err);
   assert(instance != NULL);
 
   char *v = classify("write", "ls -l");
