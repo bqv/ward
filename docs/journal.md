@@ -2373,3 +2373,24 @@ skipping the gate.
 Still unproven: the judge is a hand measurement against llamb, not a gate; no dedicated test asserts that a steering merge
 reaches the provider or that one of the fourteen error paths delivers its frame without a follow-up request; and
 `resolve_model_id` still takes the first of several display-name matches.
+
+Hundred-and-seventy-ninth: the phone showed a raw SSE line in the transcript, and the cause was not the provider. The visible
+row was an `error` whose message was the first 255 bytes of a *successful* DeepSeek stream. The streamed-response header
+callback parsed the status at a fixed offset, `data + 9`, which is the status position only for `HTTP/1.1 200`. DeepSeek answers
+over HTTP/2, where the line is `HTTP/2 200`, so the parser read the tail as zero, wrote status 0 into the job pipe, and every
+streamed turn on that provider emitted its deltas and then ended `provider_unavailable` with the SSE body as the excerpt. The
+1xx fix from the audit was necessary but not the cause here.
+
+The status is now read after the first space of the line, whatever the protocol version, and the parser is a header-only helper
+with `http_status_test` pinning HTTP/1.1, HTTP/2, HTTP/3, 100 and malformed lines. The failure was reproduced on a restarted
+daemon with `session prompt` on a throwaway session: before, `text.delta "ok"` then the error and `turn.end aborted`; after, the
+same delta, `turn.timings`, and a clean `turn.end`.
+
+Two further facts from the same screenshot. The session's stored model was `deepseek` — the catalogue's id — while the model
+sheet displayed the catalogue's *name* `deepseek-chat` and said the session had no model of its own. That is the Android
+client's identification gap (the row it compares is built from the model name, the stored value is the id), not a missing model:
+the daemon resolves `deepseek-chat` to `deepseek` on create and on `set_model`, and the gated path proves the latter. The
+false "no model of its own" line stays on the Android list.
+
+And the daemon had been running since 20:26 from the 20:21 binary, so the audit fixes were on disk but not in the process. The
+user service restart at 21:11 and again at 21:14 loaded `out/ward`; the second restart carried the HTTP/2 fix.
