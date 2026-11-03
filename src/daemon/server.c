@@ -1400,7 +1400,8 @@ static void start_session_turn(wd_server *srv, wd_session *session,
     }
     wd_turn_ctx tc = {srv, session};
     int rc = wd_turn_prompt(run->turn, text, turn_emit, &tc, &err);
-    run_after(srv, run, rc, NULL);
+    run_after(srv, run, rc, err);
+    err = NULL;
   }
   free(err);
 }

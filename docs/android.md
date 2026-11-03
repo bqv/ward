@@ -1,10 +1,12 @@
 # The Android client
 
-There are two clients. **`clients/android`** is the real one: project
-ward-android, application Ward, a Kotlin implementation of the frozen protocol
-behind the copied dsh-android screens. Its own notes and its list of missing
-parity live in `clients/android/README.md`; the JNI client below is kept as the
-reference for the C library path.
+There are two clients, and only one of them is `clients/android`.
+
+**`clients/android`** is the real one: project ward-android, application Ward, a
+Kotlin implementation of the frozen protocol behind the copied dsh-android
+screens, with QUIC pairing and a loopback-TCP door reached through `adb reverse`.
+Its own notes and its list of missing parity live in `clients/android/README.md`,
+which is the current document; this file only covers the JNI reference below.
 
 The JNI client lives in **`clients/android-ward`**: the JNI layer (`ward_jni.c`), the
 Java wrapper (`uk/xa0/ward/WardClient.java`), and a minimal app
