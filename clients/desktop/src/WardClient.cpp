@@ -719,7 +719,8 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
             m_accessNotice = text;
             emit accessNoticeChanged();
         }
-        if (method == QLatin1String("settings.set"))
+        if (method == QLatin1String("settings.set")
+            || method == QLatin1String("module.enable"))
             emit railNotice(text, true);
         if (method == QLatin1String("job.follow"))
             emit jobOutput(m_lastFollowJob, QString(), 0, true);
@@ -818,6 +819,22 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
             m_busy = false;
             emit busyChanged();
         }
+    } else if (method == QLatin1String("module.list")) {
+        QVariantList rows;
+        for (const QVariant &value : result.value(QStringLiteral("modules")).toList()) {
+            const QVariantMap module = value.toMap();
+            rows.append(QVariantMap{
+                {QStringLiteral("name"), module.value(QStringLiteral("name"))},
+                {QStringLiteral("version"), module.value(QStringLiteral("version"))},
+                {QStringLiteral("enabled"), module.value(QStringLiteral("enabled"))},
+                {QStringLiteral("valid"), module.value(QStringLiteral("valid"))}});
+        }
+        if (rows != m_modules) {
+            m_modules = rows;
+            emit modulesChanged();
+        }
+    } else if (method == QLatin1String("module.enable")) {
+        refreshModules();
     } else if (method == QLatin1String("settings.get")) {
         if (m_settings != result) {
             m_settings = result;
@@ -1551,6 +1568,20 @@ void WardClient::loadEarlierHistory()
 }
 
 
+void WardClient::refreshModules()
+{
+    if (m_fd >= 0)
+        sendRequest(QStringLiteral("module.list"));
+}
+
+void WardClient::setModuleEnabled(const QString &name, bool enabled)
+{
+    if (m_fd < 0 || name.isEmpty())
+        return;
+    sendRequest(QStringLiteral("module.enable"),
+                {{QStringLiteral("name"), name}, {QStringLiteral("enabled"), enabled}});
+}
+
 void WardClient::refreshJobs()
 {
     if (m_fd >= 0)
@@ -2163,7 +2194,8 @@ QStringList WardClient::protocolMethods() const
             QStringLiteral("terminal.write"), QStringLiteral("terminal.resize"),
             QStringLiteral("terminal.close"), QStringLiteral("attachment.add"),
             QStringLiteral("attachment.list"), QStringLiteral("attachment.read_blob"), QStringLiteral("module.list"),
-            QStringLiteral("module.reload"), QStringLiteral("stats.session"),
+            QStringLiteral("module.reload"), QStringLiteral("module.enable"),
+            QStringLiteral("stats.session"),
             QStringLiteral("stats.global"), QStringLiteral("device.pair"),
             QStringLiteral("device.enrol"), QStringLiteral("device.list"),
             QStringLiteral("device.revoke")};

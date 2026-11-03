@@ -117,6 +117,23 @@ SettingsDialog::SettingsDialog(ClientFacade *facade, QWidget *parent)
         m_hasSettings = true;
     }
 
+    if (m_facade != nullptr && m_facade->transportName() == QLatin1String("ward")) {
+        layout->addSpacing(theme->space3());
+        layout->addWidget(textLabel(this, QStringLiteral("Modules"), theme->accent(),
+                                    Chrome::monoFont(theme->fontData())));
+        m_modulesNote = textLabel(this,
+                                  QStringLiteral("Disabling applies to turns started afterwards; "
+                                                 "a running turn keeps its instance."),
+                                  theme->dim(), Chrome::uiFont(theme->fontData()));
+        layout->addWidget(m_modulesNote);
+        m_modules = new QListWidget(this);
+        m_modules->setFont(Chrome::uiFont(theme->fontUI()));
+        m_modules->setFrameShape(QFrame::NoFrame);
+        m_modules->setMaximumHeight(150);
+        layout->addWidget(m_modules);
+        m_hasModules = true;
+    }
+
     layout->addSpacing(theme->space3());
     layout->addWidget(textLabel(this, QStringLiteral("QUIC device"), theme->accent(),
                                 Chrome::monoFont(theme->fontData())));
@@ -174,6 +191,18 @@ SettingsDialog::SettingsDialog(ClientFacade *facade, QWidget *parent)
 
     connect(m_unarchive, &QPushButton::clicked, this, &SettingsDialog::unarchiveSelected);
     connect(m_pair, &QPushButton::clicked, this, &SettingsDialog::pairDevice);
+    if (m_modules != nullptr) {
+        connect(m_modules, &QListWidget::itemChanged, this,
+                [this](QListWidgetItem *item) {
+            if (m_reloadingModules || item == nullptr || m_facade == nullptr
+                    || m_facade->transport() == nullptr)
+                return;
+            const QString name = item->data(Qt::UserRole).toString();
+            QMetaObject::invokeMethod(m_facade->transport(), "setModuleEnabled",
+                                      Q_ARG(QString, name),
+                                      Q_ARG(bool, item->checkState() == Qt::Checked));
+        });
+    }
     connect(m_archivedList, &QListWidget::itemSelectionChanged, this, [this]() {
         m_unarchive->setEnabled(m_archivedList->currentItem() != nullptr);
     });
@@ -189,6 +218,9 @@ SettingsDialog::SettingsDialog(ClientFacade *facade, QWidget *parent)
             if (transport->metaObject()->indexOfSignal("settingsChanged()") >= 0)
                 connect(transport, SIGNAL(settingsChanged()), this,
                         SLOT(reloadSettings()));
+            if (transport->metaObject()->indexOfSignal("modulesChanged()") >= 0)
+                connect(transport, SIGNAL(modulesChanged()), this,
+                        SLOT(reloadModules()));
         }
         connect(m_facade, &ClientFacade::sessionsChanged,
                 this, &SettingsDialog::reloadArchivedSessions);
@@ -204,7 +236,10 @@ void SettingsDialog::showDialog()
     reloadArchivedSessions();
     if (m_hasSettings && m_facade && m_facade->transport())
         QMetaObject::invokeMethod(m_facade->transport(), "refreshSettings");
+    if (m_hasModules && m_facade && m_facade->transport())
+        QMetaObject::invokeMethod(m_facade->transport(), "refreshModules");
     reloadSettings();
+    reloadModules();
     open();
     raise();
     activateWindow();
@@ -281,6 +316,31 @@ void SettingsDialog::reloadSettings()
     m_debug->blockSignals(true);
     m_debug->setChecked(settings.value(QStringLiteral("debug")).toBool());
     m_debug->blockSignals(false);
+}
+
+void SettingsDialog::reloadModules()
+{
+    if (!m_hasModules || m_facade == nullptr || m_facade->transport() == nullptr)
+        return;
+    m_reloadingModules = true;
+    m_modules->clear();
+    const QVariantList modules = m_facade->transport()->property("modules").toList();
+    for (const QVariant &value : modules) {
+        const QVariantMap module = value.toMap();
+        const QString name = module.value(QStringLiteral("name")).toString();
+        if (name.isEmpty())
+            continue;
+        auto *item = new QListWidgetItem(
+            QStringLiteral("%1  %2").arg(name, module.value(QStringLiteral("version")).toString()),
+            m_modules);
+        item->setData(Qt::UserRole, name);
+        item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+        item->setCheckState(module.value(QStringLiteral("enabled")).toBool()
+                                ? Qt::Checked : Qt::Unchecked);
+    }
+    m_reloadingModules = false;
+    if (m_modules->count() == 0)
+        m_modulesNote->setText(QStringLiteral("No modules reported."));
 }
 
 void SettingsDialog::reloadArchivedSessions()

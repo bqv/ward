@@ -62,6 +62,7 @@ public:
     Q_PROPERTY(int contextSize READ contextSize NOTIFY contextSizeChanged)
     Q_PROPERTY(QVariantList jobs READ jobs NOTIFY jobsChanged)
     Q_PROPERTY(QVariantMap settings READ settings NOTIFY settingsChanged)
+    Q_PROPERTY(QVariantList modules READ modules NOTIFY modulesChanged)
 
     Q_PROPERTY(QVariantList todos READ todos NOTIFY todosChanged)
     Q_PROPERTY(QVariantMap goal READ goal NOTIFY goalChanged)
@@ -134,6 +135,7 @@ public:
     int contextSize() const { return m_contextSize; }
     QVariantList jobs() const { return m_jobs; }
     QVariantMap settings() const { return m_settings; }
+    QVariantList modules() const { return m_modules; }
 
     QVariantList todos() const { return m_todos; }
     QVariantMap goal() const { return m_goal; }
@@ -234,6 +236,8 @@ public:
     Q_INVOKABLE void refreshQueue();
     Q_INVOKABLE void refreshSettings();
     Q_INVOKABLE void refreshJobs();
+    Q_INVOKABLE void refreshModules();
+    Q_INVOKABLE void setModuleEnabled(const QString &name, bool enabled);
     Q_INVOKABLE void followJob(const QString &jobId, qint64 from);
     Q_INVOKABLE void setSetting(const QString &key, const QVariant &value);
 
@@ -263,6 +267,7 @@ signals:
     void contextSizeChanged();
     void jobsChanged();
     void settingsChanged();
+    void modulesChanged();
     void jobOutput(const QString &jobId, const QString &text, qint64 next, bool dropped);
     void todosChanged();
     void goalChanged();
@@ -381,6 +386,7 @@ private:
     int m_contextSize = 0;
     QVariantList m_jobs;
     QVariantMap m_settings;
+    QVariantList m_modules;
     QString m_lastFollowJob;
 
     QVariantList m_todos;

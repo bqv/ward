@@ -23,6 +23,7 @@ private slots:
     void reload();
     void reloadArchivedSessions();
     void reloadSettings();
+    void reloadModules();
     void unarchiveSelected();
     void pairDevice();
 
@@ -43,4 +44,8 @@ private:
     QCheckBox *m_debug = nullptr;
     QLabel *m_daemonNote = nullptr;
     bool m_hasSettings = false;
+    QListWidget *m_modules = nullptr;
+    QLabel *m_modulesNote = nullptr;
+    bool m_hasModules = false;
+    bool m_reloadingModules = false;
 };
