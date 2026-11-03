@@ -268,7 +268,7 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
     } else if (wd_key_eq(kp, kn, "history")) {
       uint32_t hn = 0;
       if (wd_r_array(&r, &hn) != 0) return;
-      for (uint32_t e = 0; e < hn && hist_count < 32; e++) {
+      for (uint32_t e = 0; e < hn; e++) {
         uint32_t mn = 0;
         if (wd_r_map(&r, &mn) != 0) return;
         const uint8_t *tp = 0;
@@ -287,7 +287,7 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
             return;
           }
         }
-        if (tp != 0 && rp != 0) {
+        if (tp != 0 && rp != 0 && hist_count < 32) {
           hist_text[hist_count] = tp;
           hist_text_len[hist_count] = tn;
           hist_role[hist_count] = rp;

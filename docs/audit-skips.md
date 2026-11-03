@@ -51,20 +51,20 @@ exist, because by the time it was re-read, it did.
 ## core audit, 2026-11-03
 
 A read-only audit of `src/core/`, `src/proto/` and `src/cli/` (three subagents, none of which built or ran anything) found
-one class of bug we had already shipped once: a pointer whose owner had freed or rewritten it. Fixed in the same pass:
-the `turn.timings` map leak (turn.c, both emit sites), the `session.upgraded` record naming the new version as its `from`
-value (session.c), and `wd_jobring_data` returning a rotated buffer once the ring wrapped (jobring.c, which fed both
-`job.output` and the search index). Its test still passes.
+one class of bug we had already shipped once: a pointer whose owner had freed or rewritten it. The first pass fixed the
+`turn.timings` map leak (turn.c, both emit sites), the `session.upgraded` record naming the new version as its `from` value
+(session.c), and `wd_jobring_data` returning a rotated buffer once the ring wrapped (jobring.c, which fed both `job.output`
+and the search index).
 
-Left open, in the auditor's order of severity:
+The second pass closed every remaining finding but one:
 
-- `deliver_steers` (turn.c) appends a second `prompt` key to an exact-sized map, so queued steering is dropped; folding it
-  into the payload is the fix.
-- `wd_put` (codec.c) drops `cbor_map_add`'s result, which is what made the above silent.
-- `wd_session_replay` (session.c) returns an emitted count when the callback stopped or the log was truncated.
-- `emit_provider_error`'s `reason` (turn.c) and `turn->steers[]` (turn.c teardown) leak.
-- the session header mismatch path (session.c) leaks `cwd` and `model`.
-- `src/cli/main.c` reads floats and bools through the wrong predicates — latent, since today's daemon sends the expected types.
+- `deliver_steers` now merges only into a payload that carries a string `prompt`, and `wd_put` replaces an existing key
+  rather than appending a duplicate. A map that is genuinely full prints to stderr instead of dropping the pair in silence.
+  `gate_native` drives steering, but no test asserts the merged text, so the merge itself is read, not gated.
+- `emit_provider_error`'s `reason`, the leftover `turn->steers[]`, and the session header's `cwd`/`model` on an id mismatch
+  are freed. `src/cli/main.c` uses `cbor_is_float` and `wd_bool_of`.
+- `wd_session_replay` still returns an emitted count for a truncated log. Returning -1 would make a crash-torn session
+  unopenable while its header is intact, so truncation needs its own out-parameter; that is an API decision, not a patch.
 
 The audit found no double free, no use-after-free, no mutate-while-iterating defect and no sqlite or fd lifetime bug in those
 directories.
@@ -73,52 +73,56 @@ directories.
 
 Scope correction from the auditor: `src/wasm/` holds only `host.c`/`host.h`; limits and migration live there, the ABI codec is
 `modules/abi/wd_abi.h`, and **there is no instance pool** — every turn builds its own instances and frees them once. These
-are unverified findings; none were applied.
+were unverified when written; the second pass applied the high findings and left the medium ones:
 
-- `modules/abi/wd_abi.h:133` **critical** — `r->at + len > r->len` wraps in uint32, so a text header of 0xFFFFFFFF passes the
-  bound and `wd_r_text`'s `n + 1 > cap` wraps too. Reachability unconfirmed (core never emits such a length) but this is every
-  guest's only defence. Fix: `len > r->len - r->at`, `n >= cap`.
-- `src/wasm/host.c:604,626,652,748` **high** — the 8-byte result descriptor is never zeroed, so a guest that returns early
-  replays the previous call's descriptor as this call's result. Fix: write 0xFFFFFFFF on alloc and treat it as "no output".
-- `modules/*/ward_alloc` + `src/wasm/host.c:572` **high** — guests signal exhaustion with 0, which is a legal wasm address and
-  is accepted, so an oversized input is memcpy'd over the guest's low memory. Fix: reject `at == 0`.
-- `modules/provider/provider.c:271` **high** — history truncates at 32 by the loop condition without consuming the rest, so the
-  reader is left mid-array and the call writes no reply. Fix: loop to `hn`, guard only the store.
-- `modules/provider/provider.c:468` **high** — a request over the 24 KiB reply buffer returns with no reply and no error.
-- `src/net/http.c:174` **high** — an interim `100 Continue` is latched as the final status for streamed turns. Fix: only latch
-  `>= 200`.
-- `src/net/http.c:112,71,78,120` **medium** — `*err` written without a NULL guard while its sibling guards it.
-- `src/net/http.c:316` **medium** — `wd_http_job_finish` blocks the event loop on the pipe with no deadline.
-- `src/wasm/host.c:151` **medium** — stdout capture doubles without a ceiling.
-- `modules/{tools,code,policy,judge,skills,python}.c` **medium** — no descriptor written when an answer does not fit, which the
-  host defect above turns into a stale replay.
-- `src/net/estate.c:19,24,37,46,84` **medium** — the scanner takes the next quote after a key (`"group":null` adopts the next
-  token), never skips whitespace after `[`/`,` so spaced holders read as none, trusts `strtoull` on raw bytes, truncates names
-  silently at 16/32, and interpolates the group into the URL unencoded.
-- `src/net/http.c:44` **medium** — the unix-socket path is a process global holding a borrowed pointer.
-- `modules/policy/policy.c:31` **medium** — rule strings live in 8-byte buffers, so a longer rule yields no decision at all.
-- `modules/schedule/schedule.c:90` **medium** — `from_ms` accumulates digits into uint64 unchecked.
+Applied:
+
+- `modules/abi/wd_abi.h` **critical** — bounds are subtraction-based and `wd_r_text` rejects `n >= cap` (commit `3da3dd1`;
+  `abi_test` segfaulted before it).
+- `src/wasm/host.c` **high** — the result descriptor is poisoned with `0xFFFFFFFF` before every guest call and `read_pair`
+  reports "the module produced no result" instead of replaying a stale descriptor. `alloc_guest` now rejects a null address.
+- `modules/provider/provider.c:271` **high** — the history loop consumes every entry and caps only the store, so the reader
+  is no longer left mid-array after 32 entries.
+- `src/net/http.c:174` **high** — the streamed header callback ignores statuses below 200, so `100 Continue` is not latched
+  as the final status.
+- `src/net/estate.c` **medium** — the scanner requires a quoted value after the key (so `"group":null` fails instead of
+  adopting the next token), skips whitespace around array entries, validates `since_ms` digits, rejects over-long names
+  instead of truncating, and percent-encodes the group. `estate_test` now covers spaced JSON and a null group.
+
+Still open, all **medium**:
+
+- `modules/provider/provider.c:468` — a request over the 24 KiB reply buffer now fails as "no result" at the host rather
+  than replaying a stale descriptor, but the turn still fails with no explanation from the guest.
+- `src/net/http.c:112,71,78,120` — `*err` written without a NULL guard while its sibling guards it.
+- `src/net/http.c:316` — `wd_http_job_finish` blocks the event loop on the pipe with no deadline.
+- `src/wasm/host.c:151` — stdout capture doubles without a ceiling.
+- `modules/{tools,code,policy,judge,skills,python}.c` — no descriptor written when an answer does not fit; the host now
+  reports it, but the guest still gives no reason.
+- `src/net/http.c:44` — the unix-socket path is a process global holding a borrowed pointer.
+- `modules/policy/policy.c:31` — rule strings live in 8-byte buffers, so a longer rule yields no decision at all.
+- `modules/schedule/schedule.c:90` — `from_ms` accumulates digits into uint64 unchecked.
 
 ## daemon audit, 2026-11-03
 
 Verified against `6f023cd` (4827 lines). The shipped use-after-free at `:3377` is confirmed fixed: `err` is strdup'd before
-`run_after` takes and frees it. Unverified findings, none applied:
+`run_after` takes and frees it. The second pass applied every finding except three:
 
-- `server.c:2497` **medium** — `job.follow` builds its window from `wd_jobring_data()` + skip, an invariant `jobring.c` no longer
-  holds after a rebase is missed; `run_free`'s indexer at `:3080` has the same assumption, so both are only correct because
-  `jobring_append` now rebases. Add `wd_jobring_copy(ring, skip, dst, take)` rather than relying on that.
-- `server.c:2502` **medium** — inverted capacity: `wd_map(3 + (pushed ? 0 : 1))` is 3 where four pairs are added, so `dropped` is
-  silently missing from every successful reply. Should be `(pushed ? 1 : 0)`.
-- `server.c:2869,2862,2910` **medium** — `run_new`'s error paths `free(run)` and lose the 64 KiB ring; `:2910` also never releases
-  the device lock, so that slot is gone for the daemon's life. Needs a fail label releasing lock, ring, then run.
-- `server.c:594` **medium** — `session.set_model` builds a payload map it never uses or frees.
-- `server.c:1866` **medium** — empty-name branch returns without freeing `name`.
-- `server.c:3156` **medium** — `run_after`'s pending branch returns without freeing `err` it owns.
-- `server.c:3392` **medium, uncertain** — a failed `wd_turn_pending` after a kind-1 pause leaves the run parked with the device lock
-  held; the branch looks unreachable today.
-- `server.c:1956,1964` **low** — a failed `cbor_array_push` breaks out and leaks the remaining elements.
-- Outside the six categories: **ten `conn_send_error` sites return without `conn_arm`** (`:1682,1695,1714,1730,1827,1835,1842,1851,
-  :1983,2191`), so the error frame can sit queued on AF_UNIX until the client sends again. And `resolve_model_id` returns the
-  first entry whose model name matches, not the only one — the commit message overstates it.
+Applied:
+
+- the ten `conn_send_error` sites named by the auditor, plus four it did not list (`:1812` prompt preview, three attachment
+  error paths), and the upgrade failure path, now call `conn_arm` before returning — fourteen in all. No gate asserts that an
+  error frame reaches the client without a follow-up request, so this is read, not gated.
+- `job.follow`'s capacity is `3 + (pushed ? 1 : 0)`, so `dropped` is present in a successful reply.
+- `run_new` frees the 64 KiB ring on every early exit and releases the device lock on the retry path.
+- `session.set_model`'s unused map, `module.enable`'s empty-name `name`, and `run_after`'s pending-path `err` are freed.
+
+Still open:
+
+- `job.follow` and `run_free`'s indexer still trust `wd_jobring_data()` to begin at the live bytes. `jobring_append` now
+  rebases, so that holds, but a `wd_jobring_copy` accessor would remove the dependency.
+- the `:3392` parked-run/device-lock path looks unreachable today and was left alone; the two `cbor_array_push` OOM leaks
+  are untouched.
+- `resolve_model_id` returns the first model whose display name matches, so two catalogue entries sharing a name resolve
+  silently to the first.
 
 Nothing found for dangling pointers, libcbor ownership, error strings outliving their frame, or iteration while mutating.

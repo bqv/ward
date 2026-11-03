@@ -240,11 +240,11 @@ static int session_load(const char *root, const char *id, wd_session **out) {
   if (hlog_read(s->log_path, load_record, &lc, &truncated) <= 0 || !lc.header)
     goto fail;
   snprintf(s->id, sizeof(s->id), "%s", lc.session.id);
-  if (strcmp(s->id, id) != 0) goto fail;
   s->cwd = lc.session.cwd;
   s->model = lc.session.model;
   s->created_ms = lc.session.created_ms;
   s->last_seq = lc.session.last_seq;
+  if (strcmp(s->id, id) != 0) goto fail;
   if (hlog_open_append(&s->log, s->log_path) != 0) goto fail;
   if (wd_session_replay(s, 0, apply_model, s) < 0) goto fail;
   if (wd_session_replay(s, 0, apply_pins, s) < 0) goto fail;

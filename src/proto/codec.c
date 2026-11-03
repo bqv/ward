@@ -60,12 +60,33 @@ cbor_item_t *wd_text(const char *s) { return cbor_build_string(s); }
 cbor_item_t *wd_bool(bool v) { return cbor_build_bool(v); }
 
 void wd_put(cbor_item_t *map, const char *key, cbor_item_t *value) {
+  if (map == NULL || key == NULL || value == NULL || !cbor_isa_map(map)) return;
+  struct cbor_pair *pairs = cbor_map_handle(map);
+  size_t n = cbor_map_size(map);
+  size_t key_len = strlen(key);
+  for (size_t i = 0; i < n; i++) {
+    cbor_item_t *k = pairs[i].key;
+    if (k == NULL || !cbor_isa_string(k)) continue;
+    if (cbor_string_length(k) != key_len) continue;
+    if (memcmp(cbor_string_handle(k), key, key_len) != 0) continue;
+    cbor_item_t *held = pairs[i].value;
+    cbor_incref(value);
+    pairs[i].value = value;
+    cbor_decref(&held);
+    cbor_decref(&value);
+    return;
+  }
   cbor_item_t *k = cbor_build_string(key);
+  if (k == NULL) {
+    cbor_decref(&value);
+    return;
+  }
   struct cbor_pair pair = {.key = k, .value = value};
   bool added = cbor_map_add(map, pair);
-  (void)added;
   cbor_decref(&k);
   cbor_decref(&value);
+  if (!added)
+    fprintf(stderr, "ward: map full, key \"%s\" was not stored\n", key);
 }
 
 cbor_item_t *wd_get(cbor_item_t *map, const char *key) {

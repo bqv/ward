@@ -799,11 +799,12 @@ static int command_stats(int argc, char **argv) {
              (unsigned long long)prompt_tokens,
              (unsigned long long)predicted_tokens,
              (unsigned long long)cache_tokens);
+    bool estimated = false;
+    wd_bool_of(wd_get(result, "tokens_estimated"), &estimated);
     cbor_item_t *cost = wd_get(result, "cost_total");
-    if (cost != NULL && cbor_isa_float_ctrl(cost))
+    if (cost != NULL && cbor_is_float(cost))
       printf("cost        %.6f (%s tokens)\n", cbor_float_get_float(cost),
-             cbor_get_bool(wd_get(result, "tokens_estimated")) ? "estimated"
-                                                               : "measured");
+             estimated ? "estimated" : "measured");
     free(session);
     free(model);
   }

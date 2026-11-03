@@ -1527,6 +1527,7 @@ void wd_turn_free(wd_turn *turn) {
   wd_module_free(turn->policy_module);
   wd_module_free(turn->engine_module);
   if (turn->parked != NULL) wd_free(turn->parked);
+  for (size_t i = 0; i < turn->steer_count; i++) free(turn->steers[i]);
   free(turn->park_reason);
   free(turn->root);
   free(turn->endpoint);
@@ -1626,7 +1627,8 @@ char *wd_turn_steer_pop(wd_turn *turn) {
 static void deliver_steers(wd_turn *turn, cbor_item_t *payload) {
   if (turn->steer_count == 0) return;
   char *prompt = wd_text_copy(wd_get(payload, "prompt"));
-  size_t cap = (prompt != NULL ? strlen(prompt) : 0) + 1;
+  if (prompt == NULL) return;
+  size_t cap = strlen(prompt) + 1;
   for (size_t i = 0; i < turn->steer_count; i++)
     cap += strlen(turn->steers[i]) + 2;
   char *merged = malloc(cap);
@@ -2367,11 +2369,13 @@ int wd_turn_resume_http(wd_turn *turn, wd_turn_emit emit, void *ctx,
     char *reason = err != NULL && *err != NULL ? strdup(*err) : NULL;
     free(err != NULL ? *err : NULL);
     if (err != NULL) *err = NULL;
-    return emit_provider_error(turn, WD_ERR_PROVIDER_UNAVAILABLE,
-                               reason != NULL && reason[0] != '\0'
-                                   ? reason
-                                   : "the provider is unreachable",
-                               emit, ctx, err) == 0 ? 0 : -1;
+    int sent = emit_provider_error(turn, WD_ERR_PROVIDER_UNAVAILABLE,
+                                   reason != NULL && reason[0] != '\0'
+                                       ? reason
+                                       : "the provider is unreachable",
+                                   emit, ctx, err);
+    free(reason);
+    return sent == 0 ? 0 : -1;
   }
   int out = wd_turn_resume_http_body(turn, response.status,
                                      (const char *)response.body,

@@ -155,9 +155,13 @@ static pid_t start_daemon(const char *bin, const char *sock, const char *state) 
   if (pid == 0) {
     prctl(PR_SET_PDEATHSIG, SIGTERM);
     sweep_test_cgroups();
-  char cgroup_base[128];
-    snprintf(cgroup_base, sizeof(cgroup_base),
-             "/sys/fs/cgroup/ward/test/gate-%d", (int)getpid());
+    char cgroup_base[128];
+    const char *override = getenv("WARD_GATE_CGROUP");
+    if (override != NULL)
+      snprintf(cgroup_base, sizeof(cgroup_base), "%s", override);
+    else
+      snprintf(cgroup_base, sizeof(cgroup_base),
+               "/sys/fs/cgroup/ward/test/gate-%d", (int)getpid());
     setenv("WARD_CGROUP", cgroup_base, 1);
     execl(bin, "ward", "up", "--socket", sock, "--state", state, (char *)NULL);
     _exit(127);

@@ -9,6 +9,7 @@
 
 struct wd_jobring {
   char *buf;
+  char *flat;
   size_t cap;
   size_t len;
   size_t head;
@@ -21,7 +22,10 @@ wd_jobring *wd_jobring_new(size_t cap) {
   wd_jobring *ring = calloc(1, sizeof(*ring));
   if (ring == NULL) return NULL;
   ring->buf = malloc(cap);
-  if (ring->buf == NULL) {
+  ring->flat = malloc(cap);
+  if (ring->buf == NULL || ring->flat == NULL) {
+    free(ring->buf);
+    free(ring->flat);
     free(ring);
     return NULL;
   }
@@ -32,6 +36,7 @@ wd_jobring *wd_jobring_new(size_t cap) {
 void wd_jobring_free(wd_jobring *ring) {
   if (ring == NULL) return;
   free(ring->buf);
+  free(ring->flat);
   free(ring);
 }
 
@@ -63,14 +68,13 @@ void wd_jobring_append(wd_jobring *ring, const char *data, size_t len) {
   if (len > first) memcpy(ring->buf, data + first, len - first);
   ring->len += len;
   if (ring->head != 0) {
-    char *flat = malloc(ring->len > 0 ? ring->len : 1);
-    if (flat == NULL) return;
     size_t lead = ring->cap - ring->head;
     if (lead > ring->len) lead = ring->len;
-    memcpy(flat, ring->buf + ring->head, lead);
-    if (ring->len > lead) memcpy(flat + lead, ring->buf, ring->len - lead);
-    memcpy(ring->buf, flat, ring->len);
-    free(flat);
+    memcpy(ring->flat, ring->buf + ring->head, lead);
+    if (ring->len > lead) memcpy(ring->flat + lead, ring->buf, ring->len - lead);
+    char *swap = ring->buf;
+    ring->buf = ring->flat;
+    ring->flat = swap;
     ring->head = 0;
   }
 }

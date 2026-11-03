@@ -2338,3 +2338,38 @@ format to keep in step. The empty check is the idempotence.
 
 It is **not gated**, which is the honest label: the gate that would prove it starts a daemon, writes a prompt, stops it, deletes
 `search.db`, starts again and searches. Until that exists, the reindex is code that has been read and compiled, not measured.
+
+Hundred-and-seventy-eighth: the audit findings are applied and the suite is green in all three builds. The daemon's ten
+`conn_send_error` sites that never re-armed were real, and four the auditor did not list (prompt preview and three attachment
+error paths) had the same shape, as did the upgrade failure path — fourteen in all. On AF_UNIX the reply could sit queued
+until the client sent again, which is the "the app just sat there" report. `run_new` now frees its 64 KiB ring on every early
+exit and releases the device lock on the retry path; the unused map in `session.set_model` and the empty-name branch of
+`module.enable` are freed; `run_after` frees `err` on a pending exit.
+
+The core leftovers are closed except one. Steering merges into an existing `prompt` instead of appending a duplicate key to a
+full map, `wd_put` replaces an existing key and prints when a map is genuinely full, the provider-error reason and leftover
+steers are freed, a mismatched session header frees its `cwd`/`model`, and the CLI uses `cbor_is_float`/`wd_bool_of`. The
+ring swaps a preallocated buffer instead of mallocing per wrapped append. `model.select` and `session.set_model` resolve a
+display name the way `session.create` does. `wd_session_replay` still cannot report a truncated log without a new
+out-parameter; returning -1 would make a crash-torn session unopenable, so that waits for an API decision.
+
+The wasm findings were applied where they were high: the result descriptor is poisoned before each guest call and a module
+that returns early is reported as "no result" instead of replaying the previous descriptor, a null allocator address is
+refused, the provider consumes its whole history before capping at 32 entries, and a `100 Continue` is not latched as the
+final HTTP status. The estate scanner now requires a quoted value (so `"group":null` fails rather than adopting the next
+token), skips whitespace around array entries, validates `since_ms`, rejects over-long names instead of truncating, and
+percent-encodes the group. `estate_test` covers spaced JSON and the null group. The medium findings remain and are listed in
+`docs/audit-skips.md`.
+
+The ASan red was never the daemon. `estate_test`'s fixture wrote its reply and closed without reading the request, so under
+load curl's send could fail with EPIPE ("Failed sending data to the peer"). It now signals readiness over a pipe after
+`listen`, reads the request before replying, and no longer polls with `usleep`; the test passed ten consecutive ASan runs.
+
+Measured on this tree, with `WARD_GATE_CGROUP=off` because the sandbox's cgroup mount is read-only: three consecutive green
+suites in debug (51 tests each), three in ASan (51, no sanitizer report), and three in UBSan (51, no runtime error).
+`gate_crash` now honours `WARD_GATE_CGROUP` like its siblings, so cgroups can be switched off for a sandbox run without
+skipping the gate.
+
+Still unproven: the judge is a hand measurement against llamb, not a gate; no dedicated test asserts that a steering merge
+reaches the provider or that one of the fourteen error paths delivers its frame without a follow-up request; and
+`resolve_model_id` still takes the first of several display-name matches.

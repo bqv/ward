@@ -570,12 +570,22 @@ static int alloc_guest(wd_instance *inst, size_t len, uint32_t *at, char **err) 
   wasmtime_val_t res;
   if (call_func(inst, &inst->alloc, &arg, 1, &res, 1, err) != 0) return -1;
   *at = (uint32_t)res.of.i32;
+  if (*at == 0 && len > 0) {
+    set_err(err, "the allocator returned a null address");
+    return -1;
+  }
   uint8_t *base = NULL;
   if (!memory_span(inst, *at, len, &base)) {
     set_err(err, "allocator returned an out-of-bounds span");
     return -1;
   }
   return 0;
+}
+
+static void poison_pair(wd_instance *inst, uint32_t at) {
+  uint8_t *base = NULL;
+  if (!memory_span(inst, at, 8, &base)) return;
+  memset(base, 0xff, 8);
 }
 
 static int read_pair(wd_instance *inst, uint32_t at, uint32_t *ptr, uint32_t *len,
@@ -587,6 +597,10 @@ static int read_pair(wd_instance *inst, uint32_t at, uint32_t *ptr, uint32_t *le
   }
   *ptr = get_u32(base + at);
   *len = get_u32(base + at + 4);
+  if (*ptr == UINT32_MAX && *len == UINT32_MAX) {
+    set_err(err, "the module produced no result");
+    return -1;
+  }
   return 0;
 }
 
@@ -602,6 +616,7 @@ int wd_instance_call(wd_instance *instance, const uint8_t *in, size_t in_len,
   }
   uint32_t desc = 0;
   if (alloc_guest(instance, 8, &desc, err) != 0) return -1;
+  poison_pair(instance, desc);
   uint32_t at = 0;
   if (alloc_guest(instance, in_len, &at, err) != 0) return -1;
   uint8_t *base = NULL;
@@ -650,6 +665,7 @@ int wd_instance_state_export(wd_instance *instance, uint8_t **out,
   }
   uint32_t desc = 0;
   if (alloc_guest(instance, 8, &desc, err) != 0) return -1;
+  poison_pair(instance, desc);
   wasmtime_val_t arg;
   arg.kind = WASMTIME_I32;
   arg.of.i32 = (int32_t)desc;
@@ -746,6 +762,7 @@ int wd_instance_state_migrate(wd_instance *instance, uint32_t from_schema,
   if (in_len > 0) memcpy(base + at, in, in_len);
   uint32_t desc = 0;
   if (alloc_guest(instance, 8, &desc, err) != 0) return -1;
+  poison_pair(instance, desc);
   wasmtime_val_t args[4];
   args[0].kind = WASMTIME_I32;
   args[0].of.i32 = (int32_t)from_schema;

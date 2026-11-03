@@ -22,6 +22,12 @@ static const char busy[] =
 static const char idle[] =
     "{\"group\":\"gpu\",\"holders\":[],\"since_ms\":0,"
     "\"slots\":[{\"name\":\"sd\",\"state\":\"loading\"}]}";
+static const char spaced[] =
+    "{ \"group\" : \"gpu\" , \"holders\" : [ \"sd\" , \"llama\" ] , "
+    "\"since_ms\" : 42 , \"slots\" : [ { \"name\" : \"sd\" , "
+    "\"state\" : \"running\" } ] }";
+static const char null_group[] =
+    "{\"group\":null,\"holders\":[\"sd\"],\"slots\":[]}";
 
 static void check_parse(void) {
   wd_estate_card card;
@@ -35,12 +41,23 @@ static void check_parse(void) {
   assert(card.holders_len == 0);
   assert(card.since_ms == 0);
   assert(card.slots_len == 1 && strcmp(card.slots[0].state, "loading") == 0);
+
+  assert(wd_estate_parse(spaced, &card) == 0);
+  assert(strcmp(card.group, "gpu") == 0);
+  assert(card.holders_len == 2 && strcmp(card.holders[1], "llama") == 0);
+  assert(card.since_ms == 42);
+  assert(card.slots_len == 1 && strcmp(card.slots[0].state, "running") == 0);
+
+  assert(wd_estate_parse(null_group, &card) != 0);
 }
 
 static pid_t serve_once(const char *path, const char *body) {
+  int ready[2];
+  assert(pipe(ready) == 0);
   pid_t pid = fork();
   assert(pid >= 0);
   if (pid == 0) {
+    close(ready[0]);
     int fd = socket(AF_UNIX, SOCK_STREAM, 0);
     struct sockaddr_un addr;
     memset(&addr, 0, sizeof(addr));
@@ -48,8 +65,13 @@ static pid_t serve_once(const char *path, const char *body) {
     snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", path);
     if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) _exit(1);
     if (listen(fd, 1) != 0) _exit(1);
+    char one = '1';
+    (void)!write(ready[1], &one, 1);
+    close(ready[1]);
     int conn = accept(fd, NULL, NULL);
     if (conn < 0) _exit(1);
+    char request[4096];
+    (void)!read(conn, request, sizeof(request));
     char reply[1024];
     int made = snprintf(reply, sizeof(reply),
                         "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
@@ -60,6 +82,10 @@ static pid_t serve_once(const char *path, const char *body) {
     close(fd);
     _exit(0);
   }
+  close(ready[1]);
+  char one = 0;
+  (void)!read(ready[0], &one, 1);
+  close(ready[0]);
   return pid;
 }
 
@@ -74,8 +100,6 @@ int main(void) {
   assert(made > 0 && (size_t)made < sizeof(sock));
 
   pid_t server = serve_once(sock, busy);
-  for (int tries = 0; tries < 200 && access(sock, F_OK) != 0; tries++)
-    usleep(10000);
   wd_estate_card live;
   char *err = NULL;
   if (wd_estate_card_read(sock, "gpu", &live, &err) != 0) {
@@ -87,8 +111,6 @@ int main(void) {
   unlink(sock);
 
   pid_t idle_server = serve_once(sock, idle);
-  for (int tries = 0; tries < 200 && access(sock, F_OK) != 0; tries++)
-    usleep(10000);
   assert(wd_estate_card_read(sock, "gpu", &live, &err) == 0);
   assert(live.holders_len == 0);
   assert(live.slots_len == 1 && strcmp(live.slots[0].state, "loading") == 0);

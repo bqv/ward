@@ -209,6 +209,7 @@ static wd_run_token run_tokens[WD_MAX_RUNS];
 static void conn_close(wd_server *srv, wd_conn *conn);
 static void conn_release(wd_server *srv, wd_conn *conn);
 static cbor_item_t *session_cbor(wd_server *srv, wd_session *session);
+static char *resolve_model_id(wd_server *srv, const char *wanted);
 static void handle_session_prompt(wd_server *srv, wd_conn *conn, uint64_t id,
                                   cbor_item_t *params);
 typedef struct {
@@ -489,6 +490,11 @@ static void handle_model_select(wd_server *srv, wd_conn *conn, uint64_t id,
                                 cbor_item_t *params) {
   char *name = wd_text_copy(wd_get(params, "id"));
   if (name == NULL) name = wd_text_copy(wd_get(params, "model"));
+  char *resolved = name != NULL ? resolve_model_id(srv, name) : NULL;
+  if (resolved != NULL) {
+    free(name);
+    name = resolved;
+  }
   if (name == NULL || wd_models_find(srv->models, name) == NULL) {
     free(name);
     conn_send_error(conn, id, WD_ERR_NOT_FOUND, "no such model");
@@ -577,6 +583,11 @@ static void handle_session_set_model(wd_server *srv, wd_conn *conn, uint64_t id,
     conn_arm(srv, conn);
     return;
   }
+  char *resolved = name != NULL ? resolve_model_id(srv, name) : NULL;
+  if (resolved != NULL) {
+    free(name);
+    name = resolved;
+  }
   if (name == NULL || wd_models_find(srv->models, name) == NULL) {
     free(session_id);
     free(name);
@@ -591,8 +602,6 @@ static void handle_session_set_model(wd_server *srv, wd_conn *conn, uint64_t id,
     respond_internal(srv, conn, id, "cannot record the model change");
     return;
   }
-  cbor_item_t *payload = wd_map(1);
-  wd_put(payload, "model", wd_text(name));
   cbor_item_t *event = wd_map(1);
   wd_put(event, "model", wd_text(name));
   conn_broadcast(srv, session, "session.model", seq, event);
@@ -1680,6 +1689,7 @@ static void handle_terminal_open(wd_server *srv, wd_conn *conn, uint64_t id,
     free(session_id);
     free(command);
     conn_send_error(conn, id, WD_ERR_NOT_FOUND, "no such session");
+    conn_arm(srv, conn);
     return;
   }
   size_t slot = WD_MAX_TERMS;
@@ -1693,6 +1703,7 @@ static void handle_terminal_open(wd_server *srv, wd_conn *conn, uint64_t id,
     free(session_id);
     free(command);
     conn_send_error(conn, id, WD_ERR_BUSY, "too many terminals");
+    conn_arm(srv, conn);
     return;
   }
   const char *argv[4];
@@ -1712,6 +1723,7 @@ static void handle_terminal_open(wd_server *srv, wd_conn *conn, uint64_t id,
              err != NULL ? err : "cannot open a terminal");
     free(err);
     conn_send_error(conn, id, WD_ERR_INTERNAL, message);
+    conn_arm(srv, conn);
     return;
   }
   wd_term *term = &terminals[slot];
@@ -1728,6 +1740,7 @@ static void handle_terminal_open(wd_server *srv, wd_conn *conn, uint64_t id,
   if (epoll_ctl(srv->epoll_fd, EPOLL_CTL_ADD, wd_pty_fd(pty), &ev) != 0) {
     term_drop(srv, term);
     conn_send_error(conn, id, WD_ERR_INTERNAL, "cannot watch the terminal");
+    conn_arm(srv, conn);
     return;
   }
   cbor_item_t *result = wd_map(2);
@@ -1797,6 +1810,7 @@ static void handle_prompt_preview(wd_server *srv, wd_conn *conn, uint64_t id,
   if (session == NULL) {
     free(session_id);
     conn_send_error(conn, id, WD_ERR_NOT_FOUND, "no such session");
+    conn_arm(srv, conn);
     return;
   }
   char attachments[512];
@@ -1826,6 +1840,7 @@ static void handle_session_upgrade(wd_server *srv, wd_conn *conn, uint64_t id,
     free(version);
     conn_send_error(conn, id, WD_ERR_INVALID_PARAMS,
                     "a session, a module and a version are needed");
+    conn_arm(srv, conn);
     return;
   }
   if (run_find(srv, session_id) != NULL) {
@@ -1833,6 +1848,7 @@ static void handle_session_upgrade(wd_server *srv, wd_conn *conn, uint64_t id,
     free(module);
     free(version);
     conn_send_error(conn, id, WD_ERR_BUSY, "the session is already busy");
+    conn_arm(srv, conn);
     return;
   }
   if (wd_registry_resolve(&srv->registry, module, version) == NULL) {
@@ -1840,6 +1856,7 @@ static void handle_session_upgrade(wd_server *srv, wd_conn *conn, uint64_t id,
     free(module);
     free(version);
     conn_send_error(conn, id, WD_ERR_NOT_FOUND, "no such module version");
+    conn_arm(srv, conn);
     return;
   }
   uint64_t seq = 0;
@@ -1849,6 +1866,7 @@ static void handle_session_upgrade(wd_server *srv, wd_conn *conn, uint64_t id,
   free(version);
   if (rc != 0) {
     conn_send_error(conn, id, WD_ERR_INTERNAL, "cannot upgrade the session");
+    conn_arm(srv, conn);
     return;
   }
   cbor_item_t *result = wd_map(2);
@@ -1864,6 +1882,7 @@ static void handle_module_enable(wd_server *srv, wd_conn *conn, uint64_t id,
   bool enabled = true;
   wd_bool_of(wd_get(params, "enabled"), &enabled);
   if (name == NULL || name[0] == '\0') {
+    free(name);
     conn_send_error(conn, id, WD_ERR_INVALID_PARAMS, "name is required");
     conn_arm(srv, conn);
     return;
@@ -1981,6 +2000,7 @@ static void handle_attachment_add(wd_server *srv, wd_conn *conn, uint64_t id,
     free(session_id);
     free(name);
     conn_send_error(conn, id, WD_ERR_INVALID_PARAMS, "a session and a name are needed");
+    conn_arm(srv, conn);
     return;
   }
   cbor_item_t *item = wd_get(params, "data");
@@ -2002,6 +2022,7 @@ static void handle_attachment_add(wd_server *srv, wd_conn *conn, uint64_t id,
     free(name);
     free(text);
     conn_send_error(conn, id, WD_ERR_INVALID_PARAMS, "no attachment data");
+    conn_arm(srv, conn);
     return;
   }
   if (len > (4u << 20)) {
@@ -2009,6 +2030,7 @@ static void handle_attachment_add(wd_server *srv, wd_conn *conn, uint64_t id,
     free(name);
     free(text);
     conn_send_error(conn, id, WD_ERR_INVALID_PARAMS, "the attachment is too large");
+    conn_arm(srv, conn);
     return;
   }
   char *path = NULL;
@@ -2023,6 +2045,7 @@ static void handle_attachment_add(wd_server *srv, wd_conn *conn, uint64_t id,
              err != NULL ? err : "cannot store the attachment");
     free(err);
     conn_send_error(conn, id, WD_ERR_INTERNAL, message);
+    conn_arm(srv, conn);
     return;
   }
   cbor_item_t *result = wd_map(2);
@@ -2189,6 +2212,7 @@ static void handle_attachment_list(wd_server *srv, wd_conn *conn, uint64_t id,
   free(session_id);
   if (session == NULL) {
     conn_send_error(conn, id, WD_ERR_NOT_FOUND, "no such session");
+    conn_arm(srv, conn);
     return;
   }
   attachment_list list = {NULL, 0, 0};
@@ -2499,7 +2523,7 @@ static void handle_job_follow(wd_server *srv, wd_conn *conn, uint64_t id,
   bool pushed = cbor_array_push(chunks, chunk);
   cbor_decref(&chunk);
   if (!pushed) wd_free(chunks);
-  cbor_item_t *result = wd_map(3 + (pushed ? 0 : 1));
+  cbor_item_t *result = wd_map(3 + (pushed ? 1 : 0));
   wd_put(result, "job", wd_text(job));
   if (pushed) wd_put(result, "chunks", chunks);
   wd_put(result, "next", wd_uint(next));
@@ -2850,6 +2874,11 @@ static wd_run *run_new(wd_server *srv, wd_session *session, char **err) {
   run->http_len = 0;
   run->http_cap = 0;
   run->ring = wd_jobring_new(64u * 1024u);
+  if (run->ring == NULL) {
+    free(run);
+    if (err != NULL) *err = strdup("out of memory");
+    return NULL;
+  }
   run->sse = NULL;
   run->sse_ctx = NULL;
   run->http_status_seen = 0;
@@ -2859,11 +2888,13 @@ static wd_run *run_new(wd_server *srv, wd_session *session, char **err) {
   run->turn = wd_turn_new_pinned(srv->engine, dir, session->cwd, session->pins,
                                 session->pins_len, err);
   if (run->turn == NULL) {
+    wd_jobring_free(run->ring);
     free(run);
     return NULL;
   }
   if (device_acquire(srv, session, &run->devlock) != 0) {
     wd_turn_free(run->turn);
+    wd_jobring_free(run->ring);
     free(run->sse_ctx);
     if (run->sse != NULL) wd_sse_destroy(run->sse);
     free(run);
@@ -2907,6 +2938,8 @@ static wd_run *run_new(wd_server *srv, wd_session *session, char **err) {
     run->turn = wd_turn_new_pinned(srv->engine, dir, session->cwd,
                                    session->pins, session->pins_len, err);
     if (run->turn == NULL) {
+      device_release(srv, session, &run->devlock);
+      wd_jobring_free(run->ring);
       free(run);
       return NULL;
     }
@@ -3170,6 +3203,7 @@ static void run_after(wd_server *srv, wd_run *run, int rc, char *err) {
       }
     }
     run_park(srv, run, kind);
+    free(err);
     return;
   }
   if (rc != 0)
