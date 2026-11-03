@@ -57,14 +57,23 @@ void wd_search_free(wd_search *search) {
 
 int wd_search_index(wd_search *search, const char *session, uint64_t seq,
                     const char *role, const char *ts, const char *text) {
-  if (search == NULL || text == NULL || text[0] == '\0') return 0;
+  if (text == NULL) return 0;
+  return wd_search_index_len(search, session, seq, role, ts, text,
+                             strlen(text));
+}
+
+int wd_search_index_len(wd_search *search, const char *session, uint64_t seq,
+                        const char *role, const char *ts, const char *text,
+                        size_t len) {
+  if (search == NULL || text == NULL || len == 0) return 0;
+  text = text;
   static const char insert[] =
       "INSERT INTO transcript (text, session, seq, role, ts)"
       " VALUES (?1, ?2, ?3, ?4, ?5);";
   sqlite3_stmt *stmt = NULL;
   if (sqlite3_prepare_v2(search->db, insert, -1, &stmt, NULL) != SQLITE_OK)
     return -1;
-  sqlite3_bind_text(stmt, 1, text, -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(stmt, 1, text, (int)len, SQLITE_TRANSIENT);
   sqlite3_bind_text(stmt, 2, session != NULL ? session : "", -1,
                     SQLITE_TRANSIENT);
   sqlite3_bind_int64(stmt, 3, (sqlite3_int64)seq);

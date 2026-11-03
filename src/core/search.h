@@ -25,6 +25,9 @@ void wd_search_free(wd_search *search);
 
 int wd_search_index(wd_search *search, const char *session, uint64_t seq,
                     const char *role, const char *ts, const char *text);
+int wd_search_index_len(wd_search *search, const char *session, uint64_t seq,
+                        const char *role, const char *ts, const char *text,
+                        size_t len);
 
 size_t wd_search_query(wd_search *search, const char *query,
                        const char *session, size_t limit, uint64_t before,

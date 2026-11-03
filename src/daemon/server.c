@@ -1171,6 +1171,14 @@ static void reindex_search(wd_server *srv) {
   }
 }
 
+static void index_text_len(wd_server *srv, const char *session, uint64_t seq,
+                           const char *role, const char *text, size_t len) {
+  if (srv == NULL || srv->search == NULL || text == NULL || len == 0) return;
+  char when[64] = {0};
+  wd_now_text(when, sizeof(when));
+  wd_search_index_len(srv->search, session, seq, role, when, text, len);
+}
+
 static void index_text(wd_server *srv, const char *session, uint64_t seq,
                        const char *role, const char *text) {
   if (srv == NULL || srv->search == NULL || text == NULL || text[0] == '\0')
@@ -3013,8 +3021,8 @@ static void run_free(wd_server *srv, wd_run *run) {
     size_t said = wd_jobring_len(run->ring);
     if (said > 0) {
       const char *text = wd_jobring_data(run->ring);
-      index_text(srv, run->session_id, wd_jobring_next(run->ring), "assistant",
-                 text);
+      index_text_len(srv, run->session_id, wd_jobring_next(run->ring),
+                     "assistant", text, said);
     }
   }
   if (run->turn != NULL) {
