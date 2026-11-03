@@ -57,6 +57,14 @@ int main(void) {
   assert(found <= 8);
   wd_search_hits_free(hits, found);
 
+  assert(wd_search_index_len(search, "s3", 9, "assistant", "t9",
+                             "alpha beta gamma", 10) == 0);
+  found = wd_search_query(search, "alpha", "s3", 4, 0, hits, 4, &next, &total);
+  assert(found == 1);
+  assert(strstr(hits[0].text, "gamma") == NULL);
+  assert(strstr(hits[0].snippet, "gamma") == NULL);
+  wd_search_hits_free(hits, found);
+
   wd_search_free(search);
   printf("search tests passed\n");
   return 0;
