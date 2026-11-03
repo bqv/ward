@@ -46,7 +46,16 @@ for `/estate/*` and nothing else.
 
 ## Status
 
-The transport and the reader are in, and `estate_test` gates the document over a fixture socket. What is still not exercised is the read against demesne itself: that was measured by hand. Nothing can be
+The transport and the reader are in, and `estate_test` gates the document over a fixture socket. It also has an opt-in live
+mode, `WARD_ESTATE_LIVE=gpu ./out/estate_test`, which reads the real socket with ward's own reader rather than curl.
+
+Measured that way on 2026-11-03, after demesne b02fa56:
+
+    live estate: group=gpu holders=0 since_ms=0 slots=2
+
+`holders` empty and `since_ms` 0 with llama running is the stricter holder rule working: a router holds the card only while a
+request is in flight or a model is resident, and llama had none loaded. Earlier the same document said `holders: ["llama"]`
+while nothing was loaded, which is the field lying rather than the reader. Nothing can be
 tested live until demesne 0.3.0 is deployed at `$XDG_RUNTIME_DIR/demesne.sock` —
 what owns `:55558` today is stadi 0.2.0, which has no `-socket`. The shape here is
 committed and stable, so the capability can be written against it and left

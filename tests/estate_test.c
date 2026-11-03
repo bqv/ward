@@ -94,6 +94,23 @@ int main(void) {
   assert(live.slots_len == 1 && strcmp(live.slots[0].state, "loading") == 0);
   waitpid(idle_server, NULL, 0);
 
+  const char *live_group = getenv("WARD_ESTATE_LIVE");
+  if (live_group != NULL && live_group[0] != '\0') {
+    const char *path = getenv("WARD_DEMESNE_SOCKET");
+    if (path == NULL || path[0] == '\0')
+      path = "/run/user/1000/demesne.sock";
+    wd_estate_card real;
+    if (wd_estate_card_read(path, live_group, &real, &err) != 0) {
+      fprintf(stderr, "live estate read failed: %s\n",
+              err != NULL ? err : "(none)");
+      assert(0);
+    }
+    assert(strcmp(real.group, live_group) == 0);
+    printf("live estate: group=%s holders=%zu since_ms=%llu slots=%zu\n",
+           real.group, real.holders_len, (unsigned long long)real.since_ms,
+           real.slots_len);
+  }
+
   printf("estate tests passed\n");
   return 0;
 }
