@@ -61,6 +61,7 @@ public:
     Q_PROPERTY(int contextUsed READ contextUsed NOTIFY contextChanged)
     Q_PROPERTY(int contextSize READ contextSize NOTIFY contextSizeChanged)
     Q_PROPERTY(QVariantList jobs READ jobs NOTIFY jobsChanged)
+    Q_PROPERTY(QVariantMap settings READ settings NOTIFY settingsChanged)
 
     Q_PROPERTY(QVariantList todos READ todos NOTIFY todosChanged)
     Q_PROPERTY(QVariantMap goal READ goal NOTIFY goalChanged)
@@ -132,6 +133,7 @@ public:
     int contextUsed() const { return m_contextUsed; }
     int contextSize() const { return m_contextSize; }
     QVariantList jobs() const { return m_jobs; }
+    QVariantMap settings() const { return m_settings; }
 
     QVariantList todos() const { return m_todos; }
     QVariantMap goal() const { return m_goal; }
@@ -230,6 +232,8 @@ public:
     Q_INVOKABLE void readBlob(const QString &path, qint64 offset, qint64 len);
     Q_INVOKABLE void refreshApprovals();
     Q_INVOKABLE void refreshQueue();
+    Q_INVOKABLE void refreshSettings();
+    Q_INVOKABLE void setSetting(const QString &key, const QVariant &value);
 
     Q_INVOKABLE void wardCall(const QString &method, const QVariantMap &params);
     Q_INVOKABLE QStringList protocolMethods() const;
@@ -256,6 +260,7 @@ signals:
     void contextChanged();
     void contextSizeChanged();
     void jobsChanged();
+    void settingsChanged();
     void todosChanged();
     void goalChanged();
     void changedFilesChanged();
@@ -372,6 +377,7 @@ private:
     int m_contextUsed = 0;
     int m_contextSize = 0;
     QVariantList m_jobs;
+    QVariantMap m_settings;
 
     QVariantList m_todos;
     QVariantMap m_goal;

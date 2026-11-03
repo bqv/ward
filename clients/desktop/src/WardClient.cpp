@@ -429,6 +429,7 @@ void WardClient::connectToDaemon()
     refreshConfigOptions();
     refreshApprovals();
     refreshQueue();
+    refreshSettings();
     refreshPermissionPresets();
 }
 
@@ -717,6 +718,8 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
             m_accessNotice = text;
             emit accessNoticeChanged();
         }
+        if (method == QLatin1String("settings.set"))
+            emit railNotice(text, true);
         if (method == QLatin1String("attachment.add")) {
             for (int i = m_pendingAttachments.size() - 1; i >= 0; --i) {
                 if (m_pendingAttachments.at(i).toMap().value(QStringLiteral("name")).toString()
@@ -812,6 +815,13 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
             m_busy = false;
             emit busyChanged();
         }
+    } else if (method == QLatin1String("settings.get")) {
+        if (m_settings != result) {
+            m_settings = result;
+            emit settingsChanged();
+        }
+    } else if (method == QLatin1String("settings.set")) {
+        refreshSettings();
     } else if (method == QLatin1String("session.queue")) {
         const QVariantList items = result.value(QStringLiteral("items")).toList();
         QVariantList rows;
@@ -1505,6 +1515,20 @@ void WardClient::loadEarlierHistory()
 }
 
 
+void WardClient::refreshSettings()
+{
+    if (m_fd >= 0)
+        sendRequest(QStringLiteral("settings.get"));
+}
+
+void WardClient::setSetting(const QString &key, const QVariant &value)
+{
+    if (m_fd < 0 || key.isEmpty())
+        return;
+    sendRequest(QStringLiteral("settings.set"),
+                {{QStringLiteral("key"), key}, {QStringLiteral("value"), value}});
+}
+
 void WardClient::refreshQueue()
 {
     if (m_fd >= 0 && !m_sessionId.isEmpty())
@@ -2070,6 +2094,7 @@ QStringList WardClient::protocolMethods() const
             QStringLiteral("session.cancel"), QStringLiteral("session.compact"),
             QStringLiteral("session.checkpoint"), QStringLiteral("session.undo"),
             QStringLiteral("session.set_model"), QStringLiteral("session.set_system"),
+            QStringLiteral("settings.get"), QStringLiteral("settings.set"),
             QStringLiteral("session.upgrade"), QStringLiteral("prompt.preview"),
             QStringLiteral("session.undo"), QStringLiteral("session.search"),
             QStringLiteral("session.checkpoint"),

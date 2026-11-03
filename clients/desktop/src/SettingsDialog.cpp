@@ -4,6 +4,7 @@
 #include "ShellChrome.h"
 #include "Theme.h"
 
+#include <QCheckBox>
 #include <QCoreApplication>
 #include <QDebug>
 #include <QFileInfo>
@@ -11,6 +12,7 @@
 #include <QInputDialog>
 #include <QProcess>
 #include <QSettings>
+#include <QSpinBox>
 #include <QStandardPaths>
 #include <QLabel>
 #include <QListWidget>
@@ -96,6 +98,25 @@ SettingsDialog::SettingsDialog(ClientFacade *facade, QWidget *parent)
                                                "a steered message joins the turn already running."),
                                 theme->dim(), Chrome::uiFont(theme->fontData())));
 
+    if (m_facade != nullptr && m_facade->transportName() == QLatin1String("ward")) {
+        layout->addSpacing(theme->space3());
+        layout->addWidget(textLabel(this, QStringLiteral("Daemon"), theme->accent(),
+                                    Chrome::monoFont(theme->fontData())));
+        layout->addWidget(textLabel(this, QStringLiteral("Concurrent turns"), theme->fg(),
+                                    Chrome::uiFont(theme->fontUI())));
+        m_maxRuns = new QSpinBox(this);
+        m_maxRuns->setRange(1, 64);
+        m_maxRuns->setFont(Chrome::uiFont(theme->fontUI()));
+        layout->addWidget(m_maxRuns, 0, Qt::AlignLeft);
+        m_debug = new QCheckBox(QStringLiteral("Debug logging"), this);
+        m_debug->setFont(Chrome::uiFont(theme->fontUI()));
+        layout->addWidget(m_debug);
+        m_daemonNote = textLabel(this, QStringLiteral("Stored beside models.toml; applies immediately."),
+                                 theme->dim(), Chrome::uiFont(theme->fontData()));
+        layout->addWidget(m_daemonNote);
+        m_hasSettings = true;
+    }
+
     layout->addSpacing(theme->space3());
     layout->addWidget(textLabel(this, QStringLiteral("QUIC device"), theme->accent(),
                                 Chrome::monoFont(theme->fontData())));
@@ -164,6 +185,11 @@ SettingsDialog::SettingsDialog(ClientFacade *facade, QWidget *parent)
 
     if (m_facade != nullptr) {
         connect(m_facade, &ClientFacade::busyEnterChanged, this, &SettingsDialog::reload);
+        if (QObject *transport = m_facade->transport()) {
+            if (transport->metaObject()->indexOfSignal("settingsChanged()") >= 0)
+                connect(transport, SIGNAL(settingsChanged()), this,
+                        SLOT(reloadSettings()));
+        }
         connect(m_facade, &ClientFacade::sessionsChanged,
                 this, &SettingsDialog::reloadArchivedSessions);
     }
@@ -176,6 +202,9 @@ void SettingsDialog::showDialog()
 {
     reload();
     reloadArchivedSessions();
+    if (m_hasSettings && m_facade && m_facade->transport())
+        QMetaObject::invokeMethod(m_facade->transport(), "refreshSettings");
+    reloadSettings();
     open();
     raise();
     activateWindow();
@@ -237,6 +266,23 @@ void SettingsDialog::pairDevice()
     m_pair->setEnabled(true);
 }
 
+void SettingsDialog::reloadSettings()
+{
+    if (!m_hasSettings || m_facade == nullptr || m_facade->transport() == nullptr)
+        return;
+    const QVariantMap settings =
+        m_facade->transport()->property("settings").toMap();
+    if (settings.isEmpty())
+        return;
+    const int maxRuns = settings.value(QStringLiteral("max_runs"), 8).toInt();
+    m_maxRuns->blockSignals(true);
+    m_maxRuns->setValue(qBound(1, maxRuns, 64));
+    m_maxRuns->blockSignals(false);
+    m_debug->blockSignals(true);
+    m_debug->setChecked(settings.value(QStringLiteral("debug")).toBool());
+    m_debug->blockSignals(false);
+}
+
 void SettingsDialog::reloadArchivedSessions()
 {
     struct ArchivedRow
@@ -296,6 +342,18 @@ void SettingsDialog::apply()
 {
     if (m_facade == nullptr)
         return;
+    if (m_hasSettings && m_facade->transport() != nullptr) {
+        const QVariantMap current =
+            m_facade->transport()->property("settings").toMap();
+        if (m_maxRuns->value() != current.value(QStringLiteral("max_runs")).toInt())
+            QMetaObject::invokeMethod(m_facade->transport(), "setSetting",
+                                      Q_ARG(QString, QStringLiteral("max_runs")),
+                                      Q_ARG(QVariant, m_maxRuns->value()));
+        if (m_debug->isChecked() != current.value(QStringLiteral("debug")).toBool())
+            QMetaObject::invokeMethod(m_facade->transport(), "setSetting",
+                                      Q_ARG(QString, QStringLiteral("debug")),
+                                      Q_ARG(QVariant, m_debug->isChecked()));
+    }
     const QString mode = m_steerMode->isChecked() ? QStringLiteral("steer")
                                                   : QStringLiteral("queue");
     if (mode == m_facade->busyEnter())
