@@ -3355,9 +3355,11 @@ static void handle_session_prompt(wd_server *srv, wd_conn *conn, uint64_t id,
   free(session_id);
   free(text);
   if (rc != 0 && rc != WD_TURN_PENDING) {
+    char *said = err != NULL ? strdup(err) : NULL;
     run_after(srv, run, rc, err);
     respond_internal(srv, conn, id,
-                     err != NULL && err[0] != '\0' ? err : "turn failed");
+                     said != NULL && said[0] != '\0' ? said : "turn failed");
+    free(said);
     return;
   }
   int kind = rc == WD_TURN_PENDING ? wd_turn_pending_kind(run->turn) : 0;
