@@ -68,3 +68,33 @@ Left open, in the auditor's order of severity:
 
 The audit found no double free, no use-after-free, no mutate-while-iterating defect and no sqlite or fd lifetime bug in those
 directories.
+
+## wasm, net and modules audit, 2026-11-03
+
+Scope correction from the auditor: `src/wasm/` holds only `host.c`/`host.h`; limits and migration live there, the ABI codec is
+`modules/abi/wd_abi.h`, and **there is no instance pool** — every turn builds its own instances and frees them once. These
+are unverified findings; none were applied.
+
+- `modules/abi/wd_abi.h:133` **critical** — `r->at + len > r->len` wraps in uint32, so a text header of 0xFFFFFFFF passes the
+  bound and `wd_r_text`'s `n + 1 > cap` wraps too. Reachability unconfirmed (core never emits such a length) but this is every
+  guest's only defence. Fix: `len > r->len - r->at`, `n >= cap`.
+- `src/wasm/host.c:604,626,652,748` **high** — the 8-byte result descriptor is never zeroed, so a guest that returns early
+  replays the previous call's descriptor as this call's result. Fix: write 0xFFFFFFFF on alloc and treat it as "no output".
+- `modules/*/ward_alloc` + `src/wasm/host.c:572` **high** — guests signal exhaustion with 0, which is a legal wasm address and
+  is accepted, so an oversized input is memcpy'd over the guest's low memory. Fix: reject `at == 0`.
+- `modules/provider/provider.c:271` **high** — history truncates at 32 by the loop condition without consuming the rest, so the
+  reader is left mid-array and the call writes no reply. Fix: loop to `hn`, guard only the store.
+- `modules/provider/provider.c:468` **high** — a request over the 24 KiB reply buffer returns with no reply and no error.
+- `src/net/http.c:174` **high** — an interim `100 Continue` is latched as the final status for streamed turns. Fix: only latch
+  `>= 200`.
+- `src/net/http.c:112,71,78,120` **medium** — `*err` written without a NULL guard while its sibling guards it.
+- `src/net/http.c:316` **medium** — `wd_http_job_finish` blocks the event loop on the pipe with no deadline.
+- `src/wasm/host.c:151` **medium** — stdout capture doubles without a ceiling.
+- `modules/{tools,code,policy,judge,skills,python}.c` **medium** — no descriptor written when an answer does not fit, which the
+  host defect above turns into a stale replay.
+- `src/net/estate.c:19,24,37,46,84` **medium** — the scanner takes the next quote after a key (`"group":null` adopts the next
+  token), never skips whitespace after `[`/`,` so spaced holders read as none, trusts `strtoull` on raw bytes, truncates names
+  silently at 16/32, and interpolates the group into the URL unencoded.
+- `src/net/http.c:44` **medium** — the unix-socket path is a process global holding a borrowed pointer.
+- `modules/policy/policy.c:31` **medium** — rule strings live in 8-byte buffers, so a longer rule yields no decision at all.
+- `modules/schedule/schedule.c:90` **medium** — `from_ms` accumulates digits into uint64 unchecked.
