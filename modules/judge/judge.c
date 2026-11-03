@@ -4,6 +4,29 @@
 
 #include "wd_abi.h"
 
+__attribute__((import_module("ward"), import_name("cap")))
+extern void ward_cap(uint32_t at, uint32_t len, uint32_t out);
+
+static uint8_t callbuf[4096];
+
+static int cap_call(const char *capability, const uint8_t *payload, uint32_t len,
+                    uint8_t *out, uint32_t *out_len) {
+  uint32_t name_len = wd_len(capability);
+  if (4 + name_len + len > sizeof(callbuf)) return -1;
+  wd_put32(callbuf, name_len);
+  for (uint32_t i = 0; i < name_len; i++)
+    callbuf[4 + i] = (uint8_t)capability[i];
+  for (uint32_t i = 0; i < len; i++) callbuf[4 + name_len + i] = payload[i];
+  uint32_t desc[2];
+  ward_cap((uint32_t)(uintptr_t)callbuf, 4 + name_len + len,
+           (uint32_t)(uintptr_t)desc);
+  if (desc[1] > 4096) return -1;
+  *out_len = desc[1];
+  const uint8_t *p = (const uint8_t *)(uintptr_t)desc[0];
+  for (uint32_t i = 0; i < desc[1]; i++) out[i] = p[i];
+  return 0;
+}
+
 #define HEAP_SIZE 4096u
 #define REPLY_SIZE 1024u
 #define TEXT_SIZE 256u
@@ -70,6 +93,42 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
              wd_key_eq((const uint8_t *)tool, wd_len(tool), "exec")) {
     verdict = "allow";
     reason = "the payload is a plain command";
+  }
+
+  if (wd_key_eq((const uint8_t *)verdict, wd_len(verdict), "allow") &&
+      (wd_key_eq((const uint8_t *)tool, wd_len(tool), "write") ||
+       wd_key_eq((const uint8_t *)tool, wd_len(tool), "edit") ||
+       wd_key_eq((const uint8_t *)tool, wd_len(tool), "exec"))) {
+    uint8_t asked[2048];
+    wd_w q;
+    wd_w_init(&q, asked, sizeof(asked));
+    wd_w_map(&q, 1);
+    wd_w_textz(&q, "text");
+    wd_w_textz(&q, payload);
+    uint8_t judged[512];
+    uint32_t judged_len = 0;
+    if (!q.failed &&
+        cap_call("judge.score", asked, q.at, judged, &judged_len) == 0) {
+      wd_r jr = {judged, judged_len, 0, 0};
+      uint32_t jn = 0;
+      uint32_t score_bp = 0;
+      if (wd_r_map(&jr, &jn) == 0) {
+        for (uint32_t k = 0; k < jn; k++) {
+          const uint8_t *jk = 0;
+          uint32_t jkn = 0;
+          if (wd_r_text_ptr(&jr, &jk, &jkn) != 0) break;
+          if (wd_key_eq(jk, jkn, "score_bp")) {
+            if (wd_r_uint(&jr, &score_bp) != 0) score_bp = 0;
+          } else if (wd_r_skip(&jr) != 0) {
+            break;
+          }
+        }
+      }
+      if (score_bp >= 500) {
+        verdict = "ask";
+        reason = "the decision model scored this action as risky";
+      }
+    }
   }
 
   wd_w w;
