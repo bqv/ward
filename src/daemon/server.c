@@ -38,6 +38,7 @@
 #include "core/devlock.h"
 #include "core/files.h"
 #include "core/jobring.h"
+#include "core/search.h"
 #include "core/settings.h"
 #include "core/presets.h"
 #include "core/probe.h"
@@ -177,6 +178,7 @@ typedef struct {
   wd_models *models;
   wd_credentials *credentials;
   wd_labels *labels;
+  wd_search *search;
   wd_scheduler *scheduler;
   wd_sched *schedules;
   wd_queue *queue;
@@ -1142,6 +1144,15 @@ static cbor_item_t *dup_item(cbor_item_t *item) {
   return copy;
 }
 
+static void index_text(wd_server *srv, const char *session, uint64_t seq,
+                       const char *role, const char *text) {
+  if (srv == NULL || srv->search == NULL || text == NULL || text[0] == '\0')
+    return;
+  char when[64] = {0};
+  wd_now_text(when, sizeof(when));
+  wd_search_index(srv->search, session, seq, role, when, text);
+}
+
 static int turn_emit(void *ctx, const char *event, cbor_item_t *payload,
                      char **err) {
   wd_turn_ctx *tc = ctx;
@@ -1344,6 +1355,7 @@ static void start_session_turn(wd_server *srv, wd_session *session,
       if (wd_session_emit(session, "session.time", time_payload, &time_seq) == 0)
         conn_broadcast(srv, session, "session.time", time_seq, time_event);
       if (wd_session_emit(session, "session.prompted", asked, &seq) == 0) {
+        index_text(srv, session->id, seq, "user", text);
         cbor_item_t *event = wd_map(1);
         wd_put(event, "text", wd_text(text));
         conn_broadcast(srv, session, "session.prompted", seq, event);
@@ -2276,6 +2288,54 @@ static void handle_session_queue(wd_server *srv, wd_conn *conn, uint64_t id,
   conn_arm(srv, conn);
 }
 
+static void handle_search_text(wd_server *srv, wd_conn *conn, uint64_t id,
+                               cbor_item_t *params) {
+  char *query = wd_text_copy(wd_get(params, "query"));
+  char *session = wd_text_copy(wd_get(params, "session"));
+  uint64_t limit = 0;
+  uint64_t before = 0;
+  wd_uint_of(wd_get(params, "limit"), &limit);
+  wd_uint_of(wd_get(params, "before"), &before);
+  if (query == NULL || query[0] == '\0') {
+    free(session);
+    conn_send_error(conn, id, WD_ERR_INVALID_PARAMS, "query is required");
+    conn_arm(srv, conn);
+    return;
+  }
+  wd_search_hit hits[200];
+  uint64_t next = 0;
+  uint64_t total = 0;
+  size_t found = srv->search != NULL
+                     ? wd_search_query(srv->search, query, session,
+                                       (size_t)limit, before, hits, 200, &next,
+                                       &total)
+                     : 0;
+  cbor_item_t *list = wd_array(found);
+  for (size_t i = 0; i < found; i++) {
+    cbor_item_t *hit = wd_map(7);
+    wd_put(hit, "session", wd_text(hits[i].session));
+    wd_put(hit, "seq", wd_uint(hits[i].seq));
+    wd_put(hit, "role", wd_text(hits[i].role));
+    wd_put(hit, "text", wd_text(hits[i].text != NULL ? hits[i].text : ""));
+    wd_put(hit, "snippet",
+           wd_text(hits[i].snippet != NULL ? hits[i].snippet : ""));
+    wd_put(hit, "score", cbor_build_float8(hits[i].score));
+    wd_put(hit, "ts", wd_text(hits[i].ts));
+    bool pushed = cbor_array_push(list, hit);
+    cbor_decref(&hit);
+    if (!pushed) break;
+  }
+  wd_search_hits_free(hits, found);
+  cbor_item_t *result = wd_map(3);
+  wd_put(result, "hits", list);
+  wd_put(result, "next", wd_uint(next));
+  wd_put(result, "total", wd_uint(total));
+  free(query);
+  free(session);
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
 static void handle_settings_get(wd_server *srv, wd_conn *conn, uint64_t id) {
   cbor_item_t *result = wd_map(2);
   wd_put(result, "max_runs", wd_uint((uint64_t)srv->settings.max_runs));
@@ -2878,6 +2938,14 @@ static void persist_state(wd_server *srv, wd_run *run) {
 }
 
 static void run_free(wd_server *srv, wd_run *run) {
+  if (run->turn != NULL && run->ring != NULL) {
+    size_t said = wd_jobring_len(run->ring);
+    if (said > 0) {
+      const char *text = wd_jobring_data(run->ring);
+      index_text(srv, run->session_id, wd_jobring_next(run->ring), "assistant",
+                 text);
+    }
+  }
   if (run->turn != NULL) {
     wd_session *owner = wd_session_find(&srv->store, run->session_id);
     char *late = NULL;
@@ -3012,8 +3080,10 @@ static void handle_session_prompt(wd_server *srv, wd_conn *conn, uint64_t id,
     cbor_item_t *asked_event = wd_map(1);
     wd_put(asked_event, "text", wd_text(text));
     uint64_t asked_seq = 0;
-    if (wd_session_emit(session, "session.prompted", asked, &asked_seq) == 0)
+    if (wd_session_emit(session, "session.prompted", asked, &asked_seq) == 0) {
+      index_text(srv, session->id, asked_seq, "user", text);
       conn_broadcast(srv, session, "session.prompted", asked_seq, asked_event);
+    }
     cbor_item_t *result = wd_map(2);
     wd_put(result, "session", wd_text(session->id));
     wd_put(result, "steered", cbor_build_bool(true));
@@ -3077,8 +3147,10 @@ static void handle_session_prompt(wd_server *srv, wd_conn *conn, uint64_t id,
     wd_put(asked_event, "text", wd_text(text));
     uint64_t asked_seq = 0;
     if (wd_session_emit(session, "session.prompted", asked_payload,
-                        &asked_seq) == 0)
+                        &asked_seq) == 0) {
+      index_text(srv, session->id, asked_seq, "user", text);
       conn_broadcast(srv, session, "session.prompted", asked_seq, asked_event);
+    }
     cbor_item_t *result = wd_map(3);
     wd_put(result, "session", wd_text(session->id));
     wd_put(result, "queued", cbor_build_bool(true));
@@ -3778,6 +3850,8 @@ static void handle_request(wd_server *srv, wd_conn *conn, uint64_t id,
     handle_policy_select(srv, conn, id, params);
   } else if (strcmp(method, "module.enable") == 0) {
     handle_module_enable(srv, conn, id, params);
+  } else if (strcmp(method, "session.search_text") == 0) {
+    handle_search_text(srv, conn, id, params);
   } else if (strcmp(method, "settings.get") == 0) {
     handle_settings_get(srv, conn, id);
   } else if (strcmp(method, "settings.set") == 0) {
@@ -4359,6 +4433,16 @@ int wd_up_run(const wd_up_config *cfg) {
   srv.approvals = wd_approvals_new();
   if (srv.approvals == NULL) goto cleanup;
   char *labels_err = NULL;
+  srv.search = NULL;
+  {
+    char *search_err = NULL;
+    srv.search = wd_search_open(srv.state_dir, &search_err);
+    if (srv.search == NULL) {
+      fprintf(stderr, "ward: search unavailable: %s\n",
+              search_err != NULL ? search_err : "unknown");
+      free(search_err);
+    }
+  }
   srv.labels = wd_labels_open(srv.state_dir, &labels_err);
   if (srv.labels == NULL) {
     fprintf(stderr, "ward: labels: %s\n",
@@ -4583,6 +4667,7 @@ cleanup:
   wd_models_free(srv.models);
   wd_credentials_free(srv.credentials);
   wd_labels_free(srv.labels);
+  wd_search_free(srv.search);
   free(srv.default_model);
   free(srv.quic_endpoint);
   free(srv.module_dir);

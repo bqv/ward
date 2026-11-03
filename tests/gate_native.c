@@ -543,6 +543,29 @@ int main(void) {
   wd_free(back_done);
   close(admin.fd);
 
+  wd_client searcher;
+  assert(wd_client_connect(&searcher, sock) == 0);
+  assert(wd_client_handshake(&searcher) == 0);
+  cbor_item_t *ask = wd_map(2);
+  wd_put(ask, "query", wd_text("second"));
+  wd_put(ask, "limit", wd_uint(5));
+  cbor_item_t *found = NULL;
+  assert(wd_client_call(&searcher, "session.search_text", ask, &found) == 0);
+  cbor_item_t *hits = wd_get(found, "hits");
+  assert(hits != NULL && cbor_array_size(hits) >= 1);
+  uint64_t seen_total = 0;
+  assert(wd_uint_of(wd_get(found, "total"), &seen_total));
+  assert(seen_total >= 1);
+  wd_free(found);
+  cbor_item_t *empty = wd_map(1);
+  wd_put(empty, "query", wd_text("zebra"));
+  cbor_item_t *nothing = NULL;
+  assert(wd_client_call(&searcher, "session.search_text", empty, &nothing) == 0);
+  cbor_item_t *empty_hits = wd_get(nothing, "hits");
+  assert(empty_hits != NULL && cbor_array_size(empty_hits) == 0);
+  wd_free(nothing);
+  close(searcher.fd);
+
   kill(pid, SIGTERM);
   int status = 0;
   waitpid(pid, &status, 0);

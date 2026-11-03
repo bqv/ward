@@ -55,6 +55,7 @@ int main(void) {
 
   found = wd_search_query(search, "widget", NULL, 500, 0, hits, 8, &next, &total);
   assert(found <= 8);
+  wd_search_hits_free(hits, found);
 
   wd_search_free(search);
   printf("search tests passed\n");
