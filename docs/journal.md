@@ -2331,3 +2331,10 @@ index each entry by role. Idempotent because it runs only when the table is empt
 
 Not written yet: the history item's role/content key names need checking against `session.c` before indexing, and that is the whole
 of the remaining work.
+
+Hundred-and-seventy-seventh: the reindex is in. At startup, if the search table is empty, the daemon walks `srv.store.items` and
+indexes each session's history through `wd_session_history` — the same code a turn uses — so there is no second parser and no event
+format to keep in step. The empty check is the idempotence.
+
+It is **not gated**, which is the honest label: the gate that would prove it starts a daemon, writes a prompt, stops it, deletes
+`search.db`, starts again and searches. Until that exists, the reindex is code that has been read and compiled, not measured.
