@@ -343,7 +343,8 @@ static uint32_t judge_model_score_text(const char *text) {
   }
   uint32_t bp = 0;
   if (response.status == 200) {
-    const char *found = strstr((const char *)response.body, "\"score\"");
+    const char *found = strstr((const char *)response.body, "\"noul\"");
+    if (found == NULL) found = strstr((const char *)response.body, "\"score\"");
     if (found != NULL) {
       const char *colon = strchr(found, ':');
       if (colon != NULL) bp = (uint32_t)(strtod(colon + 1, NULL) * 1000);
@@ -356,62 +357,6 @@ static uint32_t judge_model_score_text(const char *text) {
 static uint32_t judge_model_score_for(const char *tool, const char *payload) {
   (void)tool;
   return judge_model_score_text(payload);
-}
-
-static uint32_t judge_model_score(const uint8_t *in, size_t in_len) {
-  const char *base = getenv("WARD_JUDGE_ENDPOINT");
-  if (base == NULL || base[0] == '\0') return 0;
-  cbor_item_t *request = wd_decode(in, in_len);
-  char *text = request != NULL ? wd_text_copy(wd_get(request, "text")) : NULL;
-  if (text == NULL) {
-    wd_free(request);
-    return 0;
-  }
-  static char body[8192];
-  static char escaped[6144];
-  json_escape(text, escaped, sizeof(escaped));
-  free(text);
-  const char *model = getenv("WARD_JUDGE_MODEL");
-  snprintf(body, sizeof(body),
-           "{\"model\":\"%s\",\"state\":\"%s\",\"questions\":{\"risk\":"
-           "{\"type\":\"noul\",\"instructions\":\"Does this action risk "
-           "data loss or leaving this machine?\"}}}",
-           model != NULL ? model : "Kev-0.8B-Q8_0", escaped);
-  wd_free(request);
-  char url[512];
-  snprintf(url, sizeof(url), "%s/v1/systemone", base);
-  wd_http_response response;
-  char *err = NULL;
-  if (wd_http_request(url, "POST", body, NULL, 10000, 1u << 20, &response,
-                      &err) != 0) {
-    free(err);
-    return 0;
-  }
-  uint32_t bp = 0;
-  if (response.status == 200) {
-    const char *found = strstr((const char *)response.body, "\"score\"");
-    if (found != NULL) {
-      const char *colon = strchr(found, ':');
-      if (colon != NULL) bp = (uint32_t)(strtod(colon + 1, NULL) * 1000);
-    }
-  }
-  wd_http_response_free(&response);
-  return bp;
-}
-
-static int judge_score(wd_turn *turn, const uint8_t *in, size_t in_len,
-                       uint8_t **out, size_t *out_len, char **err) {
-  (void)turn;
-  uint32_t bp = judge_model_score(in, in_len);
-  cbor_item_t *reply = wd_map(1);
-  wd_put(reply, "score_bp", wd_uint(bp));
-  uint8_t *bytes = wd_encode(reply, out_len);
-  if (bytes == NULL) {
-    *err = strdup("judge.score: cannot encode the reply");
-    return -1;
-  }
-  *out = bytes;
-  return 0;
 }
 
 static bool within_root(const char *root, const char *path) {
@@ -1387,8 +1332,6 @@ static int turn_capability(void *ctx, const char *capability,
   wd_turn *turn = ctx;
   if (strcmp(capability, "engine.call") == 0)
     return wd_instance_call(turn->eng, in, in_len, out, out_len, err);
-  if (strcmp(capability, "judge.score") == 0)
-    return judge_score(turn, in, in_len, out, out_len, err);
   if (strcmp(capability, "net.request") == 0)
     return net_request(turn, in, in_len, out, out_len, err);
   if (strcmp(capability, "code.outline") == 0)
