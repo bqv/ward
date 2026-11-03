@@ -163,19 +163,6 @@ fun SetupScreen(
                 onClick = submit,
             )
 
-            if (onPairQuic != null) {
-                TextButton(
-                    enabled = !busy && !quicPairing && url.isNotBlank(),
-                    onClick = { onPairQuic(url) },
-                ) {
-                    Text(
-                        text = if (quicPairing) "Pairing this phone…" else "Pair this phone for QUIC",
-                        style = DshType.bodySmall,
-                        color = colors.link,
-                    )
-                }
-            }
-
             if (busy) {
                 Text(
                     text = startupStep?.let { StartupCopy.detail(it) }.orEmpty(),
