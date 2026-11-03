@@ -1874,8 +1874,13 @@ fun ChatScreen(vm: DshViewModel) {
                 vm.signOut()
             },
             onDismiss = { showAbout = false },
-            onPairQuic = {
-                vm.pairForQuic(ui.activeUrl.ifBlank { ui.baseUrl })
+            onPairQuic = if (
+                ui.activeUrl.startsWith("quic://") ||
+                    ui.baseUrl.startsWith("quic://")
+            ) {
+                null
+            } else {
+                { vm.pairForQuic(ui.activeUrl.ifBlank { ui.baseUrl }) }
             },
             quicPairing = ui.quicPairing,
             quicPairError = ui.quicPairError,
