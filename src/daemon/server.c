@@ -40,6 +40,7 @@
 #include "core/jobring.h"
 #include "core/search.h"
 #include "core/settings.h"
+#include "net/estate.h"
 #include "core/presets.h"
 #include "core/probe.h"
 #include "net/http.h"
@@ -2316,6 +2317,48 @@ static void handle_session_queue(wd_server *srv, wd_conn *conn, uint64_t id,
   conn_arm(srv, conn);
 }
 
+static void handle_estate_card(wd_server *srv, wd_conn *conn, uint64_t id,
+                               cbor_item_t *params) {
+  char *group = wd_text_copy(wd_get(params, "group"));
+  const char *socket_path = getenv("WARD_DEMESNE_SOCKET");
+  if (socket_path == NULL || socket_path[0] == '\0')
+    socket_path = "/run/user/1000/demesne.sock";
+  wd_estate_card card;
+  char *err = NULL;
+  if (wd_estate_card_read(socket_path, group, &card, &err) != 0) {
+    conn_send_error(conn, id, WD_ERR_INTERNAL,
+                    err != NULL ? err : "the estate is unreachable");
+    free(err);
+    free(group);
+    conn_arm(srv, conn);
+    return;
+  }
+  free(group);
+  cbor_item_t *holders = wd_array(card.holders_len);
+  for (size_t i = 0; i < card.holders_len; i++) {
+    cbor_item_t *name = wd_text(card.holders[i]);
+    bool pushed = cbor_array_push(holders, name);
+    cbor_decref(&name);
+    if (!pushed) break;
+  }
+  cbor_item_t *slots = wd_array(card.slots_len);
+  for (size_t i = 0; i < card.slots_len; i++) {
+    cbor_item_t *slot = wd_map(2);
+    wd_put(slot, "name", wd_text(card.slots[i].name));
+    wd_put(slot, "state", wd_text(card.slots[i].state));
+    bool pushed = cbor_array_push(slots, slot);
+    cbor_decref(&slot);
+    if (!pushed) break;
+  }
+  cbor_item_t *result = wd_map(4);
+  wd_put(result, "group", wd_text(card.group));
+  wd_put(result, "holders", holders);
+  wd_put(result, "since_ms", wd_uint(card.since_ms));
+  wd_put(result, "slots", slots);
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
 static void handle_search_text(wd_server *srv, wd_conn *conn, uint64_t id,
                                cbor_item_t *params) {
   char *query = wd_text_copy(wd_get(params, "query"));
@@ -3878,6 +3921,8 @@ static void handle_request(wd_server *srv, wd_conn *conn, uint64_t id,
     handle_policy_select(srv, conn, id, params);
   } else if (strcmp(method, "module.enable") == 0) {
     handle_module_enable(srv, conn, id, params);
+  } else if (strcmp(method, "estate.card") == 0) {
+    handle_estate_card(srv, conn, id, params);
   } else if (strcmp(method, "session.search_text") == 0) {
     handle_search_text(srv, conn, id, params);
   } else if (strcmp(method, "settings.get") == 0) {

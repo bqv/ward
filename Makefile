@@ -73,6 +73,7 @@ CORE_SRC := \
            src/core/jobring.c \
            src/core/settings.c \
            src/core/search.c \
+           src/net/estate.c \
            src/core/presets.c \
            src/core/prompt.c \
            src/core/probe.c \

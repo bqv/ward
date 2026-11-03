@@ -18,7 +18,7 @@ Read it exactly as served:
   engines are up for the length of an eviction. Empty means idle. Do not assume
   length one and do not pick a "primary".
 - **`since_ms` is when the card became busy**, not when the request was made, and
-  **0 means unknown** (an engine demesne did not start, e.g. `llama` today).
+  **0 means unknown** (an engine demesne did not start; `llama` is no longer in that class — demesne starts it, so its holder reports a real time).
   Treat 0 as unknown, never as 1970.
 - **`state` is `running | loading | stopped`**, and `loading` is "about to hold
   the card" — a cold `sd` spends minutes there. Treating `loading` as free is how
