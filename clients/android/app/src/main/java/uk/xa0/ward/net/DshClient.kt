@@ -118,6 +118,8 @@ class DshClient(context: Context) {
 
     fun baseUrl(): HttpUrl? = displayUrlOf(config.baseUrl)
 
+    fun baseUrlText(): String = config.baseUrl.trim().trimEnd('/')
+
     fun isLanRoute(): Boolean = isPrivateLanHost(hostOf(config.baseUrl))
 
     fun lanDoorFault(): DoorFault? = null

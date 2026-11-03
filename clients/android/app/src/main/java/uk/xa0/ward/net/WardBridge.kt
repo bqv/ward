@@ -387,7 +387,8 @@ class WardBridge(
         val session = request.optString("workspaceFileScopeId").ifEmpty { request.optString("sessionId") }
         val raw = request.optString("path")
         val path = if (raw.isEmpty() || raw == ".") "" else raw
-        val result = api.listFiles(session, path)
+        val result = runCatching { api.hostList(path) }
+            .getOrElse { api.listFiles(session, path) }
         val entries = JSONArray()
         result.array("entries")?.items?.forEach { item ->
             val entry = (item as? Cbor.Map) ?: return@forEach

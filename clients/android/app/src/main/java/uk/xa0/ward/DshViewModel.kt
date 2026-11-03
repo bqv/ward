@@ -3729,7 +3729,7 @@ class DshViewModel(application: Application) : AndroidViewModel(application) {
      * with it why the LAN door is not the one in use, when it is not.
      */
     private fun publishRoute() {
-        val url = client.baseUrl()?.toString().orEmpty()
+        val url = client.baseUrlText()
         val lan = client.isLanRoute()
         val fault = client.lanDoorFault()
         val lanConfigured = client.hasLanCandidate()

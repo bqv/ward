@@ -180,6 +180,9 @@ class WardApi(private val connection: WardConnection) {
 
     // ---------------------------------------------------------------- files
 
+    suspend fun hostList(path: String): Cbor.Map =
+        connection.call("host.list", cborMap("path" to path.cbor())).asMap()
+
     suspend fun listFiles(id: String, path: String): Cbor.Map =
         connection.call("session.file_list", cborMap("id" to id.cbor(), "path" to path.cbor())).asMap()
 
