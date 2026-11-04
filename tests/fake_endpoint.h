@@ -119,6 +119,7 @@ static void serve(int fd) {
   int n = snprintf(response, sizeof(response),
                    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n"
                    "Connection: close\r\n\r\n"
+                   "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"weighing the reply\"}}]}\n\n"
                    "data: {\"choices\":[{\"delta\":{\"content\":\"%.*s\"}}]}\n\n"
                    "data: {\"choices\":[{\"delta\":{\"content\":\"%s\"}}]}\n\n"
                    "data: [DONE]\n\n",

@@ -3522,20 +3522,15 @@ static void tool_done(wd_server *srv, wd_run *run) {
   run_after(srv, run, rc, err);
 }
 
-static int stream_event(void *ctx, const wd_sse_event *event) {
-  stream_ctx *sc = ctx;
-  if (getenv("WARD_DEBUG") != NULL)
-    fprintf(stderr, "ward: sse event %zu bytes\n", event->data_len);
-  if (event->data == NULL || event->data_len < 12) return 0;
-  const char *at = NULL;
-  for (size_t i = 0; i + 11 < event->data_len; i++) {
-    if (memcmp(event->data + i, "\"content\":\"", 11) == 0) {
-      at = event->data + i + 11;
-      break;
-    }
-  }
-  if (at == NULL) return 0;
-  size_t room = (size_t)(event->data + event->data_len - at);
+static const char *json_string_at(const char *data, size_t len, const char *prefix) {
+  size_t plen = strlen(prefix);
+  if (len < plen) return NULL;
+  for (size_t i = 0; i + plen <= len; i++)
+    if (memcmp(data + i, prefix, plen) == 0) return data + i + plen;
+  return NULL;
+}
+
+static int push_delta(stream_ctx *sc, const char *kind, const char *at, size_t room) {
   char text[2048];
   size_t len = 0;
   for (size_t i = 0; i < room && len + 1 < sizeof(text); i++) {
@@ -3555,12 +3550,28 @@ static int stream_event(void *ctx, const wd_sse_event *event) {
   cbor_item_t *logged = wd_map(1);
   wd_put(logged, "text", wd_text_len(text, len));
   uint64_t seq = 0;
-  if (wd_session_emit(session, "text.delta", logged, &seq) != 0) return 0;
+  if (wd_session_emit(session, kind, logged, &seq) != 0) return 0;
   cbor_item_t *out = wd_map(1);
   wd_put(out, "text", wd_text_len(text, len));
-  conn_broadcast(sc->srv, session, "text.delta", seq, out);
+  conn_broadcast(sc->srv, session, kind, seq, out);
   sc->run->streamed++;
   return 0;
+}
+
+static int stream_event(void *ctx, const wd_sse_event *event) {
+  stream_ctx *sc = ctx;
+  if (getenv("WARD_DEBUG") != NULL)
+    fprintf(stderr, "ward: sse event %zu bytes\n", event->data_len);
+  if (event->data == NULL || event->data_len < 12) return 0;
+  const char *at = json_string_at(event->data, event->data_len,
+                                  "\"reasoning_content\":\"");
+  if (at != NULL)
+    return push_delta(sc, "reasoning.delta", at,
+                      (size_t)(event->data + event->data_len - at));
+  at = json_string_at(event->data, event->data_len, "\"content\":\"");
+  if (at == NULL) return 0;
+  return push_delta(sc, "text.delta", at,
+                    (size_t)(event->data + event->data_len - at));
 }
 
 static int read_stream(wd_server *srv, wd_run *run, bool *eof) {
