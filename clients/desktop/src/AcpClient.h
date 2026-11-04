@@ -221,6 +221,9 @@ public:
     /// streams, which arrive as a full replacement rather than a delta.
     void replaceLast(const QString &kind, const QString &text);
 
+    void markQueued(const QString &text);
+    void settleQueued(const QStringList &stillQueued);
+
     void clear();
 
 signals:

@@ -427,6 +427,31 @@ void AcpTranscript::replaceLast(const QString &kind, const QString &text)
     append(kind, text);
 }
 
+void AcpTranscript::markQueued(const QString &text)
+{
+    for (int i = static_cast<int>(m_rows.size()) - 1; i >= 0; --i) {
+        Row &row = m_rows[i];
+        if (row.kind != QLatin1String("user") || row.text != text)
+            continue;
+        row.status = QStringLiteral("queued");
+        emit dataChanged(index(i, 0), index(i, 0), {StatusRole});
+        return;
+    }
+}
+
+void AcpTranscript::settleQueued(const QStringList &stillQueued)
+{
+    for (int i = 0; i < static_cast<int>(m_rows.size()); ++i) {
+        Row &row = m_rows[i];
+        if (row.kind != QLatin1String("user") || row.status != QLatin1String("queued"))
+            continue;
+        if (stillQueued.contains(row.text))
+            continue;
+        row.status.clear();
+        emit dataChanged(index(i, 0), index(i, 0), {StatusRole});
+    }
+}
+
 void AcpTranscript::clear()
 {
     // The turn state belongs to the journal the rows came from, so it goes with

@@ -804,6 +804,7 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
         }
         if (result.value(QStringLiteral("queued")).toBool()) {
             const int ahead = result.value(QStringLiteral("ahead")).toInt();
+            m_transcript->markQueued(m_sentPrompt);
             m_queue = QVariantList{QVariantMap{
                 {QStringLiteral("id"), QStringLiteral("queued-0")},
                 {QStringLiteral("text"), m_sentPrompt},
@@ -875,14 +876,17 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
     } else if (method == QLatin1String("session.queue")) {
         const QVariantList items = result.value(QStringLiteral("items")).toList();
         QVariantList rows;
+        QStringList texts;
         for (const QVariant &value : items) {
             const QVariantMap item = value.toMap();
+            texts.append(item.value(QStringLiteral("text")).toString());
             rows.append(QVariantMap{
                 {QStringLiteral("id"), QStringLiteral("queue-%1").arg(rows.size())},
                 {QStringLiteral("text"), item.value(QStringLiteral("text"))},
                 {QStringLiteral("ahead"), item.value(QStringLiteral("ahead"))},
                 {QStringLiteral("steering"), false}});
         }
+        m_transcript->settleQueued(texts);
         if (rows != m_queue) {
             m_queue = rows;
             emit queueChanged();
@@ -1107,6 +1111,37 @@ void WardClient::handleEvent(uint64_t sub, uint64_t seq, const QString &kind,
         } else {
             emit trajectoryChanged();
         }
+    } else if (kind == QLatin1String("reasoning.delta")) {
+        const QString piece = payload.value(QStringLiteral("text")).toString();
+        m_transcript->appendOrExtend(QStringLiteral("thought"), piece,
+                                     QDateTime::currentMSecsSinceEpoch(), m_turn);
+        const QString id = QStringLiteral("thought-%1").arg(m_turn);
+        bool found = false;
+        for (int i = 0; i < m_trajectory.size(); ++i) {
+            QVariantMap cell = m_trajectory.at(i).toMap();
+            if (cell.value(QStringLiteral("id")).toString() != id)
+                continue;
+            cell[QStringLiteral("text")] = cell.value(QStringLiteral("text")).toString() + piece;
+            cell[QStringLiteral("output")] = cell.value(QStringLiteral("output")).toString() + piece;
+            m_trajectory[i] = cell;
+            found = true;
+            break;
+        }
+        if (!found) {
+            addTrajectory(QVariantMap{
+                {QStringLiteral("id"), id},
+                {QStringLiteral("turn"), m_turn},
+                {QStringLiteral("step"), 1},
+                {QStringLiteral("kind"), QStringLiteral("thought")},
+                {QStringLiteral("lane"), 0},
+                {QStringLiteral("status"), QStringLiteral("running")},
+                {QStringLiteral("text"), piece},
+                {QStringLiteral("output"), piece},
+                {QStringLiteral("summary"), QStringLiteral("thinking")},
+                {QStringLiteral("seq"), QVariant::fromValue<qulonglong>(seq)}});
+        } else {
+            emit trajectoryChanged();
+        }
     } else if (kind == QLatin1String("turn.start")) {
         m_turn = int(payload.value(QStringLiteral("turn")).toULongLong());
         m_turnOpen = true;
@@ -1286,6 +1321,28 @@ void WardClient::handleEvent(uint64_t sub, uint64_t seq, const QString &kind,
         if (!updated.isEmpty())
             appendRow(QStringLiteral("notice"),
                       QStringLiteral("subagent %1").arg(updated.value(QStringLiteral("state")).toString()));
+    } else if (kind == QLatin1String("session.attachment")) {
+        const QString name = payload.value(QStringLiteral("name")).toString();
+        const uint64_t size = payload.value(QStringLiteral("size")).toULongLong();
+        appendRow(QStringLiteral("notice"),
+                  QStringLiteral("%1 (%2 bytes)").arg(name).arg(size),
+                  QStringLiteral("attached"));
+    } else if (kind == QLatin1String("session.compacted")) {
+        appendRow(QStringLiteral("compacted"),
+                  payload.value(QStringLiteral("summary")).toString(),
+                  QStringLiteral("compacted"));
+    } else if (kind == QLatin1String("session.checkpoint")) {
+        appendRow(QStringLiteral("notice"),
+                  payload.value(QStringLiteral("label")).toString(),
+                  QStringLiteral("checkpoint"));
+    } else if (kind == QLatin1String("session.model")) {
+        appendRow(QStringLiteral("notice"),
+                  payload.value(QStringLiteral("model")).toString(),
+                  QStringLiteral("model"));
+    } else if (kind == QLatin1String("session.migration_failed")) {
+        appendRow(QStringLiteral("notice"),
+                  payload.value(QStringLiteral("reason")).toString(),
+                  QStringLiteral("migration"));
     } else if (kind == QLatin1String("replay.end")) {
         m_openingSession = false;
         emit openingSessionChanged();
