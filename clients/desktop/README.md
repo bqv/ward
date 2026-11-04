@@ -26,26 +26,24 @@ libvterm and libcbor found through `pkg-config`.
 
 ```sh
 cmake -S . -B build -G Ninja && cmake --build build
-cmake -S . -B build-quic -G Ninja -DWARD_QUIC=ON && cmake --build build-quic
 ```
 
-`WARD_QUIC=ON` links ngtcp2 and OpenSSL through pkg-config and defines
-`WARD_HAVE_QUIC`; the default build never touches either. It also builds
+The build always links ngtcp2 and OpenSSL through pkg-config and defines
+`WARD_HAVE_QUIC`; there is no separate QUIC configuration. It also builds
 `ward-pair`, which mints a pairing token over the local Unix socket and enrols a
 fresh CSR over QUIC:
 
 ```sh
-./build-quic/ward-pair --socket /run/user/1000/ward.sock --out ~/.local/share/ward-gui/quic
+./build/ward-pair --socket /run/user/1000/ward.sock --out ~/.local/share/ward-gui/quic
 ```
 
 A QUIC connection then uses the files it wrote:
 
 ```sh
-WARD_QUIC_CERT=device.crt WARD_QUIC_KEY=device.key WARD_QUIC_CA=ca.crt     ./build-quic/ward-gui --socket quic://127.0.0.1:4433
+WARD_QUIC_CERT=device.crt WARD_QUIC_KEY=device.key WARD_QUIC_CA=ca.crt     ./build/ward-gui --socket quic://127.0.0.1:4433
 ```
 
-Without `WARD_QUIC=ON`, `quic://` is refused with that build message; with it but
-no certificate, it is refused as an unpaired client.
+With no certificate, `quic://` is refused as an unpaired client.
 
 This builds three binaries:
 
@@ -53,7 +51,7 @@ This builds three binaries:
 |---|---|
 | `ward-gui` | the shell |
 | `ward-gui-probe` | a headless protocol probe: handshake, `session.list`, create, prompt, approvals, terminal, files, presets and replay, with no display |
-| `ward-pair` | `WARD_QUIC=ON` only: CSR, `device.pair`/`enrol`, writes `device.crt`, `device.key`, `ca.crt` |
+| `ward-pair` | CSR, `device.pair`/`enrol`, writes `device.crt`, `device.key`, `ca.crt` |
 | `libwardwire.a` | ward's `frame.c`, `codec.c` and `util.c`, compiled for the client |
 
 ## Run

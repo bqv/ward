@@ -89,7 +89,7 @@ daemon.
 | queue | `session.prompt` -> `{queued: true, ahead}` while a turn runs; `session.queue` refreshes the authoritative rows after reconnect and at turn boundaries; one queued prompt per session |
 | steer | `session.prompt` with `steer: true` appends to the running turn; client falls back to queue when no turn is open or the local steer budget is spent |
 | attachments | `attachment.read_blob` for the image lightbox; `session.attachment.path` and `tool.result.path` supply the reference |
-| QUIC | `WARD_QUIC=ON`, `ward-pair`, `--socket quic://host:port`, `WARD_QUIC_CERT/KEY/CA/PIN`; Settings > Pair a device runs the same flow |
+| QUIC | always built: `ward-pair`, `--socket quic://host:port`, `WARD_QUIC_CERT/KEY/CA/PIN`; Settings > Pair a device runs the same flow |
 | terminal | `terminal.open/write/resize/close`, `terminal.output`, eof and exit state |
 | session lifecycle | create (client-side lazy), list, resume, prompt, cancel, rename, pin, archive, compact, set_model |
 | catalog | `model.list`, `session.set_model` |
