@@ -2394,3 +2394,22 @@ false "no model of its own" line stays on the Android list.
 
 And the daemon had been running since 20:26 from the 20:21 binary, so the audit fixes were on disk but not in the process. The
 user service restart at 21:11 and again at 21:14 loaded `out/ward`; the second restart carried the HTTP/2 fix.
+
+Hundred-and-eightieth: two client faults and one daemon fault behind the same screenshot. The transcript's words were doubled,
+but the session log had every delta once: the desktop client had two subscriptions to the session. Following a session that was
+already live sent a second `session.resume` once the first response had cleared `m_subscribing`, and the daemon gives every
+resume a new sub id; `handleEvent` ignored `sub`, so both subscriptions' deltas were appended. `subscribe` is now idempotent
+while that session's sub is live (`force` keeps compact's re-replay), events whose sub is not the current one are dropped, and a
+failed connection clears the sub state. Not gated: a subscription is UI state the probe does not exercise.
+
+The attachment was uploaded correctly — the log holds `session.attachment` for the 29,702-byte PNG — but the **head** that
+carries `attached to this session: …` was built on the first turn and reused for the session's life, so anything attached later
+never reached the model. Attaching a file, or changing the system prompt, now invalidates the head and the next turn rebuilds
+it. Verified live on session `076a0aad10870be2`: `session attach … head-check.txt`, one turn, and the new `session.head`
+(11,227 bytes) contains `attached to this session`, `head-check.txt` and the earlier `2026-11-04_21-53-03.png`. Worth stating
+plainly: the system line carries names and sizes, not image bytes, so a text-only model knows a picture exists but cannot see it.
+
+`ward session attach <id> <path>` now exists for the command line (the GUI used it already), and the terminal section of
+`gate_tool` reads up to sixteen output events instead of demanding the whole echo in the first one — it failed once under the
+suite load and passed three standalone runs afterwards. The full suite is green again: 52 tests, `gate_tool` and
+`gate_desktop` included.
