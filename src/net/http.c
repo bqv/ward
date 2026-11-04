@@ -8,8 +8,10 @@
 #include <curl/curl.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <signal.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
@@ -94,6 +96,7 @@ int wd_http_request(const char *url, const char *method, const char *body,
     curl_easy_setopt(handle, CURLOPT_UNIX_SOCKET_PATH, unix_socket_path);
   curl_easy_setopt(handle, CURLOPT_FOLLOWLOCATION, 0L);
   curl_easy_setopt(handle, CURLOPT_NOSIGNAL, 1L);
+  curl_easy_setopt(handle, CURLOPT_CONNECTTIMEOUT_MS, (long)timeout_ms);
   curl_easy_setopt(handle, CURLOPT_TIMEOUT_MS, (long)timeout_ms);
   curl_easy_setopt(handle, CURLOPT_HTTPHEADER, headers);
   curl_easy_setopt(handle, CURLOPT_WRITEFUNCTION, write_cb);
@@ -135,7 +138,26 @@ void wd_http_response_free(wd_http_response *response) {
 struct wd_http_job {
   pid_t pid;
   int fd;
+  uint64_t timeout_ms;
 };
+
+static uint64_t now_ms(void) {
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u;
+}
+
+static bool readable(int fd, uint64_t deadline) {
+  for (;;) {
+    uint64_t now = now_ms();
+    if (now >= deadline) return false;
+    struct pollfd wait = {.fd = fd, .events = POLLIN};
+    int ready = poll(&wait, 1, (int)(deadline - now));
+    if (ready > 0) return true;
+    if (ready < 0 && errno == EINTR) continue;
+    return false;
+  }
+}
 
 typedef struct {
   int fd;
@@ -266,6 +288,7 @@ wd_http_job *wd_http_start(const char *url, const char *method, const char *body
   }
   job->pid = pid;
   job->fd = fds[0];
+  job->timeout_ms = timeout_ms;
   return job;
 }
 
@@ -288,7 +311,12 @@ static int read_exact(int fd, void *buf, size_t len) {
 
 int wd_http_job_finish(wd_http_job *job, wd_http_response *out, char **err) {
   memset(out, 0, sizeof(*out));
+  uint64_t deadline = now_ms() + job->timeout_ms;
   uint8_t header[4];
+  if (!readable(job->fd, deadline)) {
+    if (err != NULL) *err = strdup("the http helper timed out");
+    return -1;
+  }
   if (read_exact(job->fd, header, sizeof(header)) != 0) {
     if (err != NULL) *err = strdup("the http helper died");
     return -1;
@@ -314,6 +342,11 @@ int wd_http_job_finish(wd_http_job *job, wd_http_response *out, char **err) {
       }
       buffer = next;
       cap = grown;
+    }
+    if (!readable(job->fd, deadline)) {
+      free(buffer);
+      if (err != NULL) *err = strdup("the http helper timed out");
+      return -1;
     }
     ssize_t got = read(job->fd, buffer + len, cap - len);
     if (got < 0) {

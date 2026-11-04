@@ -3,12 +3,15 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include <assert.h>
+#include <poll.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/prctl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <sys/un.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -51,12 +54,18 @@ static void check_parse(void) {
   assert(wd_estate_parse(null_group, &card) != 0);
 }
 
+static void die_with_parent(void) {
+  prctl(PR_SET_PDEATHSIG, SIGKILL);
+  if (getppid() == 1) _exit(1);
+}
+
 static pid_t serve_once(const char *path, const char *body) {
   int ready[2];
   assert(pipe(ready) == 0);
   pid_t pid = fork();
   assert(pid >= 0);
   if (pid == 0) {
+    die_with_parent();
     close(ready[0]);
     int fd = socket(AF_UNIX, SOCK_STREAM, 0);
     struct sockaddr_un addr;
@@ -68,8 +77,12 @@ static pid_t serve_once(const char *path, const char *body) {
     char one = '1';
     (void)!write(ready[1], &one, 1);
     close(ready[1]);
+    struct pollfd wait = {.fd = fd, .events = POLLIN};
+    if (poll(&wait, 1, 10000) <= 0) _exit(1);
     int conn = accept(fd, NULL, NULL);
     if (conn < 0) _exit(1);
+    struct timeval tv = {.tv_sec = 5, .tv_usec = 0};
+    setsockopt(conn, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     char request[4096];
     (void)!read(conn, request, sizeof(request));
     char reply[1024];
@@ -90,6 +103,7 @@ static pid_t serve_once(const char *path, const char *body) {
 }
 
 int main(void) {
+  die_with_parent();
   alarm(30);
   check_parse();
 
