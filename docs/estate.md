@@ -49,14 +49,25 @@ for `/estate/*` and nothing else.
 The transport and the reader are in, and `estate_test` gates the document over a fixture socket. It also has an opt-in live
 mode, `WARD_ESTATE_LIVE=gpu ./out/estate_test`, which reads the real socket with ward's own reader rather than curl.
 
-Measured that way on 2026-11-03, after demesne b02fa56:
+Measured that way on 2026-11-04 against the deployed demesne:
 
-    live estate: group=gpu holders=0 since_ms=0 slots=2
+    live estate: group=gpu holders=1 since_ms=1793721683083 slots=2
 
-`holders` empty and `since_ms` 0 with llama running is the stricter holder rule working: a router holds the card only while a
-request is in flight or a model is resident, and llama had none loaded. Earlier the same document said `holders: ["llama"]`
-while nothing was loaded, which is the field lying rather than the reader. Nothing can be
-tested live until demesne 0.3.0 is deployed at `$XDG_RUNTIME_DIR/demesne.sock` —
-what owns `:55558` today is stadi 0.2.0, which has no `-socket`. The shape here is
-committed and stable, so the capability can be written against it and left
-labelled unmeasured until the socket answers.
+`holders` and `since_ms` now carry the real state; the earlier `holders: []` with llama loaded was the stricter holder rule
+working, not a reader fault. A demesne restart does not move the socket: it stays at
+`/run/user/1000/demesne.sock`, so live mode keeps pointing at the same path.
+
+The read is bounded. The plain GET sets `CURLOPT_CONNECTTIMEOUT_MS` and `CURLOPT_TIMEOUT_MS` (5 s) on the same handle as
+`CURLOPT_UNIX_SOCKET_PATH`, and `wd_http_job_finish` polls its pipe against the job's own timeout instead of blocking.
+`/estate/card` never takes demesne's transition lock and answers in milliseconds even in the middle of an eight-minute sd
+cold load, so 5 s is roughly fifteen times the worst legitimate case: if it fires, the socket is dead rather than busy.
+
+The test cannot outlive its harness. `main` and the forked fixture server both arm `PR_SET_PDEATHSIG(SIGKILL)` — fork
+clears the setting, so the child re-arms it — and the fixture's `accept` waits in `poll` with a 10 s deadline. The case
+that once left two reparented processes is:
+
+    timeout 1 env WARD_ESTATE_LIVE=gpu ./out/estate_test   # exit 124
+    ps -eo pid,ppid,comm | grep estate_test                # empty
+
+A listener that accepts and never answers returns the read in about 5 s rather than hanging; that is the path the
+orphans sat behind. Treat a 10 s accept expiry as a slow machine to investigate, not a number to raise.
