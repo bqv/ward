@@ -1023,12 +1023,18 @@ int main(void) {
                  &term_write_resp, NULL) == 0);
   assert(wd_bool_of(wd_get(term_write_resp, "written"), &term_written));
   wd_free(term_write_resp);
-  cbor_item_t *term_out = wait_event(&a, "terminal.output", NULL);
-  assert(term_out != NULL);
-  char *term_data = wd_text_copy(wd_get(term_out, "data"));
-  assert(term_data != NULL && strstr(term_data, "hello terminal") != NULL);
-  free(term_data);
-  wd_free(term_out);
+  char term_text[4096] = {0};
+  for (int i = 0; i < 16 && strstr(term_text, "hello terminal") == NULL; i++) {
+    cbor_item_t *term_out = wait_event(&a, "terminal.output", NULL);
+    assert(term_out != NULL);
+    char *term_data = wd_text_copy(wd_get(term_out, "data"));
+    if (term_data != NULL)
+      strncat(term_text, term_data,
+              sizeof(term_text) - strlen(term_text) - 1);
+    free(term_data);
+    wd_free(term_out);
+  }
+  assert(strstr(term_text, "hello terminal") != NULL);
   cbor_item_t *term_resize = wd_map(3);
   wd_put(term_resize, "terminal", wd_text(term_id));
   wd_put(term_resize, "rows", wd_uint(40));
