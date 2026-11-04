@@ -304,6 +304,9 @@ void WardClient::fail(const QString &message)
         close(m_fd);
         m_fd = -1;
     }
+    m_sub = 0;
+    m_subscribedSession.clear();
+    m_subscribing.clear();
 }
 
 void WardClient::sendFrame(uint16_t type, uint64_t sub, uint64_t seq, cbor_item_t *body)
@@ -659,6 +662,10 @@ void WardClient::handleFrame(uint16_t type, uint64_t sub, uint64_t seq,
         return;
     }
     if (type == WD_FRAME_EVENT) {
+        if (m_sub != 0 && sub != m_sub) {
+            wd_free(root);
+            return;
+        }
         char *kind = nullptr;
         cbor_item_t *payload = nullptr;
         if (wd_read_event(root, &kind, &payload)) {
@@ -936,7 +943,7 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
         }
     } else if (method == QLatin1String("session.compact")) {
         setState(Ready, QStringLiteral("compacted"));
-        subscribe(m_sessionId);
+        subscribe(m_sessionId, true);
     } else if (method == QLatin1String("session.rename")
                || method == QLatin1String("session.pin")
                || method == QLatin1String("session.archive")) {
@@ -1405,11 +1412,13 @@ void WardClient::rebuildWorkspaces()
     emit workspacesChanged();
 }
 
-void WardClient::subscribe(const QString &sessionId)
+void WardClient::subscribe(const QString &sessionId, bool force)
 {
     if (sessionId.isEmpty())
         return;
     if (m_subscribing == sessionId)
+        return;
+    if (!force && m_subscribedSession == sessionId && m_sub != 0)
         return;
     if (!m_terminalId.isEmpty())
         closeTerminal();

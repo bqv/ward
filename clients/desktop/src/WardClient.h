@@ -343,7 +343,7 @@ private:
     void setSessions(const QVariantList &sessions);
     void rebuildWorkspaces();
     void applyApprovals(const QVariantList &entries);
-    void subscribe(const QString &sessionId);
+    void subscribe(const QString &sessionId, bool force = false);
     void doPrompt(const QString &text, bool steer = false);
     void appendRow(const QString &kind, const QString &text, const QString &title = {},
                    const QString &status = {}, const QString &detail = {},
