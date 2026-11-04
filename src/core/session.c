@@ -492,6 +492,12 @@ int wd_session_set_head(wd_session *s, const char *text, uint64_t *seq_out) {
   return 0;
 }
 
+void wd_session_invalidate_head(wd_session *s) {
+  if (s == NULL) return;
+  free(s->head);
+  s->head = NULL;
+}
+
 int wd_session_set_system(wd_session *s, const char *text, uint64_t *seq_out) {
   char *copy = text != NULL ? strdup(text) : NULL;
   if (text != NULL && copy == NULL) return -1;

@@ -563,6 +563,7 @@ static void handle_session_set_system(wd_server *srv, wd_conn *conn,
     conn_arm(srv, conn);
     return;
   }
+  wd_session_invalidate_head(session);
   cbor_item_t *result = wd_map(2);
   wd_put(result, "session", wd_session_to_cbor(session));
   wd_put(result, "seq", wd_uint(seq));
@@ -2048,6 +2049,7 @@ static void handle_attachment_add(wd_server *srv, wd_conn *conn, uint64_t id,
     conn_arm(srv, conn);
     return;
   }
+  wd_session_invalidate_head(session);
   cbor_item_t *result = wd_map(2);
   wd_put(result, "path", wd_text(path));
   wd_put(result, "size", wd_uint((uint64_t)len));
