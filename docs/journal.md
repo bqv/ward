@@ -2413,3 +2413,15 @@ plainly: the system line carries names and sizes, not image bytes, so a text-onl
 `gate_tool` reads up to sixteen output events instead of demanding the whole echo in the first one — it failed once under the
 suite load and passed three standalone runs afterwards. The full suite is green again: 52 tests, `gate_tool` and
 `gate_desktop` included.
+
+Hundred-and-eighty-first: the desktop transcript now has the rows dsh-native had. The daemon never looked at a streaming
+completion's `reasoning_content`, so a reasoning model's thoughts were dropped before any client could draw them; the SSE scan
+prefers `reasoning_content` and emits `reasoning.delta`, and the client streams those into the thought row and its trajectory
+cell. The client also marks a prompt the daemon queues as `queued` on its user row and clears the mark when the queue
+projection stops listing it, and maps the durable non-chat events it used to ignore: an attachment, a compaction (a
+`compacted` row carrying the summary), a checkpoint, a model change and a failed migration. Tool calls and results were
+already mapped; the fixture now streams one reasoning chunk ahead of its answer, and `gate_tool` asserts the event arrives.
+The suite is green: 52 tests.
+
+Two limits worth saying: a thought row appears only when the provider actually streams reasoning (a plain chat model sends
+none), and the attachment line still carries names and sizes rather than image bytes.
