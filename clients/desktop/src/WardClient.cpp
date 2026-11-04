@@ -1302,6 +1302,11 @@ void WardClient::handleEvent(uint64_t sub, uint64_t seq, const QString &kind,
     Q_UNUSED(sub);
 }
 
+static QString wardWorkspaceKey(const QVariant &cwd)
+{
+    return QStringLiteral("cwd:") + cwd.toString();
+}
+
 void WardClient::applySession(const QVariantMap &session)
 {
     if (session.isEmpty())
@@ -1314,6 +1319,8 @@ void WardClient::applySession(const QVariantMap &session)
     const QString name = session.value(QStringLiteral("name")).toString();
     row.insert(QStringLiteral("title"), name.isEmpty() ? QStringLiteral("Untitled") : name);
     row.insert(QStringLiteral("cwd"), session.value(QStringLiteral("cwd")).toString());
+    row.insert(QStringLiteral("workspaceId"),
+               wardWorkspaceKey(session.value(QStringLiteral("cwd"))));
     row.insert(QStringLiteral("model"), session.value(QStringLiteral("model")).toString());
     row.insert(QStringLiteral("updatedAt"), session.value(QStringLiteral("created")));
     row.insert(QStringLiteral("pinned"), session.value(QStringLiteral("pinned")));
@@ -1356,6 +1363,8 @@ void WardClient::setSessions(const QVariantList &sessions)
             {QStringLiteral("sessionId"), id},
             {QStringLiteral("title"), name.isEmpty() ? QStringLiteral("Untitled") : name},
             {QStringLiteral("cwd"), session.value(QStringLiteral("cwd"))},
+            {QStringLiteral("workspaceId"),
+             wardWorkspaceKey(session.value(QStringLiteral("cwd")))},
             {QStringLiteral("model"), session.value(QStringLiteral("model"))},
             {QStringLiteral("updatedAt"), session.value(QStringLiteral("created"))},
             {QStringLiteral("pinned"), session.value(QStringLiteral("pinned"))},
@@ -1384,7 +1393,7 @@ void WardClient::rebuildWorkspaces()
         const QString title = cwd.isEmpty() ? QStringLiteral("sessions")
                                            : QFileInfo(cwd).fileName();
         list.append(QVariantMap{
-            {QStringLiteral("workspaceId"), QStringLiteral("cwd:") + cwd},
+            {QStringLiteral("workspaceId"), wardWorkspaceKey(cwd)},
             {QStringLiteral("path"), cwd},
             {QStringLiteral("title"), title.isEmpty() ? cwd : title},
             {QStringLiteral("sessionIds"), it.value()}});
