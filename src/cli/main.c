@@ -43,6 +43,7 @@ static void usage(FILE *out) {
           "  session fork   <id> [--from SEQ] [--json]\n"
           "  session set-model <id> <model>\n"
           "  session set-system <id> <text>\n"
+          "  session attach <id> <path>\n"
           "  session compact <id>\n"
           "  model list     [--json]\n"
           "  model probe    <id> [--json]\n"
@@ -420,6 +421,47 @@ static int command_session(int argc, char **argv) {
     if (wd_client_call(&client, "session.set_model", params, &result) != 0)
       goto done;
     printf("model %s\n", text);
+    rc = 0;
+  } else if (strcmp(sub, "attach") == 0) {
+    if (id == NULL || text == NULL) {
+      fprintf(stderr, "ward: session attach needs an id and a path\n");
+      goto done;
+    }
+    FILE *file = fopen(text, "rb");
+    if (file == NULL) {
+      fprintf(stderr, "ward: cannot read %s\n", text);
+      goto done;
+    }
+    if (fseek(file, 0, SEEK_END) != 0) {
+      fclose(file);
+      goto done;
+    }
+    long size = ftell(file);
+    if (size < 0 || size > 4 * 1024 * 1024 || fseek(file, 0, SEEK_SET) != 0) {
+      fclose(file);
+      fprintf(stderr, "ward: the attachment must be under 4 MiB\n");
+      goto done;
+    }
+    char *data = malloc(size > 0 ? (size_t)size : 1);
+    if (data == NULL || fread(data, 1, (size_t)size, file) != (size_t)size) {
+      fclose(file);
+      free(data);
+      fprintf(stderr, "ward: cannot read %s\n", text);
+      goto done;
+    }
+    fclose(file);
+    const char *name = strrchr(text, '/');
+    name = name != NULL ? name + 1 : text;
+    cbor_item_t *params = wd_map(3);
+    wd_put(params, "id", wd_text(id));
+    wd_put(params, "name", wd_text(name));
+    wd_put(params, "data", wd_bytes_len(data, (size_t)size));
+    free(data);
+    if (wd_client_call(&client, "attachment.add", params, &result) != 0)
+      goto done;
+    uint64_t stored = 0;
+    wd_uint_of(wd_get(result, "size"), &stored);
+    printf("attached %s (%llu bytes)\n", name, (unsigned long long)stored);
     rc = 0;
   } else if (strcmp(sub, "compact") == 0) {
     if (id == NULL) {
