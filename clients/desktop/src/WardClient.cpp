@@ -5,6 +5,7 @@
 #include "WardClient.h"
 
 #include "AcpClient.h"
+#include "AppRestart.h"
 
 #include <QDateTime>
 #include <QBuffer>
@@ -1861,7 +1862,7 @@ void WardClient::restartSelf()
         m_notifier = nullptr;
     }
     m_pending.clear();
-    connectToDaemon();
+    if (!restartApplication()) connectToDaemon();
 }
 
 void WardClient::goalAction(const QString &action)

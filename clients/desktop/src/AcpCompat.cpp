@@ -2,6 +2,8 @@
 
 #include "AcpCompat.h"
 
+#include "AppRestart.h"
+
 #include <QCoreApplication>
 #include <QDebug>
 #include <QFile>
@@ -44,19 +46,7 @@ void AcpCompat::createSessionInWorkspace(const QString &)
 
 void AcpCompat::restartSelf()
 {
-    const QString exe = QCoreApplication::applicationFilePath();
-    const QStringList args = QCoreApplication::arguments().mid(1);
-    // No status line here: `setStatus` belongs to the subclass and this base
-    // cannot reach it — so the outcome goes to the log instead of vanishing.
-    const QString wd = QDir::currentPath();
-    const bool started = QProcess::startDetached(exe, args, wd.isEmpty() ? QDir::homePath() : wd);
-    qInfo() << "restarting:" << exe << args << "started:" << started;
-    if (!started) {
-        qWarning() << "restart failed:" << exe;
-        return;
-    }
-    QTimer::singleShot(1500, [] { std::exit(0); });
-    QCoreApplication::quit();
+    (void)restartApplication();
 }
 
 namespace Prefs {
