@@ -8748,7 +8748,7 @@ class DshViewModel(application: Application) : AndroidViewModel(application) {
             // Held over when the payload omits both keys: a `session/list` refresh
             // without them is not evidence that the session has no statistics, and
             // clearing them would blink the pills out on every pull.
-            sessionStats = parseSessionStats(values) ?: _ui.value.sessionStats,
+            sessionStats = parseSessionStats(values, _ui.value.sessionStats) ?: _ui.value.sessionStats,
         )
         // The session seat's chip names the policy this session runs. Guarded on the
         // change, not called unconditionally: these projections re-apply on every

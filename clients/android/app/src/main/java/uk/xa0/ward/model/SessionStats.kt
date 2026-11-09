@@ -89,26 +89,26 @@ data class SessionStats(
  *
  * @param values the object the host sends as a session's `projections`
  */
-fun parseSessionStats(values: JSONObject?): SessionStats? {
+fun parseSessionStats(values: JSONObject?, previous: SessionStats? = null): SessionStats? {
     if (values == null) return null
     val stats = values.optJSONObject("sessionStats")
     val usage = values.optJSONObject("tokenUsage")
     if (stats == null && usage == null) return null
     return SessionStats(
-        hasStats = stats != null,
-        turns = stats?.optInt("turns", 0) ?: 0,
-        steps = stats?.optInt("steps", 0) ?: 0,
-        llmMs = stats?.optLong("llmMs", 0L) ?: 0L,
-        toolMs = stats?.optLong("toolMs", 0L) ?: 0L,
-        ttftMs = stats?.optLong("ttftMs", 0L) ?: 0L,
-        ttftSteps = stats?.optInt("ttftSteps", 0) ?: 0,
-        decodeMs = stats?.optLong("decodeMs", 0L) ?: 0L,
-        decodeTokens = stats?.optLong("decodeTokens", 0L) ?: 0L,
-        hasUsage = usage != null,
-        uncachedInputTokens = usage?.optLong("uncachedInputTokens", 0L) ?: 0L,
-        cacheReadTokens = usage?.optLong("cacheReadTokens", 0L) ?: 0L,
-        cacheWriteTokens = usage?.optLong("cacheWriteTokens", 0L) ?: 0L,
-        outputTokens = usage?.optLong("outputTokens", 0L) ?: 0L,
+        hasStats = stats != null || previous?.hasStats == true,
+        turns = stats?.optInt("turns", 0) ?: previous?.turns ?: 0,
+        steps = stats?.optInt("steps", 0) ?: previous?.steps ?: 0,
+        llmMs = stats?.optLong("llmMs", 0L) ?: previous?.llmMs ?: 0L,
+        toolMs = stats?.optLong("toolMs", 0L) ?: previous?.toolMs ?: 0L,
+        ttftMs = stats?.optLong("ttftMs", 0L) ?: previous?.ttftMs ?: 0L,
+        ttftSteps = stats?.optInt("ttftSteps", 0) ?: previous?.ttftSteps ?: 0,
+        decodeMs = stats?.optLong("decodeMs", 0L) ?: previous?.decodeMs ?: 0L,
+        decodeTokens = stats?.optLong("decodeTokens", 0L) ?: previous?.decodeTokens ?: 0L,
+        hasUsage = usage != null || previous?.hasUsage == true,
+        uncachedInputTokens = usage?.optLong("uncachedInputTokens", 0L) ?: previous?.uncachedInputTokens ?: 0L,
+        cacheReadTokens = usage?.optLong("cacheReadTokens", 0L) ?: previous?.cacheReadTokens ?: 0L,
+        cacheWriteTokens = usage?.optLong("cacheWriteTokens", 0L) ?: previous?.cacheWriteTokens ?: 0L,
+        outputTokens = usage?.optLong("outputTokens", 0L) ?: previous?.outputTokens ?: 0L,
     )
 }
 
