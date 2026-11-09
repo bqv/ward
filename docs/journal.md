@@ -2425,3 +2425,27 @@ The suite is green: 52 tests.
 
 Two limits worth saying: a thought row appears only when the provider actually streams reasoning (a plain chat model sends
 none), and the attachment line still carries names and sizes rather than image bytes.
+
+Hundred-and-eighty-second: the two upstream clients were re-read and their unabsorbed work brought over. The Android window
+was much smaller than its log suggests, because ward `22c476e` had already carried the app through upstream `40211e4`; the
+subagent checked that by comparing files with the base rather than trusting the date, and found the approval notices, terminal
+selection, link chooser, preset header, blocked-goal reason and htop work already present. Of the nine commits since, eight are
+the demesne/estate model-load cards, which read `estate/status` fields (`loads[]`, `progress`, `resident_models`) that ward's
+`estate.card` does not carry; porting them would be a new feature fed by polling demesne, not a port. The ninth, `a607ec3`,
+fixes a projection refresh that carried one half of the session stats and zeroed the other; it is ported with its test
+(`2b0f943`) and the Android unit suite is green. It is inert on today's payloads, which always carry both halves.
+
+The desktop window was `30981c4..ed3b7c0`, seventeen commits of which ten carry content. Ported: the link chooser (`LinkText`,
+`LinkDialog`, bare `www.` autolinks, the transcript/ACP/headless prose), the workspace picker rebuilt over ward's `host.list`
+(the `directoryListing`/`directoryPickLoading`/`directoryPickNotice` properties, browse, crumbs, Add creating a session at the
+chosen cwd because ward has no workspace registry), a busy session no longer taking a rail row, the hover-under-pointer fix,
+and the queued row's steer-button width. Skipped with reasons: the estate/model-load chip (ward has no estate feed and
+`model.list` carries no route or load phase), the rc.5 one-stream terminal attach (ward's terminal is unary
+`terminal.open/write/resize` plus `terminal.output`), the `workspaceFiles`/`settings` renames (ward has neither method), and
+the agent preset on the strip (ward has no agent preset; its policy preset is already the access chip). The queued-row steer
+itself stays out: ward's queue rows have no addressable item id and one prompt queues per session.
+
+The offscreen `--ui-gate` now opens the link dialog and the workspace picker, and `gate_desktop` asserts both, so the port is
+not merely compiled. The suite is green at 52 tests. Two honest edges: Create folder in the picker refuses because ward has no
+mkdir method, and under `--transport dsh` the facade now logs the three picker properties as missing, which is the transport
+gap the README's "Not adopted yet" records.
