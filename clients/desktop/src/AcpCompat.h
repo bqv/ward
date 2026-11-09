@@ -108,6 +108,12 @@ public:
     Q_PROPERTY(QVariantList searchResults MEMBER m_searchResults NOTIFY searchResultsChanged)
     Q_PROPERTY(QVariantList fileEntries MEMBER m_fileEntries NOTIFY fileEntriesChanged)
     Q_PROPERTY(QVariantList workspaces MEMBER m_workspaces NOTIFY workspacesChanged)
+    Q_PROPERTY(QVariantMap directoryListing MEMBER m_directoryListing
+               NOTIFY directoryListingChanged)
+    Q_PROPERTY(bool directoryPickLoading MEMBER m_directoryPickLoading
+               NOTIFY directoryPickLoadingChanged)
+    Q_PROPERTY(QString directoryPickNotice MEMBER m_directoryPickNotice
+               NOTIFY directoryPickNoticeChanged)
     Q_PROPERTY(QVariantList sessions MEMBER m_sessions NOTIFY sessionsChanged)
     /// The rail's two marks. ACP does have an approval — its bridge carries
     /// `session/request_permission` — but it has no question waterfall and no
@@ -225,6 +231,9 @@ public:
     /// `railNotice` rather than returning in silence — the honest form of "no".
     Q_INVOKABLE void createWorkspaceFromPicker();
     Q_INVOKABLE void createSessionInWorkspace(const QString &workspaceId);
+    Q_INVOKABLE void browseDirectory(const QString &path = QString());
+    Q_INVOKABLE void createDirectory(const QString &name);
+    Q_INVOKABLE void addWorkspaceAt(const QString &path);
     Q_INVOKABLE void refreshSessions() {}
     Q_INVOKABLE void followSession(const QString &) {}
     Q_INVOKABLE void followSubagent(const QString &, const QString &, const QString & = QString()) {}
@@ -287,6 +296,10 @@ signals:
     void searchResultsChanged();
     void fileEntriesChanged();
     void workspacesChanged();
+    void directoryListingChanged();
+    void directoryPickLoadingChanged();
+    void directoryPickNoticeChanged();
+    void workspacePickerRequested();
     void sessionsChanged();
     void sessionMarksChanged();
     void changedFilesChanged();
@@ -361,6 +374,9 @@ private:
     QVariantList m_searchResults;
     QVariantList m_fileEntries;
     QVariantList m_workspaces;
+    QVariantMap m_directoryListing;
+    bool m_directoryPickLoading = false;
+    QString m_directoryPickNotice;
     QVariantList m_sessions;
     QVariantList m_pendingInteractionSessions;
     QVariantList m_unreadSessionIds;

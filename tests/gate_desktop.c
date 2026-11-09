@@ -257,6 +257,8 @@ int main(void) {
     assert(run_capture(sock, ui_gui, ui_argv, ui_out, sizeof(ui_out)) == 0);
     assert(strstr(ui_out, "ui-gate: settings 1") != NULL);
     assert(strstr(ui_out, "ui-gate: jobs 1") != NULL);
+    assert(strstr(ui_out, "ui-gate: link 1") != NULL);
+    assert(strstr(ui_out, "ui-gate: picker 1") != NULL);
     assert(strstr(ui_out, "ui-gate: ok") != NULL);
   }
 

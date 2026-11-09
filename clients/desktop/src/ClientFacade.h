@@ -270,6 +270,21 @@ public:
     Q_PROPERTY(int workspaceCount READ workspaceCount NOTIFY workspaceCountChanged)
     int workspaceCount() const { return m_workspaceCount; }
 
+    Q_PROPERTY(QVariantMap directoryListing READ directoryListing
+               NOTIFY directoryListingChanged)
+    QVariantMap directoryListing() const
+    { return read(QStringLiteral("directoryListing")).toMap(); }
+
+    Q_PROPERTY(bool directoryPickLoading READ directoryPickLoading
+               NOTIFY directoryPickLoadingChanged)
+    bool directoryPickLoading() const
+    { return readBool(QStringLiteral("directoryPickLoading")); }
+
+    Q_PROPERTY(QString directoryPickNotice READ directoryPickNotice
+               NOTIFY directoryPickNoticeChanged)
+    QString directoryPickNotice() const
+    { return readString(QStringLiteral("directoryPickNotice")); }
+
     Q_PROPERTY(bool sessionsLoading READ sessionsLoading NOTIFY sessionsLoadingChanged)
     bool sessionsLoading() const { return readBool(QStringLiteral("sessionsLoading")); }
 
@@ -517,6 +532,10 @@ public:
 
     void unarchiveSession(const QString &sessionId);
 
+    void browseDirectory(const QString &path);
+    void createDirectory(const QString &name);
+    void addWorkspaceAt(const QString &path);
+
     void refreshScheduleTasks();
     void saveScheduleTask(const QString &id, const QString &title, const QString &prompt);
     void deleteScheduleTask(const QString &id);
@@ -561,6 +580,10 @@ signals:
     void unreadCountChanged();
     void workspacesChanged();
     void workspaceCountChanged();
+    void directoryListingChanged();
+    void directoryPickLoadingChanged();
+    void directoryPickNoticeChanged();
+    void workspacePickerRequested();
     void sessionsLoadingChanged();
     void openingSessionChanged();
 

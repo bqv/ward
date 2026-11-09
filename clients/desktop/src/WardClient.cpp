@@ -283,6 +283,8 @@ void WardClient::setState(State state, const QString &status)
 void WardClient::fail(const QString &message)
 {
     m_lastError = message;
+    m_workspacePickInFlight = false;
+    setDirectoryPickLoading(false);
     emit lastErrorChanged();
     setState(Failed, message);
     if (m_notifier != nullptr) {
@@ -426,6 +428,9 @@ void WardClient::connectToDaemon()
     m_notifier = new QSocketNotifier(m_fd, QSocketNotifier::Read, this);
     connect(m_notifier, &QSocketNotifier::activated, this, &WardClient::onReadable);
 
+    m_workspacePickInFlight = false;
+    setDirectoryPickLoading(false);
+    setDirectoryPickNotice(QString());
     setState(Ready, QStringLiteral("ready"));
     m_sessionsLoading = true;
     emit sessionsLoadingChanged();
@@ -571,6 +576,9 @@ void WardClient::connectQuic()
     connect(m_quicTimer, &QTimer::timeout, this, [this]() { serviceQuic(); });
     scheduleQuic();
     m_handshaken = true;
+    m_workspacePickInFlight = false;
+    setDirectoryPickLoading(false);
+    setDirectoryPickNotice(QString());
     setState(Ready, QStringLiteral("ready"));
     m_sessionsLoading = true;
     emit sessionsLoadingChanged();
@@ -753,6 +761,15 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
             emit fileEntriesChanged();
             emit fileErrorChanged();
         }
+        if (method == QLatin1String("host.list")) {
+            const bool opening = m_workspacePickInFlight;
+            m_workspacePickInFlight = false;
+            setDirectoryPickLoading(false);
+            const QString notice = QStringLiteral("Could not read the folder: %1").arg(text);
+            setDirectoryPickNotice(notice);
+            if (opening)
+                emit railNotice(notice, true);
+        }
         return;
     }
 
@@ -761,6 +778,13 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
         m_sessionsLoading = false;
         emit sessionsLoadingChanged();
         setSessions(result.value(QStringLiteral("sessions")).toList());
+    } else if (method == QLatin1String("host.list")) {
+        setDirectoryPickLoading(false);
+        applyHostListing(result);
+        if (m_workspacePickInFlight) {
+            m_workspacePickInFlight = false;
+            emit workspacePickerRequested();
+        }
     } else if (method == QLatin1String("session.create")) {
         const QVariantMap session = result.value(QStringLiteral("session")).toMap();
         applySession(session);
@@ -1518,6 +1542,111 @@ void WardClient::createSessionInWorkspace(const QString &workspaceId)
     m_createCwd = workspaceId.startsWith(QLatin1String("cwd:"))
                       ? workspaceId.mid(4)
                       : workspaceId;
+}
+
+void WardClient::createWorkspaceFromPicker()
+{
+    if (m_state != Ready) {
+        emit railNotice(QStringLiteral("not connected yet"), true);
+        return;
+    }
+    if (m_workspacePickInFlight || m_directoryPickLoading)
+        return;
+    m_workspacePickInFlight = true;
+    browseDirectory(QString());
+}
+
+void WardClient::browseDirectory(const QString &path)
+{
+    if (m_state != Ready) {
+        setDirectoryPickNotice(QStringLiteral("Not connected yet."));
+        return;
+    }
+    if (m_directoryPickLoading)
+        return;
+    setDirectoryPickNotice(QString());
+    setDirectoryPickLoading(true);
+    m_directoryPickPath = path.isEmpty() ? QDir::homePath() : QDir(path).absolutePath();
+    sendRequest(QStringLiteral("host.list"),
+                path.isEmpty() ? QVariantMap{}
+                               : QVariantMap{{QStringLiteral("path"), path}});
+}
+
+void WardClient::createDirectory(const QString &name)
+{
+    if (name.trimmed().isEmpty())
+        return;
+    setDirectoryPickNotice(QStringLiteral("ward has no method to create a folder; "
+                                          "create it in a terminal and refresh."));
+}
+
+void WardClient::addWorkspaceAt(const QString &path)
+{
+    if (path.isEmpty())
+        return;
+    m_createCwd = path;
+    createSessionNow();
+}
+
+void WardClient::applyHostListing(const QVariantMap &result)
+{
+    const QString home = QDir::homePath();
+    const QString current = m_directoryPickPath.isEmpty() ? home : m_directoryPickPath;
+
+    QVariantList crumbs;
+    const QString homeName = QFileInfo(home).fileName();
+    crumbs.append(QVariantMap{{QStringLiteral("name"),
+                               homeName.isEmpty() ? home : homeName},
+                              {QStringLiteral("path"), home}});
+    const QString relative = QDir(home).relativeFilePath(current);
+    if (relative != QLatin1String(".") && !relative.startsWith(QLatin1String(".."))) {
+        QString running = home;
+        for (const QString &part : relative.split(QLatin1Char('/'), Qt::SkipEmptyParts)) {
+            running += QLatin1Char('/') + part;
+            crumbs.append(QVariantMap{{QStringLiteral("name"), part},
+                                      {QStringLiteral("path"), running}});
+        }
+    }
+
+    QVariantList entries;
+    for (const QVariant &value : result.value(QStringLiteral("entries")).toList()) {
+        const QVariantMap entry = value.toMap();
+        const QString name = entry.value(QStringLiteral("name")).toString();
+        if (name.isEmpty())
+            continue;
+        entries.append(QVariantMap{
+            {QStringLiteral("name"), name},
+            {QStringLiteral("path"), current + QLatin1Char('/') + name},
+            {QStringLiteral("hidden"), name.startsWith(QLatin1Char('.'))}});
+    }
+
+    const QVariantMap listing{
+        {QStringLiteral("path"), current},
+        {QStringLiteral("home"), home},
+        {QStringLiteral("crumbs"), crumbs},
+        {QStringLiteral("entries"), entries},
+        {QStringLiteral("truncated"), result.value(QStringLiteral("truncated")).toBool()},
+    };
+    if (listing == m_directoryListing)
+        return;
+    m_directoryListing = listing;
+    emit directoryListingChanged();
+}
+
+void WardClient::setDirectoryPickLoading(bool loading)
+{
+    if (m_directoryPickLoading == loading)
+        return;
+    m_directoryPickLoading = loading;
+    emit directoryPickLoadingChanged();
+}
+
+void WardClient::setDirectoryPickNotice(const QString &notice)
+{
+    if (m_directoryPickNotice == notice)
+        return;
+    m_directoryPickNotice = notice;
+    emit directoryPickNoticeChanged();
 }
 
 void WardClient::followSession(const QString &sessionId)
@@ -2300,6 +2429,7 @@ QStringList WardClient::protocolMethods() const
             QStringLiteral("session.get"), QStringLiteral("session.resume"),
             QStringLiteral("session.file_read"), QStringLiteral("session.file_read_blob"),
             QStringLiteral("session.file_list"),
+            QStringLiteral("host.list"),
             QStringLiteral("session.fork"),
             QStringLiteral("session.rename"),
             QStringLiteral("session.archive"), QStringLiteral("session.pin"),

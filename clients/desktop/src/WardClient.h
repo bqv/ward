@@ -50,6 +50,12 @@ public:
                NOTIFY sessionMarksChanged)
     Q_PROPERTY(QVariantList unreadSessionIds READ unreadSessionIds NOTIFY sessionMarksChanged)
     Q_PROPERTY(QVariantList workspaces READ workspaces NOTIFY workspacesChanged)
+    Q_PROPERTY(QVariantMap directoryListing READ directoryListing
+               NOTIFY directoryListingChanged)
+    Q_PROPERTY(bool directoryPickLoading READ directoryPickLoading
+               NOTIFY directoryPickLoadingChanged)
+    Q_PROPERTY(QString directoryPickNotice READ directoryPickNotice
+               NOTIFY directoryPickNoticeChanged)
     Q_PROPERTY(bool sessionsLoading READ sessionsLoading NOTIFY sessionsLoadingChanged)
     Q_PROPERTY(bool openingSession READ openingSession NOTIFY openingSessionChanged)
 
@@ -127,6 +133,9 @@ public:
     QVariantList pendingInteractionSessions() const { return m_pendingInteractionSessions; }
     QVariantList unreadSessionIds() const { return m_unreadSessionIds; }
     QVariantList workspaces() const { return m_workspaces; }
+    QVariantMap directoryListing() const { return m_directoryListing; }
+    bool directoryPickLoading() const { return m_directoryPickLoading; }
+    QString directoryPickNotice() const { return m_directoryPickNotice; }
     bool sessionsLoading() const { return m_sessionsLoading; }
     bool openingSession() const { return m_openingSession; }
 
@@ -186,6 +195,10 @@ public:
     Q_INVOKABLE void createSession();
     Q_INVOKABLE void createSessionNow();
     Q_INVOKABLE void createSessionInWorkspace(const QString &workspaceId);
+    Q_INVOKABLE void createWorkspaceFromPicker();
+    Q_INVOKABLE void browseDirectory(const QString &path = QString());
+    Q_INVOKABLE void createDirectory(const QString &name);
+    Q_INVOKABLE void addWorkspaceAt(const QString &path);
     Q_INVOKABLE void followSession(const QString &sessionId);
     Q_INVOKABLE void sendPrompt(const QString &text);
     Q_INVOKABLE void sendPrompt(const QString &text, const QString &mode);
@@ -266,6 +279,10 @@ signals:
     void sessionsChanged();
     void sessionMarksChanged();
     void workspacesChanged();
+    void directoryListingChanged();
+    void directoryPickLoadingChanged();
+    void directoryPickNoticeChanged();
+    void workspacePickerRequested();
     void sessionsLoadingChanged();
     void openingSessionChanged();
     void permissionPresetChanged();
@@ -342,6 +359,9 @@ private:
     void applySession(const QVariantMap &session);
     void setSessions(const QVariantList &sessions);
     void rebuildWorkspaces();
+    void applyHostListing(const QVariantMap &result);
+    void setDirectoryPickLoading(bool loading);
+    void setDirectoryPickNotice(const QString &notice);
     void applyApprovals(const QVariantList &entries);
     void subscribe(const QString &sessionId, bool force = false);
     void doPrompt(const QString &text, bool steer = false);
@@ -385,6 +405,11 @@ private:
     QVariantList m_pendingInteractionSessions;
     QVariantList m_unreadSessionIds;
     QVariantList m_workspaces;
+    QVariantMap m_directoryListing;
+    bool m_directoryPickLoading = false;
+    QString m_directoryPickNotice;
+    QString m_directoryPickPath;
+    bool m_workspacePickInFlight = false;
     bool m_sessionsLoading = false;
     bool m_openingSession = false;
 

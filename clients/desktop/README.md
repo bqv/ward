@@ -104,7 +104,8 @@ The client speaks ward's method names and event kinds, not an adapter vocabulary
 | files | `session.file_read` (text), `session.file_read_blob` (CBOR bytes), `session.file_list` |
 | schedules | `schedule.list`, `schedule.delete` |
 | trajectory | `turn.*`, `session.prompted`, `text.delta`, `tool.call/result` |
-| workspaces | synthetic groups by session cwd |
+| workspaces | `host.list` for the Add workspace folder chooser; synthetic groups by session cwd |
+| links | Markdown anchors in the transcript, ACP and headless prose open the link dialog: browser, this window, copy |
 | presets | `policy.list` / `policy.select`; chip normalises `id` to `value`; full-access requires the warning confirmation and marks the chip |
 | search | `session.search_text` paging; Search messages dialog, no replay |
 | ACP | `ward-acp`, JSON-RPC 2.0 over stdio: initialize, session/new, session/prompt, session/cancel, session/update, request_permission |
@@ -121,6 +122,8 @@ and are never silently dropped by the wire layer.
 
 ## Not adopted yet
 
+- **New folder from the workspace picker.** ward serves `host.list` but has no method to create a
+  directory, so Create reports that rather than sending a call.
 - **QUIC pairing dialog.** Settings > Pair a device runs `ward-pair`, stores the
   certificate paths and says to restart on `--socket quic://…`; the window does
   not switch transport at runtime.

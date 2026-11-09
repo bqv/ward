@@ -161,6 +161,8 @@ add_executable(ward-gui
     src/PendingBand.cpp
     src/TranscriptView.h
     src/TranscriptView.cpp
+    src/LinkText.h
+    src/LinkText.cpp
     src/TrajectoryPage.h
     src/TrajectoryPage.cpp
     src/TerminalPanel.h
@@ -177,6 +179,10 @@ add_executable(ward-gui
     src/ChangesDialog.cpp
     src/GoalEditDialog.h
     src/GoalEditDialog.cpp
+    src/LinkDialog.h
+    src/LinkDialog.cpp
+    src/WorkspacePickerDialog.h
+    src/WorkspacePickerDialog.cpp
 )
 
 target_link_libraries(ward-gui PRIVATE

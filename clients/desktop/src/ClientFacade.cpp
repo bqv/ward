@@ -46,6 +46,9 @@ const Binding kBindings[] = {
     {"pendingInteractionSessions", nullptr, "onSessionMarksNotify"},
     {"unreadSessionIds", nullptr, "onSessionMarksNotify"},
     {"workspaces", nullptr, "onWorkspacesNotify"},
+    {"directoryListing", "directoryListingChanged", nullptr},
+    {"directoryPickLoading", "directoryPickLoadingChanged", nullptr},
+    {"directoryPickNotice", "directoryPickNoticeChanged", nullptr},
     {"sessionsLoading", "sessionsLoadingChanged", nullptr},
     {"openingSession", "openingSessionChanged", nullptr},
 
@@ -191,6 +194,9 @@ ClientFacade::ClientFacade(QObject *transport, QObject *parent)
     if (transportMeta->indexOfSignal("questionsRequested(QString,QVariantList)") >= 0)
         QObject::connect(transport, SIGNAL(questionsRequested(QString,QVariantList)), this,
                          SIGNAL(questionsRequested(QString,QVariantList)));
+    if (transportMeta->indexOfSignal("workspacePickerRequested()") >= 0)
+        QObject::connect(transport, SIGNAL(workspacePickerRequested()), this,
+                         SIGNAL(workspacePickerRequested()));
 
     // Seed the derived values before anything can read them. Every recompute is
     // the same code the notify handlers run, so there is no second spelling of a
@@ -767,6 +773,21 @@ void ClientFacade::followSubagent(const QString &parentSessionId, const QString 
 void ClientFacade::unarchiveSession(const QString &sessionId)
 {
     call("unarchiveSession(QString)", QGenericReturnArgument(), stringArg(sessionId));
+}
+
+void ClientFacade::browseDirectory(const QString &path)
+{
+    call("browseDirectory(QString)", QGenericReturnArgument(), stringArg(path));
+}
+
+void ClientFacade::createDirectory(const QString &name)
+{
+    call("createDirectory(QString)", QGenericReturnArgument(), stringArg(name));
+}
+
+void ClientFacade::addWorkspaceAt(const QString &path)
+{
+    call("addWorkspaceAt(QString)", QGenericReturnArgument(), stringArg(path));
 }
 
 bool ClientFacade::followParentSession()

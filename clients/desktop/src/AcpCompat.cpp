@@ -44,6 +44,24 @@ void AcpCompat::createSessionInWorkspace(const QString &)
                     true);
 }
 
+void AcpCompat::browseDirectory(const QString &)
+{
+    emit railNotice(QStringLiteral("The ACP transport cannot browse for a folder: it has no workspace surface."),
+                    true);
+}
+
+void AcpCompat::createDirectory(const QString &)
+{
+    emit railNotice(QStringLiteral("The ACP transport cannot create a folder: it has no workspace surface."),
+                    true);
+}
+
+void AcpCompat::addWorkspaceAt(const QString &)
+{
+    emit railNotice(QStringLiteral("The ACP transport cannot add a workspace: it has no workspace surface."),
+                    true);
+}
+
 void AcpCompat::restartSelf()
 {
     (void)restartApplication();

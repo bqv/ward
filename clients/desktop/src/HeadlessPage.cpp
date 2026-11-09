@@ -1,4 +1,5 @@
 #include "HeadlessPage.h"
+#include "LinkText.h"
 
 #include "AcpClient.h"
 #include "HeadlessClient.h"
@@ -74,7 +75,7 @@ void applyWrapAnywhere(QTextDocument *document)
     document->setDefaultTextOption(option);
 }
 
-void configureReadOnly(QTextEdit *edit, const QFont &font, const QColor &base,
+void configureReadOnly(LinkText *edit, const QFont &font, const QColor &base,
                        const QColor &text)
 {
     Theme *theme = Theme::instance();
@@ -528,17 +529,21 @@ public:
         setAttribute(Qt::WA_Hover);
         setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 
-        m_user = new QTextEdit(this);
+        m_user = new LinkText(this);
+        QObject::connect(m_user, &LinkText::linkActivated, this,
+                         [this](const QString &href) { emit m_owner->linkActivated(href); });
         configureReadOnly(m_user, Chrome::uiFont(theme->fontProse() + 1), theme->bubble(),
                           theme->fg());
         m_user->hide();
 
-        m_agent = new QTextEdit(this);
+        m_agent = new LinkText(this);
+        QObject::connect(m_agent, &LinkText::linkActivated, this,
+                         [this](const QString &href) { emit m_owner->linkActivated(href); });
         configureReadOnly(m_agent, Chrome::uiFont(theme->fontProse() + 1), theme->bg(),
                           theme->fg());
         m_agent->hide();
 
-        m_payload = new QTextEdit(this);
+        m_payload = new LinkText(this);
         configureReadOnly(m_payload, Chrome::monoFont(theme->fontMono()),
                           theme->codeBlock(), theme->fg());
         m_payload->hide();
@@ -840,9 +845,9 @@ private:
     QString m_key;
     QString m_rowId;
     bool m_expanded = false;
-    QTextEdit *m_user = nullptr;
-    QTextEdit *m_agent = nullptr;
-    QTextEdit *m_payload = nullptr;
+    LinkText *m_user = nullptr;
+    LinkText *m_agent = nullptr;
+    LinkText *m_payload = nullptr;
     QPixmap m_icon;
     QString m_iconName;
     mutable int m_measuredWidth = -1;

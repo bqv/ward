@@ -29,6 +29,7 @@ signals:
     void acpSessionSelected(const QString &sessionId);
     void acpSessionCloseRequested(const QString &sessionId);
     void acpNewSessionRequested();
+    void linkActivated(const QString &href);
 
 protected:
     void showEvent(QShowEvent *event) override;
@@ -59,6 +60,7 @@ private:
     void showPermission(const QString &requestId, const QString &toolName,
                         const QString &detail);
     void clearPermission();
+    void raiseLink(const QString &href);
     void withdrawPermission(const QString &requestId);
     void answerPermission(bool allow);
     void bindTranscript();

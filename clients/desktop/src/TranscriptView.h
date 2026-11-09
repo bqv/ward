@@ -39,6 +39,7 @@ signals:
     void openImage(const QVariant &source, const QVariant &alt,
                    double fallbackWidth, double fallbackHeight);
     void openFile(const QString &path);
+    void linkActivated(const QString &href);
     void pageEarlier();
 
 protected:

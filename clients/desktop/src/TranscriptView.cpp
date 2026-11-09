@@ -2,6 +2,7 @@
 
 #include "AcpClient.h"
 #include "ClientFacade.h"
+#include "LinkText.h"
 #include "Markdown.h"
 #include "ShellChrome.h"
 #include "Theme.h"
@@ -9,8 +10,10 @@
 #include <QAbstractItemModel>
 #include <QAbstractAnimation>
 #include <QAbstractScrollArea>
+#include <QApplication>
 #include <QClipboard>
 #include <QCoreApplication>
+#include <QCursor>
 #include <QDateTime>
 #include <QDir>
 #include <QElapsedTimer>
@@ -567,11 +570,20 @@ public:
     std::function<void()> toggleExpanded;
     std::function<void(const QVariant &, const QVariant &, double, double)> openImage;
     std::function<void(const QString &)> openFile;
+    std::function<void(const QString &)> activateLink;
     std::function<QString(const QString &)> attachmentUrl;
     std::function<void(const QString &)> loadAttachment;
     std::function<QPixmap(const QString &)> attachmentPicture;
 
 protected:
+    void linkFrom(LinkText *text)
+    {
+        QObject::connect(text, &LinkText::linkActivated, this, [this](const QString &href) {
+            if (activateLink)
+                activateLink(href);
+        });
+    }
+
     void resizeEvent(QResizeEvent *event) override
     {
         QWidget::resizeEvent(event);
@@ -634,32 +646,14 @@ protected:
     }
 };
 
-class ProseEdit : public QTextEdit
+class ProseEdit : public LinkText
 {
 public:
     explicit ProseEdit(QWidget *parent = nullptr)
-        : QTextEdit(parent)
+        : LinkText(parent)
     {
         setObjectName(QStringLiteral("transcriptProse"));
-        setReadOnly(true);
-        setFrameShape(QFrame::NoFrame);
-        setLineWrapMode(QTextEdit::WidgetWidth);
-        setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
         setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-        setAcceptDrops(false);
-        setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
-        setContentsMargins(0, 0, 0, 0);
-        document()->setDocumentMargin(0);
-        setAutoFillBackground(false);
-        viewport()->setAutoFillBackground(false);
-
-        QPalette colours = palette();
-        colours.setColor(QPalette::Base, Qt::transparent);
-        colours.setColor(QPalette::Window, Qt::transparent);
-        colours.setColor(QPalette::Highlight, Theme::instance()->accent());
-        colours.setColor(QPalette::HighlightedText, Theme::instance()->accentFg());
-        colours.setColor(QPalette::Text, Theme::instance()->fg());
-        setPalette(colours);
     }
 
     void setMarkup(const QString &markup, const QColor &colour, int pixelSize, bool monospace)
@@ -715,6 +709,7 @@ public:
     {
         m_prose = new ProseEdit(this);
         m_prose->setObjectName(QStringLiteral("userProse"));
+        linkFrom(m_prose);
         m_prose->hide();
         setMouseTracking(true);
         m_captionHeight = QFontMetrics(uiFont(Theme::instance()->fontData())).height();
@@ -812,6 +807,14 @@ protected:
         TranscriptRow::mouseMoveEvent(event);
     }
 
+    void enterEvent(QEnterEvent *) override
+    {
+        if (!pending() || m_hover)
+            return;
+        m_hover = true;
+        update();
+    }
+
     void leaveEvent(QEvent *) override
     {
         if (!m_hover)
@@ -872,7 +875,8 @@ private:
             return;
         }
 
-        const int copyWidth = metrics.horizontalAdvance(QStringLiteral("Copy"));
+        const int copyWidth = qMax(metrics.horizontalAdvance(QStringLiteral("Copy")),
+                                   metrics.horizontalAdvance(QStringLiteral("Copied")));
         m_copyRect = QRect(content.right() - labelWidth - theme->space4() - copyWidth,
                            content.top(), copyWidth, m_captionHeight);
         if (!m_hover)
@@ -918,6 +922,7 @@ public:
     {
         m_prose = new ProseEdit(this);
         m_prose->setObjectName(QStringLiteral("agentProse"));
+        linkFrom(m_prose);
         m_prose->hide();
     }
 
@@ -1044,6 +1049,7 @@ public:
     {
         m_prose = new ProseEdit(this);
         m_prose->setObjectName(QStringLiteral("expandedProse"));
+        linkFrom(m_prose);
         m_prose->hide();
     }
 
@@ -1338,31 +1344,12 @@ protected:
     bool m_hover = false;
 };
 
-class ToolScroll : public QTextEdit
+class ToolScroll : public LinkText
 {
 public:
     explicit ToolScroll(QWidget *parent = nullptr)
-        : QTextEdit(parent)
+        : LinkText(parent)
     {
-        setReadOnly(true);
-        setFrameShape(QFrame::NoFrame);
-        setLineWrapMode(QTextEdit::WidgetWidth);
-        setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-        setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-        setAcceptDrops(false);
-        setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
-        setContentsMargins(0, 0, 0, 0);
-        document()->setDocumentMargin(0);
-        setAutoFillBackground(false);
-        viewport()->setAutoFillBackground(false);
-
-        QPalette colours = palette();
-        colours.setColor(QPalette::Base, Qt::transparent);
-        colours.setColor(QPalette::Window, Qt::transparent);
-        colours.setColor(QPalette::Highlight, Theme::instance()->accent());
-        colours.setColor(QPalette::HighlightedText, Theme::instance()->accentFg());
-        setPalette(colours);
-
         QFont face = monoFont(Theme::instance()->fontData());
         setFont(face);
         document()->setDefaultFont(face);
@@ -1394,10 +1381,18 @@ public:
     {
         m_in = new ToolScroll(this);
         m_out = new ToolScroll(this);
+        auto forward = [this](const QString &href) {
+            if (activateLink)
+                activateLink(href);
+        };
+        QObject::connect(m_in, &LinkText::linkActivated, this, forward);
+        QObject::connect(m_out, &LinkText::linkActivated, this, forward);
         m_in->hide();
         m_out->hide();
         setAutoFillBackground(false);
     }
+
+    std::function<void(const QString &)> activateLink;
 
     void setRow(const RowData &data)
     {
@@ -1581,6 +1576,10 @@ public:
         : FlowRow(RowClass::Tool, parent)
     {
         m_card = new ToolCard(this);
+        m_card->activateLink = [this](const QString &href) {
+            if (activateLink)
+                activateLink(href);
+        };
         m_card->hide();
     }
 
@@ -1697,6 +1696,7 @@ public:
         : FlowRow(RowClass::Thought, parent)
     {
         m_prose = new ProseEdit(this);
+        linkFrom(m_prose);
         m_prose->hide();
     }
 
@@ -2407,11 +2407,22 @@ void TranscriptView::bindRow(TranscriptRow *row)
         emit openImage(source, alt, fallbackWidth, fallbackHeight);
     };
     row->openFile = [this](const QString &path) { emit openFile(path); };
+    row->activateLink = [this](const QString &href) { emit linkActivated(href); };
     row->attachmentUrl = [this](const QString &id) { return m_attachments->url(id); };
     row->loadAttachment = [this](const QString &id) { m_attachments->request(id); };
     row->attachmentPicture = [this](const QString &id) {
         return m_attachments->picture(id);
     };
+    QTimer::singleShot(0, row, [row]() {
+        if (row == nullptr || !row->isVisible())
+            return;
+        const QPoint local = row->mapFromGlobal(QCursor::pos());
+        if (!row->rect().contains(local))
+            return;
+        const QPointF where(local);
+        QEnterEvent enter(where, where, where);
+        QApplication::sendEvent(row, &enter);
+    });
     row->setRow(row->row());
 }
 

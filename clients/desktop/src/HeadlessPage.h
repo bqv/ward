@@ -24,6 +24,7 @@ public:
 signals:
     void dismissRequested();
     void shutRequested();
+    void linkActivated(const QString &href);
 
 protected:
     void showEvent(QShowEvent *event) override;

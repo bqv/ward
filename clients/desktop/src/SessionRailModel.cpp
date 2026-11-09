@@ -818,7 +818,7 @@ void SessionRailModel::rebuild()
             const bool subagent = isSubagentChild(kid);
             const bool shown =
                 subagent ? (subagentKids < kCollapsedChildLimit || liveUnder(kid))
-                         : (sessionKids < kCollapsedSessionLimit || liveUnder(kid));
+                         : sessionKids < kCollapsedSessionLimit;
             if (shown)
                 shownKidIds.insert(sessionIdOf(kid));
             else if (subagent)
@@ -1033,8 +1033,7 @@ void SessionRailModel::rebuild()
             const bool shown =
                 pinned
                 || (subagent ? (subagents < kCollapsedChildLimit || liveUnder(member))
-                             : (unpinnedSessions < kCollapsedSessionLimit
-                                || liveUnder(member)));
+                             : unpinnedSessions < kCollapsedSessionLimit);
             if (shown)
                 shownMemberIds.insert(sessionIdOf(member));
             else if (subagent)

@@ -10,6 +10,8 @@ class AcpClient;
 class ClientFacade;
 class Composer;
 class GoalEditDialog;
+class WorkspacePickerDialog;
+class LinkDialog;
 class GoalRow;
 class HeadlessClient;
 class HeadlessPage;
@@ -180,6 +182,8 @@ private:
     void showSettingsDialog();
     void showChangesDialog();
     void showGoalEditDialog(const QString &objective, int maxGoalRounds);
+    void showLinkDialog(const QString &href);
+    void showWorkspacePicker();
     /// The refresh `main.qml`'s opener performs once: the namespace the tab reads,
     /// asked of the transport by name because the facade deliberately does not
     /// carry the schedule and plugin surfaces (plan §3.3).
@@ -235,6 +239,8 @@ private:
     SettingsDialog *m_settingsDialog = nullptr;
     ChangesDialog *m_changesDialog = nullptr;
     GoalEditDialog *m_goalEditDialog = nullptr;
+    LinkDialog *m_linkDialog = nullptr;
+    WorkspacePickerDialog *m_workspacePicker = nullptr;
     /// The splitter's one animation, so a second press retargets it rather than
     /// stacking two timelines on the same fixed width.
     QVariantAnimation *m_railAnimation = nullptr;

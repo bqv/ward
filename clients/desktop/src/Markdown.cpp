@@ -746,8 +746,10 @@ QString inlineMarkup(const QString &text, QList<Markdown::ImagePart> *images)
         }
 
         // A bare URL, but only at a word boundary — `xhttps://` is not a link.
-        if ((hasAt(text, i, QLatin1String("http://")) || hasAt(text, i, QLatin1String("https://")))
-            && (i == 0 || !text.at(i - 1).isLetterOrNumber())) {
+        const bool bareWeb = (hasAt(text, i, QLatin1String("http://"))
+                              || hasAt(text, i, QLatin1String("https://"))
+                              || hasAt(text, i, QLatin1String("www.")));
+        if (bareWeb && (i == 0 || !text.at(i - 1).isLetterOrNumber())) {
             int end = i;
             while (end < n && !text.at(end).isSpace() && text.at(end) != QLatin1Char('<')
                    && text.at(end) != QLatin1Char('"') && text.at(end) != QLatin1Char('`')) {
@@ -761,7 +763,10 @@ QString inlineMarkup(const QString &text, QList<Markdown::ImagePart> *images)
                 --end;
             }
             const QString url = text.mid(i, end - i);
-            out += linkTo(escapeHtml(url), url);
+            const QString href = hasAt(text, i, QLatin1String("www."))
+                ? QStringLiteral("https://") + url
+                : url;
+            out += linkTo(escapeHtml(url), href);
             i = end;
             continue;
         }
@@ -771,7 +776,7 @@ QString inlineMarkup(const QString &text, QList<Markdown::ImagePart> *images)
         while (end < n && text.at(end) != QLatin1Char('`') && text.at(end) != QLatin1Char('*')
                && text.at(end) != QLatin1Char('_') && text.at(end) != QLatin1Char('[')
                && text.at(end) != QLatin1Char('~') && text.at(end) != QLatin1Char('h')
-               && text.at(end) != QLatin1Char('!')) {
+               && text.at(end) != QLatin1Char('w') && text.at(end) != QLatin1Char('!')) {
             ++end;
         }
         out += escapeHtml(text.mid(i, end - i));

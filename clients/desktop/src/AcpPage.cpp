@@ -1,6 +1,7 @@
 #include "AcpPage.h"
 
 #include "AcpClient.h"
+#include "LinkText.h"
 #include "Markdown.h"
 #include "ShellChrome.h"
 #include "Theme.h"
@@ -63,7 +64,7 @@ void applyProseRhythm(QTextDocument *document)
     }
 }
 
-void configureProse(QTextEdit *edit, const QFont &font, const QColor &text)
+void configureProse(LinkText *edit, const QFont &font, const QColor &text)
 {
     Theme *theme = Theme::instance();
     edit->setReadOnly(true);
@@ -817,13 +818,18 @@ public:
         setObjectName(QStringLiteral("acpRow"));
         setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 
-        m_user = new QTextEdit(this);
+        m_user = new LinkText(this);
         configureProse(m_user, Chrome::uiFont(theme->fontProse()), theme->fg());
         m_user->hide();
 
-        m_agent = new QTextEdit(this);
+        m_agent = new LinkText(this);
         configureProse(m_agent, Chrome::uiFont(theme->fontProse()), theme->fg());
         m_agent->hide();
+
+        QObject::connect(m_user, &LinkText::linkActivated, this,
+                         [this](const QString &href) { m_owner->raiseLink(href); });
+        QObject::connect(m_agent, &LinkText::linkActivated, this,
+                         [this](const QString &href) { m_owner->raiseLink(href); });
 
         m_user->installEventFilter(this);
         m_agent->installEventFilter(this);
@@ -1058,8 +1064,8 @@ private:
     QString m_status;
     QString m_detail;
     QString m_request;
-    QTextEdit *m_user = nullptr;
-    QTextEdit *m_agent = nullptr;
+    LinkText *m_user = nullptr;
+    LinkText *m_agent = nullptr;
     int m_measuredWidth = -1;
     int m_measuredHeight = 0;
     int m_bubbleWidth = 0;
@@ -1557,6 +1563,11 @@ void AcpPage::dragMoveEvent(QDragMoveEvent *event)
 void AcpPage::dropEvent(QDropEvent *event)
 {
     event->ignore();
+}
+
+void AcpPage::raiseLink(const QString &href)
+{
+    emit linkActivated(href);
 }
 
 void AcpPage::focusPage()

@@ -13,6 +13,8 @@
 #include "GoalEditDialog.h"
 #include "GoalRow.h"
 #include "HeadlessClient.h"
+#include "LinkDialog.h"
+#include "WorkspacePickerDialog.h"
 
 #include "HeadlessPage.h"
 #include "Lightbox.h"
@@ -215,6 +217,8 @@ Shell::Shell(ClientFacade *facade, const ShellPanes &panes, QWidget *parent)
                          m_filesDock->setShown(true);
                          m_facade->readFile(path);
                      });
+    QObject::connect(m_conversation, &TranscriptView::linkActivated, this,
+                     &Shell::showLinkDialog);
     QObject::connect(m_facade, &ClientFacade::sessionIdChanged, m_lightbox,
                      &Lightbox::closeLightbox);
     if (QObject *transport = m_facade->transport()) {
@@ -747,6 +751,8 @@ QWidget *Shell::buildChatPage()
 
     QObject::connect(m_rail, &SessionRail::workspaceNewRequested, this,
                      [this]() { callRailTransport("createWorkspaceFromPicker"); });
+    QObject::connect(m_facade, &ClientFacade::workspacePickerRequested, this,
+                     &Shell::showWorkspacePicker);
     QObject::connect(m_rail, &SessionRail::sessionNewRequested, this, [this]() {
         callRailTransport("createSession");
         m_composer->focusEntry();
@@ -869,6 +875,8 @@ void Shell::buildFullWindowPages(const ShellPanes &panes)
 
     QObject::connect(m_acpPage, &AcpPage::closeRequested, this,
                      [this]() { closePage(QStringLiteral("acp")); });
+    QObject::connect(m_acpPage, &AcpPage::linkActivated, this,
+                     &Shell::showLinkDialog);
 
     QObject::connect(m_acpPage, &AcpPage::acpSessionSelected, this,
                      [this](const QString &sessionId) {
@@ -897,6 +905,8 @@ void Shell::buildFullWindowPages(const ShellPanes &panes)
                    << "the pane will read as idle";
 
     m_headlessPage = new HeadlessPage(panes.headlessClient, iconDirectory(), m_pages);
+    QObject::connect(m_headlessPage, &HeadlessPage::linkActivated, this,
+                     &Shell::showLinkDialog);
     m_headlessPage->hide();
     m_pageByName.insert(QStringLiteral("headless"), m_headlessPage);
 
@@ -1181,6 +1191,14 @@ void Shell::uiGate()
     jobs->show();
     QApplication::processEvents();
     printf("ui-gate: jobs %d\n", jobs->isVisible() ? 1 : 0);
+    showLinkDialog(QStringLiteral("https://example.com/"));
+    QApplication::processEvents();
+    printf("ui-gate: link %d\n",
+           m_linkDialog != nullptr && m_linkDialog->isVisible() ? 1 : 0);
+    showWorkspacePicker();
+    QApplication::processEvents();
+    printf("ui-gate: picker %d\n",
+           m_workspacePicker != nullptr && m_workspacePicker->isVisible() ? 1 : 0);
     QTimer::singleShot(50, this, []() {
         for (QWidget *widget : QApplication::topLevelWidgets()) {
             if (auto *box = qobject_cast<QMessageBox *>(widget)) {
@@ -1231,6 +1249,40 @@ void Shell::showGoalEditDialog(const QString &objective, int maxGoalRounds)
                          &ClientFacade::editGoal);
     }
     m_goalEditDialog->showDialog(objective, maxGoalRounds);
+}
+
+void Shell::showLinkDialog(const QString &href)
+{
+    if (m_linkDialog == nullptr) {
+        m_linkDialog = new LinkDialog(this);
+        m_linkDialog->setObjectName(QStringLiteral("linkDialog"));
+        QObject::connect(m_linkDialog, &LinkDialog::browserRequested, this,
+                         [](const QUrl &url) {
+                             qInfo().nospace() << "link dialog: opening " << url.toString()
+                                               << " in the system browser";
+                             QDesktopServices::openUrl(url);
+                         });
+        QObject::connect(m_linkDialog, &LinkDialog::inWindowRequested, this,
+                         [this](const QUrl &url) {
+                             qInfo().nospace() << "link dialog: opening " << url.toString()
+                                               << " in the web page";
+                             m_webUrl = url;
+                             if (m_webPage != nullptr)
+                                 m_webPage->setUrl(url);
+                             openPage(QStringLiteral("web"));
+                         });
+    }
+    m_linkDialog->showLink(href);
+    qInfo().nospace() << "link dialog: showing for " << href;
+}
+
+void Shell::showWorkspacePicker()
+{
+    if (m_workspacePicker == nullptr) {
+        m_workspacePicker = new WorkspacePickerDialog(m_facade, iconDirectory(), this);
+        m_workspacePicker->setObjectName(QStringLiteral("workspacePickerDialog"));
+    }
+    m_workspacePicker->showPicker();
 }
 
 void Shell::openManagementPage(const QString &tab)
