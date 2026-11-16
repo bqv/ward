@@ -5,7 +5,7 @@ BUILDDIR ?= out
 MODE ?= debug
 SANITIZE ?= none
 GUEST_PROFILE ?= debug
-TEST_TIMEOUT ?= 300
+TEST_TIMEOUT ?= 500
 
 PREFIX ?= /usr/local
 

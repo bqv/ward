@@ -29,6 +29,8 @@ typedef struct {
 
 int wd_estate_card_read(const char *socket_path, const char *group,
                         wd_estate_card *out, char **err);
+int wd_estate_status_read(const char *url, char **json, size_t *len,
+                          char **err);
 int wd_estate_parse(const char *json, wd_estate_card *out);
 
 #endif

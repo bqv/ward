@@ -71,3 +71,12 @@ that once left two reparented processes is:
 
 A listener that accepts and never answers returns the read in about 5 s rather than hanging; that is the path the
 orphans sat behind. Treat a 10 s accept expiry as a slow machine to investigate, not a number to raise.
+
+## `estate.status`
+
+`estate.status` answers `{json: "..."}` with demesne's live `/status` document
+(the tenants, loads, reservations, `llm_health`, `vram_used_gib` and version that
+the desktop and Android estate cards read). It is fetched from
+`http://127.0.0.1:55555/status`, overridable with `WARD_ESTATE_URL` for tests,
+with a 5 s timeout and a 1 MiB cap. It is the live status endpoint, never the
+inference route; the socket remains for `/estate/*` only.

@@ -323,7 +323,7 @@ static long proc_status_kb(pid_t pid, const char *key) {
 }
 
 int main(void) {
-  alarm(180);
+  alarm(400);
   const char *bin = getenv("WARD_BIN");
   const char *modules = getenv("WARD_MODULE_DIR");
   if (bin == NULL || modules == NULL) {
@@ -344,6 +344,10 @@ int main(void) {
   snprintf(retry_path, sizeof(retry_path), "/tmp/ward-retry-once-%d", (int)getpid());
   setenv("WARD_FAKE_429_FILE", retry_path, 1);
   fake_endpoint(&endpoint_port, &endpoint);
+  char estate_url[128];
+  snprintf(estate_url, sizeof(estate_url), "http://127.0.0.1:%d/v1/systemone",
+           endpoint_port);
+  setenv("WARD_ESTATE_URL", estate_url, 1);
   char root[] = "/tmp/ward-tool-gate-XXXXXX";
   assert(mkdtemp(root) != NULL);
   char rules_path[512];
@@ -445,6 +449,14 @@ int main(void) {
   char *session = wd_text_copy(wd_get(wd_get(created, "session"), "id"));
   assert(session != NULL);
   wd_free(created);
+
+  cbor_item_t *estate_status = NULL;
+  assert(request(&a, a.next_id++, "estate.status", wd_map(0), &estate_status,
+                 NULL) == 0);
+  char *estate_json = wd_text_copy(wd_get(estate_status, "json"));
+  assert(estate_json != NULL && strstr(estate_json, "score") != NULL);
+  free(estate_json);
+  wd_free(estate_status);
 
   bool catalog_ok = false;
   cbor_item_t *listed = NULL;

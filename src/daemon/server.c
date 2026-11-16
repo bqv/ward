@@ -2414,6 +2414,26 @@ static void handle_estate_card(wd_server *srv, wd_conn *conn, uint64_t id,
   conn_arm(srv, conn);
 }
 
+static void handle_estate_status(wd_server *srv, wd_conn *conn, uint64_t id) {
+  const char *url = getenv("WARD_ESTATE_URL");
+  if (url == NULL || url[0] == '\0') url = "http://127.0.0.1:55555/status";
+  char *json = NULL;
+  size_t len = 0;
+  char *err = NULL;
+  if (wd_estate_status_read(url, &json, &len, &err) != 0) {
+    conn_send_error(conn, id, WD_ERR_INTERNAL,
+                    err != NULL ? err : "the estate is unreachable");
+    free(err);
+    conn_arm(srv, conn);
+    return;
+  }
+  cbor_item_t *result = wd_map(1);
+  wd_put(result, "json", wd_text_len(json, len));
+  free(json);
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
 static void handle_search_text(wd_server *srv, wd_conn *conn, uint64_t id,
                                cbor_item_t *params) {
   char *query = wd_text_copy(wd_get(params, "query"));
@@ -4109,6 +4129,8 @@ static void handle_request(wd_server *srv, wd_conn *conn, uint64_t id,
     handle_host_list(srv, conn, id, params);
   } else if (strcmp(method, "estate.card") == 0) {
     handle_estate_card(srv, conn, id, params);
+  } else if (strcmp(method, "estate.status") == 0) {
+    handle_estate_status(srv, conn, id);
   } else if (strcmp(method, "session.search_text") == 0) {
     handle_search_text(srv, conn, id, params);
   } else if (strcmp(method, "settings.get") == 0) {

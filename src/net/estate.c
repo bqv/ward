@@ -157,3 +157,32 @@ int wd_estate_card_read(const char *socket_path, const char *group,
   }
   return 0;
 }
+
+int wd_estate_status_read(const char *url, char **json, size_t *len,
+                          char **err) {
+  if (url == NULL || url[0] == '\0' || json == NULL || len == NULL) {
+    if (err != NULL) *err = strdup("estate.status: no status url");
+    return -1;
+  }
+  wd_http_response response = {0};
+  if (wd_http_request(url, "GET", NULL, NULL, 5000, 1u << 20, &response,
+                      err) != 0)
+    return -1;
+  if (response.status != 200) {
+    if (err != NULL) *err = strdup("estate.status: the endpoint refused");
+    wd_http_response_free(&response);
+    return -1;
+  }
+  char *copy = malloc(response.len + 1);
+  if (copy == NULL) {
+    if (err != NULL) *err = strdup("estate.status: out of memory");
+    wd_http_response_free(&response);
+    return -1;
+  }
+  if (response.len > 0) memcpy(copy, response.body, response.len);
+  copy[response.len] = '\0';
+  *json = copy;
+  *len = response.len;
+  wd_http_response_free(&response);
+  return 0;
+}
