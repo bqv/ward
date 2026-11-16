@@ -2535,3 +2535,14 @@ therefore never saw it, the wait blocked, and the tool gate died at its watchdog
 The policy now lives in the capability layer of `process_action`, where the turn's emit callback both logs and broadcasts: before
 `fs.write` or `fs.edit` runs, it emits `session.checkpoint {label: "before a side effect"}`. Gate_tool approves the out.txt write,
 waits for that checkpoint before the result, and the suite is green at 52. The model-request half of the DSH policy is still open.
+
+Hundred-and-ninety-second: the Android release build is blocked in this environment, and the attempts are worth writing down. `assembleRelease`
+dies in `:app:processReleaseResources` with `AAPT2 aapt2-8.5.2-11315950-linux Daemon #0: Daemon startup failed`. The extracted
+`aapt2` binary runs directly (`aapt version` prints 2.19-11315950), so it is not corrupt. The failure is identical sandboxed and
+unsandboxed, after `./build.sh --stop`, after deleting and forcing re-extraction of the AAPT2 transform, and with
+`-Pandroid.aapt2.daemonMode=false`; `-Pandroid.aapt2FromMavenOverride=<binary>` is rejected earlier, at plugin application.
+Session limits are not the cause (pids 5/1024, memory 523 MB of the 4 GiB session cap, fd soft 1024). The wrapper already runs
+Gradle with `--no-daemon`, so a stale Gradle daemon is ruled out; the remaining hypotheses are a stale toolchain cache (a fresh
+GRADLE_USER_HOME means re-downloading the Android dependency set), a different AGP/aapt2 pin, or a host-side build. Version
+0.6.8 (17) is committed and the phone stays on 0.6.7 (16), which already carries the estate cards. The APK item is parked until
+that build can be produced; the rest of the programme does not depend on it.
