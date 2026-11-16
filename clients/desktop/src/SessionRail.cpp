@@ -1836,6 +1836,16 @@ bool SessionRail::eventFilter(QObject *watched, QEvent *event)
             // body of a row is a target too, so it keeps the same cursor.
             m_list->viewport()->setCursor(row >= 0 ? Qt::PointingHandCursor
                                                    : Qt::ArrowCursor);
+
+            const SessionRailModel::Row *hovered = rowAt(row);
+            QString tip;
+            if (hovered != nullptr
+                && (hovered->kind == SessionRailModel::RowKind::Session
+                    || SessionRailModel::isCap(hovered->kind))) {
+                tip = hovered->title;
+            }
+            if (m_list->viewport()->toolTip() != tip)
+                m_list->viewport()->setToolTip(tip);
         } else if (event->type() == QEvent::Leave && m_hoveredRow != -1) {
             // The ⋯ would vanish from under the pointer as it crossed the
             // viewport's edge; the QML keeps it while the row's own area or the

@@ -519,6 +519,8 @@ public:
     void goalAction(const QString &action);
     void editGoal(const QString &objective, int maxGoalRounds);
 
+    bool forkSession(const QString &sessionId, qint64 atSeq = 0);
+
     /// Follow a session, and the parent seat's own two-argument form for a parent
     /// that is itself a child (the host answers `session/agent-busy` to a bare
     /// child id, which is why the mode travels with the address).
@@ -605,6 +607,7 @@ signals:
     void queueCountChanged();
     void pendingAttachmentsChanged();
     void pendingAttachmentCountChanged();
+    void promptRestored(const QString &text);
     void fileCandidatesChanged();
     void fileEntriesChanged();
     void filePathChanged();

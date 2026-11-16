@@ -136,6 +136,11 @@ QGenericArgument intArg(const int &value)
     return QGenericArgument("int", &value);
 }
 
+QGenericArgument longLongArg(const qint64 &value)
+{
+    return QGenericArgument("qlonglong", &value);
+}
+
 }   // namespace
 
 ClientFacade::ClientFacade(QObject *transport, QObject *parent)
@@ -197,6 +202,9 @@ ClientFacade::ClientFacade(QObject *transport, QObject *parent)
     if (transportMeta->indexOfSignal("workspacePickerRequested()") >= 0)
         QObject::connect(transport, SIGNAL(workspacePickerRequested()), this,
                          SIGNAL(workspacePickerRequested()));
+    if (transportMeta->indexOfSignal("promptRestored(QString)") >= 0)
+        QObject::connect(transport, SIGNAL(promptRestored(QString)), this,
+                         SIGNAL(promptRestored(QString)));
 
     // Seed the derived values before anything can read them. Every recompute is
     // the same code the notify handlers run, so there is no second spelling of a
@@ -756,6 +764,16 @@ void ClientFacade::editGoal(const QString &objective, int maxGoalRounds)
         return;
     call("editGoal(QString,int)", QGenericReturnArgument(), stringArg(objective),
          intArg(maxGoalRounds));
+}
+
+bool ClientFacade::forkSession(const QString &sessionId, qint64 atSeq)
+{
+    if (!m_transport)
+        return false;
+    if (transportMethod("forkSession(QString,qlonglong)").isValid())
+        return call("forkSession(QString,qlonglong)", QGenericReturnArgument(),
+                    stringArg(sessionId), longLongArg(atSeq));
+    return call("forkSession(QString)", QGenericReturnArgument(), stringArg(sessionId));
 }
 
 void ClientFacade::followSession(const QString &sessionId)

@@ -4,9 +4,11 @@
 #include "ShellChrome.h"
 #include "Theme.h"
 
+#include <QCoreApplication>
 #include <QEnterEvent>
 #include <QFontMetrics>
 #include <QHBoxLayout>
+#include <QLabel>
 #include <QPainter>
 #include <QPaintEvent>
 #include <QToolButton>
@@ -210,6 +212,23 @@ ShellHeader::ShellHeader(ClientFacade *facade, QWidget *parent)
         row->addWidget(toggle);
         QObject::connect(toggle, &QToolButton::clicked, this,
                          [this, toggle]() { emit paneToggleRequested(toggle->page()); });
+    }
+
+#ifdef WARD_GUI_BUILD
+    const QString build = QStringLiteral(WARD_GUI_BUILD);
+#else
+    const QString build = QCoreApplication::applicationVersion();
+#endif
+    if (!build.isEmpty() && build != QLatin1String("dev")) {
+        m_build = new QLabel(build, this);
+        m_build->setObjectName(QStringLiteral("buildLabel"));
+        m_build->setFont(Chrome::uiFont(Theme::instance()->fontData()));
+        m_build->setToolTip(QStringLiteral("Client build ") + build);
+        QPalette palette = m_build->palette();
+        palette.setColor(QPalette::WindowText, Theme::instance()->faint());
+        m_build->setPalette(palette);
+        m_build->setContentsMargins(Theme::instance()->space2(), 0, 0, 0);
+        row->addWidget(m_build, 0, Qt::AlignVCenter);
     }
 
     // A pane of the same protocol beside itself would be a second child for no

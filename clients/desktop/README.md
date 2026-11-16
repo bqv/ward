@@ -97,9 +97,10 @@ The client speaks ward's method names and event kinds, not an adapter vocabulary
 | approval | `approval.list` for global marks and tool/reason; `approval.requested` -> `approval.respond` -> `approval.resolved` for the card |
 | cancel | `session.cancel` |
 | rename, pin, archive | `session.rename`, `session.pin`, `session.archive` |
+| fork | `session.fork {id, from?}` from the rail, or from a message's Fork with `from` set to that row's event seq |
 | compact | `session.compact` |
 | goal | `goal.set`, `goal.clear` |
-| models | `model.list`, `session.set_model` |
+| models | `model.list`, `session.set_model`; a model chosen on a new-session seat travels in `session.create {model}` |
 | terminal | `terminal.open/write/resize/close`, `terminal.output`, eof |
 | files | `session.file_read` (text), `session.file_read_blob` (CBOR bytes), `session.file_list` |
 | schedules | `schedule.list`, `schedule.delete` |
@@ -111,7 +112,7 @@ The client speaks ward's method names and event kinds, not an adapter vocabulary
 | ACP | `ward-acp`, JSON-RPC 2.0 over stdio: initialize, session/new, session/prompt, session/cancel, session/update, request_permission |
 | jobs | `job.list`, `job.follow` retained output and `job.kill`; the jobs chip opens the viewer |
 | settings | `settings.get` / `settings.set`; Settings edits `max_runs` and `debug` |
-| queue | `session.prompt` -> `{queued, ahead}`; `session.queue` refreshes the authoritative rows |
+| queue | `session.prompt` -> `{queued, ahead}`; `session.queue` refreshes the authoritative rows; a refused prompt returns to the composer |
 | steer | `session.prompt` with `steer: true` appends to the running turn |
 | images | `tool.result.path` / `session.attachment.path` -> `attachment.read_blob` |
 | any other method | `wardCall(method, params)` is the generic door; `protocolMethods()` lists the frozen table |
@@ -124,6 +125,9 @@ and are never silently dropped by the wire layer.
 
 - **New folder from the workspace picker.** ward serves `host.list` but has no method to create a
   directory, so Create reports that rather than sending a call.
+- **Per-message Fork on the DSH transport.** ward's event seqs let a row offer a fork from that
+  message; the retained DSH transport publishes no row seqs, so its Fork is the rail's
+  whole-session one.
 - **QUIC pairing dialog.** Settings > Pair a device runs `ward-pair`, stores the
   certificate paths and says to restart on `--socket quic://…`; the window does
   not switch transport at runtime.

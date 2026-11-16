@@ -19,6 +19,7 @@ class ClientFacade;
 /// only under the pointer or while their pane is up. That is a shape Fusion has no
 /// primitive for, so `paintEvent` draws it from the token table rather than a
 /// `QProxyStyle` bending a stock control into something it is not.
+class QLabel;
 class ShellHeader : public QWidget
 {
     Q_OBJECT
@@ -53,6 +54,7 @@ private:
     Toggle *m_web;
     Toggle *m_acp;
     Toggle *m_headless;
+    QLabel *m_build = nullptr;
     /// The page whose toggle is lit, so a page switch is logged once rather than
     /// on every sync.
     QString m_page;

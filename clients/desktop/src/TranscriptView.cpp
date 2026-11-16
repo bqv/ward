@@ -66,6 +66,7 @@ struct RowData
     QString fullText;
     QString key;
     qint64 time = 0;
+    qint64 seq = 0;
     int turn = -1;
     bool turnLead = false;
     int index = 0;
@@ -149,6 +150,7 @@ RowData rowDataFor(const QAbstractItemModel *model, const QSet<QString> &expande
     data.fullText = model->data(mi, AcpTranscript::FullTextRole).toString();
     data.key = model->data(mi, AcpTranscript::KeyRole).toString();
     data.time = model->data(mi, AcpTranscript::TimeRole).toLongLong();
+    data.seq = model->data(mi, AcpTranscript::SequenceRole).toLongLong();
     data.turn = model->data(mi, AcpTranscript::TurnRole).toInt();
     data.turnLead = model->data(mi, AcpTranscript::TurnLeadRole).toBool();
     if (data.kind == QLatin1String("user") && looksInjected(data.text)) {
@@ -574,6 +576,7 @@ public:
     std::function<QString(const QString &)> attachmentUrl;
     std::function<void(const QString &)> loadAttachment;
     std::function<QPixmap(const QString &)> attachmentPicture;
+    std::function<void(qint64)> forkAtSequence;
 
 protected:
     void linkFrom(LinkText *text)
@@ -592,11 +595,31 @@ protected:
 
     virtual void layoutBody() {}
 
+    void mousePressEvent(QMouseEvent *event) override
+    {
+        if (event->button() == Qt::LeftButton) {
+            m_pressPoint = event->position().toPoint();
+            m_pressHeld = true;
+        }
+        QWidget::mousePressEvent(event);
+    }
+
+    bool takeCleanClick(const QPoint &point)
+    {
+        const bool clean = m_pressHeld
+            && (point - m_pressPoint).manhattanLength()
+                   <= QApplication::startDragDistance();
+        m_pressHeld = false;
+        return clean;
+    }
+
     RowData m_data;
 
 private:
     RowClass m_class;
     int m_columnWidth = 0;
+    QPoint m_pressPoint;
+    bool m_pressHeld = false;
 };
 
 class PlaceholderRow : public TranscriptRow
@@ -767,7 +790,7 @@ protected:
         QPainter painter(this);
         painter.setRenderHint(QPainter::Antialiasing, true);
         painter.setPen(Qt::NoPen);
-        if (pending())
+        if (captionBand() > 0)
             paintCaption(painter, content);
         if (m_bubbleHeight <= 0)
             return;
@@ -796,20 +819,22 @@ protected:
 
     void mouseMoveEvent(QMouseEvent *event) override
     {
-        const bool hover = pending()
-            && contentRect().contains(event->position().toPoint());
+        const QPoint point = event->position().toPoint();
+        const bool hover = captionBand() > 0 && contentRect().contains(point);
         if (hover != m_hover) {
             m_hover = hover;
             update();
         }
-        setCursor(hover && m_copyRect.contains(event->position().toPoint())
-                      ? Qt::PointingHandCursor : Qt::ArrowCursor);
+        const bool copy = !m_copyRect.isEmpty() && m_copyRect.contains(point);
+        const bool fork = !m_forkRect.isEmpty() && m_forkRect.contains(point);
+        setCursor(hover && (copy || fork) ? Qt::PointingHandCursor
+                                          : Qt::ArrowCursor);
         TranscriptRow::mouseMoveEvent(event);
     }
 
     void enterEvent(QEnterEvent *) override
     {
-        if (!pending() || m_hover)
+        if (captionBand() <= 0 || m_hover)
             return;
         m_hover = true;
         update();
@@ -826,17 +851,26 @@ protected:
 
     void mouseReleaseEvent(QMouseEvent *event) override
     {
-        if (pending() && event->button() == Qt::LeftButton && m_hover
-                && !messageText().isEmpty()
-                && m_copyRect.contains(event->position().toPoint())) {
-            QGuiApplication::clipboard()->setText(messageText());
-            m_copied = true;
-            update();
-            QTimer::singleShot(1600, this, [this]() {
-                m_copied = false;
-                update();
-            });
+        const QPoint point = event->position().toPoint();
+        const bool clean = event->button() == Qt::LeftButton && takeCleanClick(point);
+        if (clean && !m_forkRect.isEmpty() && m_forkRect.contains(point)
+                && m_data.seq > 0) {
+            if (forkAtSequence)
+                forkAtSequence(m_data.seq);
             return;
+        }
+        if (clean && pending() && m_hover) {
+            if (!m_copyRect.isEmpty() && !messageText().isEmpty()
+                    && m_copyRect.contains(point)) {
+                QGuiApplication::clipboard()->setText(messageText());
+                m_copied = true;
+                update();
+                QTimer::singleShot(1600, this, [this]() {
+                    m_copied = false;
+                    update();
+                });
+                return;
+            }
         }
         TranscriptRow::mouseReleaseEvent(event);
     }
@@ -853,7 +887,9 @@ private:
 
     int captionBand() const
     {
-        return pending() ? m_captionHeight + Theme::instance()->space2() : 0;
+        if (pending() || m_data.seq > 0)
+            return m_captionHeight + Theme::instance()->space2();
+        return 0;
     }
 
     void paintCaption(QPainter &painter, const QRect &content)
@@ -862,28 +898,51 @@ private:
         const QFont font = uiFont(theme->fontData());
         const QFontMetrics metrics(font);
         painter.setFont(font);
-        painter.setPen(theme->caption());
-        const QString label = m_data.status == QLatin1String("steering")
-            ? QStringLiteral("steering\u2026") : QStringLiteral("queued\u2026");
-        const int labelWidth = metrics.horizontalAdvance(label);
-        painter.drawText(QRect(content.right() - labelWidth, content.top(),
-                               labelWidth, m_captionHeight),
-                         Qt::AlignVCenter | Qt::AlignRight, label);
 
-        if (messageText().isEmpty()) {
-            m_copyRect = QRect();
-            return;
+        m_copyRect = QRect();
+        m_forkRect = QRect();
+
+        int right = content.right();
+        if (pending()) {
+            painter.setPen(theme->caption());
+            const QString label = m_data.status == QLatin1String("steering")
+                ? QStringLiteral("steering\u2026") : QStringLiteral("queued\u2026");
+            const int labelWidth = metrics.horizontalAdvance(label);
+            painter.drawText(QRect(right - labelWidth, content.top(),
+                                   labelWidth, m_captionHeight),
+                             Qt::AlignVCenter | Qt::AlignRight, label);
+            right -= labelWidth + theme->space4();
         }
 
-        const int copyWidth = qMax(metrics.horizontalAdvance(QStringLiteral("Copy")),
-                                   metrics.horizontalAdvance(QStringLiteral("Copied")));
-        m_copyRect = QRect(content.right() - labelWidth - theme->space4() - copyWidth,
-                           content.top(), copyWidth, m_captionHeight);
+        if (m_data.seq > 0) {
+            const int forkWidth = metrics.horizontalAdvance(QStringLiteral("Fork"));
+            const int forkLeft = right - forkWidth;
+            if (forkLeft >= content.left()) {
+                m_forkRect = QRect(forkLeft, content.top(), forkWidth, m_captionHeight);
+                right = forkLeft - theme->space4();
+            }
+        }
+
+        if (pending() && !messageText().isEmpty()) {
+            const int copyWidth = qMax(metrics.horizontalAdvance(QStringLiteral("Copy")),
+                                       metrics.horizontalAdvance(QStringLiteral("Copied")));
+            const int copyLeft = right - copyWidth;
+            if (copyLeft >= content.left())
+                m_copyRect = QRect(copyLeft, content.top(), copyWidth, m_captionHeight);
+        }
+
         if (!m_hover)
             return;
-        painter.setPen(m_copied ? theme->ok() : theme->dim());
-        painter.drawText(m_copyRect, Qt::AlignVCenter | Qt::AlignRight,
-                         m_copied ? QStringLiteral("Copied") : QStringLiteral("Copy"));
+        if (!m_forkRect.isEmpty()) {
+            painter.setPen(theme->dim());
+            painter.drawText(m_forkRect, Qt::AlignVCenter | Qt::AlignRight,
+                             QStringLiteral("Fork"));
+        }
+        if (!m_copyRect.isEmpty()) {
+            painter.setPen(m_copied ? theme->ok() : theme->dim());
+            painter.drawText(m_copyRect, Qt::AlignVCenter | Qt::AlignRight,
+                             m_copied ? QStringLiteral("Copied") : QStringLiteral("Copy"));
+        }
     }
 
     void measure(int width) const
@@ -908,6 +967,7 @@ private:
     bool m_hover = false;
     bool m_copied = false;
     QRect m_copyRect;
+    QRect m_forkRect;
     mutable int m_bubbleX = 0;
     mutable int m_bubbleWidth = 0;
     mutable int m_bubbleHeight = 0;
@@ -930,6 +990,8 @@ public:
     {
         const bool changed = data.text != m_data.text;
         TranscriptRow::setRow(data);
+        m_copyRect = QRect();
+        m_forkRect = QRect();
         if (!changed) {
             layoutBody();
             return;
@@ -993,17 +1055,31 @@ protected:
         const QFont font = uiFont(theme->fontData());
         const QFontMetrics metrics(font);
         painter.setFont(font);
-        const QString stamp = QDateTime::fromMSecsSinceEpoch(m_data.time).toString(
-            QStringLiteral("HH:mm"));
         const int y = content.top() + m_textHeight + theme->space2();
-        painter.setPen(theme->caption());
-        painter.drawText(QRect(0, y, metrics.horizontalAdvance(stamp), 19),
-                         Qt::AlignVCenter | Qt::AlignLeft, stamp);
-        const int copyX = metrics.horizontalAdvance(stamp) + theme->space4();
-        m_copyRect = QRect(copyX, y, metrics.horizontalAdvance(QStringLiteral("Copy")), 19);
+        int x = 0;
+        if (m_data.time > 0) {
+            const QString stamp = QDateTime::fromMSecsSinceEpoch(m_data.time).toString(
+                QStringLiteral("HH:mm"));
+            painter.setPen(theme->caption());
+            painter.drawText(QRect(0, y, metrics.horizontalAdvance(stamp), 19),
+                             Qt::AlignVCenter | Qt::AlignLeft, stamp);
+            x = metrics.horizontalAdvance(stamp) + theme->space4();
+        }
+        const int copyWidth = metrics.horizontalAdvance(QStringLiteral("Copy"));
+        m_copyRect = QRect(x, y, copyWidth, 19);
         painter.setPen(theme->dim());
         painter.drawText(m_copyRect, Qt::AlignVCenter | Qt::AlignLeft,
                          QStringLiteral("Copy"));
+        m_forkRect = QRect();
+        if (m_data.seq > 0) {
+            const int forkWidth = metrics.horizontalAdvance(QStringLiteral("Fork"));
+            const int forkX = x + copyWidth + theme->space4();
+            if (forkX + forkWidth <= content.right()) {
+                m_forkRect = QRect(forkX, y, forkWidth, 19);
+                painter.drawText(m_forkRect, Qt::AlignVCenter | Qt::AlignLeft,
+                                 QStringLiteral("Fork"));
+            }
+        }
     }
 
     void layoutBody() override
@@ -1022,9 +1098,18 @@ protected:
 
     void mouseReleaseEvent(QMouseEvent *event) override
     {
-        if (footerVisible() && m_copyRect.contains(event->position().toPoint())) {
-            QGuiApplication::clipboard()->setText(m_data.text);
-            return;
+        const QPoint point = event->position().toPoint();
+        if (event->button() == Qt::LeftButton && takeCleanClick(point)) {
+            if (footerVisible() && !m_forkRect.isEmpty() && m_forkRect.contains(point)
+                    && m_data.seq > 0) {
+                if (forkAtSequence)
+                    forkAtSequence(m_data.seq);
+                return;
+            }
+            if (footerVisible() && m_copyRect.contains(point)) {
+                QGuiApplication::clipboard()->setText(m_data.text);
+                return;
+            }
         }
         TranscriptRow::mouseReleaseEvent(event);
     }
@@ -1032,13 +1117,15 @@ protected:
 private:
     bool footerVisible() const
     {
-        return !m_data.text.isEmpty() && m_data.closesTurn && m_data.time > 0
-            && m_data.status != QLatin1String("streaming");
+        if (m_data.text.isEmpty() || m_data.status == QLatin1String("streaming"))
+            return false;
+        return m_data.seq > 0 || (m_data.closesTurn && m_data.time > 0);
     }
 
     ProseEdit *m_prose = nullptr;
     mutable int m_textHeight = 0;
     mutable QRect m_copyRect;
+    mutable QRect m_forkRect;
 };
 
 class ExpandedRow : public TranscriptRow
@@ -2423,6 +2510,11 @@ void TranscriptView::bindRow(TranscriptRow *row)
         QEnterEvent enter(where, where, where);
         QApplication::sendEvent(row, &enter);
     });
+    row->forkAtSequence = [this](qint64 seq) {
+        if (seq <= 0)
+            return;
+        emit forkRequested(seq);
+    };
     row->setRow(row->row());
 }
 

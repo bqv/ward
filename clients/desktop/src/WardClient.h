@@ -215,6 +215,7 @@ public:
     Q_INVOKABLE void confirmPermissionPreset(const QString &value);
     Q_INVOKABLE void setConfigOption(const QString &configId, const QString &value);
     Q_INVOKABLE void pinSession(const QString &sessionId);
+    Q_INVOKABLE void forkSession(const QString &sessionId, qint64 atSeq = 0);
     Q_INVOKABLE void unpinSession(const QString &sessionId);
     Q_INVOKABLE void archiveSession(const QString &sessionId);
     Q_INVOKABLE void unarchiveSession(const QString &sessionId);
@@ -302,6 +303,7 @@ signals:
     void changedFilesChanged();
     void queueChanged();
     void pendingAttachmentsChanged();
+    void promptRestored(const QString &text);
     void fileCandidatesChanged();
     void fileEntriesChanged();
     void filePathChanged();
@@ -359,6 +361,7 @@ private:
     void applySession(const QVariantMap &session);
     void setSessions(const QVariantList &sessions);
     void rebuildWorkspaces();
+    void syncModelChoice(const QString &model, bool clearNotice = true);
     void applyHostListing(const QVariantMap &result);
     void setDirectoryPickLoading(bool loading);
     void setDirectoryPickNotice(const QString &notice);
@@ -367,10 +370,11 @@ private:
     void doPrompt(const QString &text, bool steer = false);
     void appendRow(const QString &kind, const QString &text, const QString &title = {},
                    const QString &status = {}, const QString &detail = {},
-                   const QString &key = {}, int turn = -1);
+                   const QString &key = {}, int turn = -1, qint64 seq = 0);
     void addTrajectory(const QVariantMap &cell);
     void updateTrajectory(const QString &id, const QVariantMap &patch);
     void clearTranscript();
+    void restorePendingPrompt();
 
     QString m_socketPath;
     int m_fd = -1;
@@ -467,6 +471,7 @@ private:
     QStringList m_railCollapsed;
 
     QString m_createCwd;
+    QString m_pendingModel;
     QString m_blobPath;
     qint64 m_blobOffset = 0;
     qint64 m_blobLen = 0;
@@ -477,6 +482,10 @@ private:
 
     QString m_queuedPrompt;
     QString m_sentPrompt;
+    QString m_pendingSendText;
+    QVariantList m_pendingSendAttachments;
+    bool m_pendingSendActive = false;
+    bool m_pendingSendEchoed = false;
     bool m_steerAttempt = false;
     int m_steerCount = 0;
     QString m_pendingApproval;

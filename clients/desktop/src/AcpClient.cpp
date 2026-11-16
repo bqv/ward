@@ -137,6 +137,7 @@ QVariant AcpTranscript::data(const QModelIndex &index, int role) const
     case TurnLeadRole: return row.turnLead;
     case FullTextRole: return row.fullText;
     case KeyRole: return row.key;
+    case SequenceRole: return row.seq;
     default:         return {};
     }
 }
@@ -155,6 +156,7 @@ QHash<int, QByteArray> AcpTranscript::roleNames() const
         {TurnLeadRole, "turnLead"},
         {FullTextRole, "fullText"},
         {KeyRole, "rowKey"},
+        {SequenceRole, "seq"},
     };
 }
 
@@ -213,7 +215,8 @@ QString workspacePath(const QString &workspace, const QString &path)
 int AcpTranscript::append(const QString &kind, const QString &text,
                           const QString &title, const QString &status,
                           const QString &detail, const QString &key, qint64 time,
-                          int turn, const QString &request, const QString &fullText)
+                          int turn, const QString &request, const QString &fullText,
+                          qint64 seq)
 {
     // Whether this row is the one that will stand in for its turn when folded.
     // Decided here rather than in the view: a delegate cannot ask the model what
@@ -241,7 +244,7 @@ int AcpTranscript::append(const QString &kind, const QString &text,
     const UpdateCost cost("append", row, row + 1);
     beginInsertRows(QModelIndex(), row, row);
     m_rows.append(Row{kind, text, title, status, detail, request, key, time, turn,
-                      lead, fullText});
+                      lead, fullText, seq});
     endInsertRows();
     m_turnCountsStale = true;
     return row;
@@ -375,30 +378,36 @@ QVariantMap AcpTranscript::turnSummary(int turn) const
 }
 
 void AcpTranscript::appendOrExtend(const QString &kind, const QString &text, qint64 time,
-                                   int turn)
+                                   int turn, qint64 seq)
 {
     if (!m_rows.isEmpty() && m_rows.last().kind == kind) {
         // The time is the row's original one and is deliberately not refreshed:
         // a message that streams over a minute is stamped when it began.
         m_rows.last().text += text;
+        const bool seqMoved = seq > 0 && m_rows.last().seq != seq;
+        if (seqMoved)
+            m_rows.last().seq = seq;
         const int row = static_cast<int>(m_rows.size()) - 1;
         const UpdateCost cost("appendOrExtend", row, row + 1);
-        emit dataChanged(index(row, 0), index(row, 0), {TextRole});
+        emit dataChanged(index(row, 0), index(row, 0),
+                         seqMoved ? QList<int>{TextRole, SequenceRole}
+                                  : QList<int>{TextRole});
         return;
     }
-    append(kind, text, {}, {}, {}, {}, time, turn);
+    append(kind, text, {}, {}, {}, {}, time, turn, QString(), QString(), seq);
 }
 
 int AcpTranscript::prepend(const QString &kind, const QString &text,
                            const QString &title, const QString &status,
-                           const QString &detail, const QString &request)
+                           const QString &detail, const QString &request, qint64 seq)
 {
     // Insert at row 0 rather than rebuilding: a model reset would render the same
     // rows but lose the view's scroll position, and the reader who asked for
     // earlier history is holding precisely that position.
     const UpdateCost cost("prepend", 0, static_cast<int>(m_rows.size()) + 1);
     beginInsertRows(QModelIndex(), 0, 0);
-    m_rows.prepend(Row{kind, text, title, status, detail, request});
+    m_rows.prepend(Row{kind, text, title, status, detail, request, {}, 0, -1,
+                       false, {}, seq});
     endInsertRows();
     m_turnCountsStale = true;
     return 0;

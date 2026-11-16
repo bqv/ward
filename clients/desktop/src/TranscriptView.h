@@ -41,6 +41,7 @@ signals:
     void openFile(const QString &path);
     void linkActivated(const QString &href);
     void pageEarlier();
+    void forkRequested(qint64 seq);
 
 protected:
     void resizeEvent(QResizeEvent *event) override;

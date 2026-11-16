@@ -94,6 +94,8 @@ private:
     /// typed in, and is put back when that session returns.
     void adoptDraft(const QString &sessionId);
 
+    void restorePrompt(const QString &text);
+
     /// main.qml's `primaryMode()`/`alternateMode()` (2220-2227), which are the
     /// facade's `promptMode()`/`alternatePromptMode()`.
     QString primaryMode() const;

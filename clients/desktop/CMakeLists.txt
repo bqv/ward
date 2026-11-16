@@ -218,8 +218,11 @@ target_compile_definitions(ward-gui-probe PRIVATE WARD_HAVE_QUIC=1)
 # Where the installed data lives: the icon set the rail and the transcript load,
 # and the cursor themes main.cpp prepends to XCURSOR_PATH. Resolved at run time
 # from this prefix, never baked as a build-tree path.
+set(WARD_GUI_BUILD "dev" CACHE STRING "Build label shown in the header")
+
 target_compile_definitions(ward-gui PRIVATE
     DSH_NATIVE_DATA_SUBDIR="/usr/share/ward-gui"
+    WARD_GUI_BUILD="${WARD_GUI_BUILD}"
 )
 
 target_sources(ward-gui PRIVATE $<TARGET_OBJECTS:wardquic>)

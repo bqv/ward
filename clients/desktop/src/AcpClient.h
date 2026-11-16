@@ -130,6 +130,7 @@ public:
         /// prepend renumbers every row below it and an index-keyed set would open
         /// whichever row inherited the index. See `rowId` in qml/main.qml.
         KeyRole,
+        SequenceRole,
     };
     Q_ENUM(Role)
 
@@ -159,7 +160,8 @@ public:
                qint64 time = 0,
                int turn = -1,
                const QString &request = QString(),
-               const QString &fullText = QString());
+               const QString &fullText = QString(),
+               qint64 seq = 0);
 
     /// Address a row by `key` and rewrite its status/detail/text in place.
     /// Returns false when no row carries that key, which is not an error: a
@@ -198,7 +200,7 @@ public:
     /// `time` is kept from the row's first chunk, so a message that streams for a
     /// minute is stamped when it began rather than when it finished.
     void appendOrExtend(const QString &kind, const QString &text, qint64 time = 0,
-                        int turn = -1);
+                        int turn = -1, qint64 seq = 0);
 
     /// Insert a row *above* the existing ones and return its index — the mirror
     /// of append().
@@ -210,7 +212,8 @@ public:
                 const QString &title = QString(),
                 const QString &status = QString(),
                 const QString &detail = QString(),
-                const QString &request = QString());
+                const QString &request = QString(),
+                qint64 seq = 0);
 
     /// Extend the *first* row when it is `kind`, else insert a new row above.
     /// The mirror of appendOrExtend(): a page is translated oldest-first, so a
@@ -257,6 +260,7 @@ private:
         /// The whole text a row only previews, or empty. See FullTextRole. Kept
         /// last because it is the one field no existing row has ever set.
         QString fullText;
+        qint64 seq = 0;
     };
     QList<Row> m_rows;
     /// The highest turn seen, and whether it is still being written.

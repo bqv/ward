@@ -219,6 +219,8 @@ Shell::Shell(ClientFacade *facade, const ShellPanes &panes, QWidget *parent)
                      });
     QObject::connect(m_conversation, &TranscriptView::linkActivated, this,
                      &Shell::showLinkDialog);
+    QObject::connect(m_conversation, &TranscriptView::forkRequested, this,
+                     [this](qint64 seq) { forkSession(QString(), seq); });
     QObject::connect(m_facade, &ClientFacade::sessionIdChanged, m_lightbox,
                      &Lightbox::closeLightbox);
     if (QObject *transport = m_facade->transport()) {
@@ -789,7 +791,7 @@ QWidget *Shell::buildChatPage()
                      });
     QObject::connect(m_rail, &SessionRail::forkRequested, this,
                      [this](const QString &sessionId) {
-                         callRailTransport("forkSession", sessionId);
+                         forkSession(sessionId);
                      });
     QObject::connect(m_rail, &SessionRail::pinRequested, this,
                      [this](const QString &sessionId, bool pinned) {
@@ -1634,7 +1636,7 @@ void Shell::openRailRowMenu(const QRect &globalRow, const QString &sessionId,
 
     QAction *fork = menu->addAction(Chrome::menuText(QStringLiteral("Fork")));
     connect(fork, &QAction::triggered, this, [this, sessionId]() {
-        callRailTransport("forkSession", sessionId);
+        forkSession(sessionId);
     });
 
     QAction *pin = menu->addAction(
@@ -1702,6 +1704,26 @@ void Shell::renameRailSession(const QString &sessionId, const QString &storedTit
                 }
             });
     dialog->open();
+}
+
+void Shell::forkSession(const QString &sessionId, qint64 atSeq)
+{
+    const QString from = sessionId.isEmpty() ? m_facade->sessionId() : sessionId;
+    if (from.isEmpty()) {
+        qWarning().nospace() << "fork: no session to branch"
+                             << (atSeq > 0 ? QStringLiteral(" at seq %1").arg(atSeq)
+                                           : QString());
+        return;
+    }
+    if (!m_facade->forkSession(from, atSeq)) {
+        qWarning().nospace() << "fork: transport " << m_facade->transportName()
+                             << " refused forkSession(" << from << ", " << atSeq << ")";
+        return;
+    }
+    qInfo().nospace() << (atSeq > 0 ? "transcript" : "session rail")
+                      << ": fork session " << from
+                      << (atSeq > 0 ? QStringLiteral(" at seq %1").arg(atSeq)
+                                    : QStringLiteral(" at its latest turn"));
 }
 
 void Shell::callRailTransport(const char *method, const QString &argument)

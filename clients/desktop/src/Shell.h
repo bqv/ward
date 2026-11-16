@@ -216,6 +216,7 @@ private:
     /// the facade deliberately carries only the chrome's subset (plan §3.3).
     void renameRailSession(const QString &sessionId, const QString &storedTitle);
     void callRailTransport(const char *method, const QString &argument = QString());
+    void forkSession(const QString &sessionId, qint64 atSeq = 0);
     /// Focus the chat composer after a pane is put away, which is the QML's
     /// `input.forceActiveFocus()` in every minimise and close function.
     void focusChatComposer();

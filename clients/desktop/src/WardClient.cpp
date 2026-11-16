@@ -711,13 +711,32 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
             const QString retry = m_sentPrompt;
             m_sentPrompt.clear();
             if (!retry.isEmpty()) {
+                if (!m_pendingSendAttachments.isEmpty()) {
+                    QVariantList saved = m_pendingSendAttachments;
+                    saved += m_pendingAttachments;
+                    m_pendingAttachments = saved;
+                    emit pendingAttachmentsChanged();
+                }
                 doPrompt(retry, false);
                 return;
             }
         }
+        if (method == QLatin1String("session.prompt") && !m_steerAttempt
+                && m_pendingSendActive && !m_pendingSendEchoed)
+            restorePendingPrompt();
+        if (method == QLatin1String("session.prompt")) {
+            m_pendingSendActive = false;
+            m_pendingSendText.clear();
+            m_pendingSendAttachments.clear();
+        }
         if (method == QLatin1String("session.prompt") && !m_turnOpen) {
             m_busy = false;
             emit busyChanged();
+        }
+        if (method == QLatin1String("session.set_model")) {
+            m_modelNotice = QStringLiteral("the model did not change: %1").arg(text);
+            emit modelNoticeChanged();
+            qWarning().nospace() << "model select failed: " << text;
         }
         if (method == QLatin1String("session.file_read")) {
             m_fileError = text;
@@ -789,6 +808,7 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
         const QVariantMap session = result.value(QStringLiteral("session")).toMap();
         applySession(session);
         const QString id = session.value(QStringLiteral("id")).toString();
+        const QString model = session.value(QStringLiteral("model")).toString();
         if (!id.isEmpty()) {
             m_pendingSession = false;
             emit pendingSessionChanged();
@@ -796,6 +816,27 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
             subscribe(id);
             emit sessionChanged();
         }
+        syncModelChoice(model);
+        if (!id.isEmpty() && !m_pendingModel.isEmpty() && m_pendingModel != model) {
+            const QString late = m_pendingModel;
+            m_pendingModel.clear();
+            sendRequest(QStringLiteral("session.set_model"),
+                        {{QStringLiteral("id"), id}, {QStringLiteral("model"), late}});
+            qInfo().nospace() << "model selected after the session existed: " << late;
+        }
+    } else if (method == QLatin1String("session.set_model")) {
+        const QVariantMap session = result.value(QStringLiteral("session")).toMap();
+        applySession(session);
+        const QString model = session.value(QStringLiteral("model")).toString();
+        syncModelChoice(model);
+        setState(Ready, QStringLiteral("model changed"));
+        qInfo().nospace() << "model selected: " << model;
+    } else if (method == QLatin1String("session.fork")) {
+        const QVariantMap session = result.value(QStringLiteral("session")).toMap();
+        applySession(session);
+        const QString id = session.value(QStringLiteral("id")).toString();
+        if (!id.isEmpty())
+            followSession(id);
     } else if (method == QLatin1String("session.resume")) {
         const QVariantMap session = result.value(QStringLiteral("session")).toMap();
         applySession(session);
@@ -818,6 +859,9 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
             m_steerAttempt = false;
             ++m_steerCount;
             m_sentPrompt.clear();
+            m_pendingSendActive = false;
+            m_pendingSendText.clear();
+            m_pendingSendAttachments.clear();
             if (!m_pendingAttachments.isEmpty()) {
                 m_pendingAttachments.clear();
                 m_stagingName.clear();
@@ -835,6 +879,9 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
                 {QStringLiteral("ahead"), ahead},
                 {QStringLiteral("steering"), false}}};
             m_sentPrompt.clear();
+            m_pendingSendActive = false;
+            m_pendingSendText.clear();
+            m_pendingSendAttachments.clear();
             emit queueChanged();
             refreshQueue();
             if (!m_pendingAttachments.isEmpty()) {
@@ -847,6 +894,9 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
         }
         const QVariantMap session = result.value(QStringLiteral("session")).toMap();
         applySession(session);
+        m_pendingSendActive = false;
+        m_pendingSendText.clear();
+        m_pendingSendAttachments.clear();
         const QVariantMap approval = result.value(QStringLiteral("approval")).toMap();
         if (!approval.isEmpty()) {
             m_busy = false;
@@ -947,8 +997,15 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
         refreshPermissionPresets();
     } else if (method == QLatin1String("model.list")) {
         const QVariantList models = result.value(QStringLiteral("models")).toList();
+        QString previous;
+        for (const QVariant &entry : m_configOptions) {
+            const QVariantMap option = entry.toMap();
+            if (option.value(QStringLiteral("id")).toString() == QLatin1String("model"))
+                previous = option.value(QStringLiteral("currentValue")).toString();
+        }
         QVariantList choices;
-        QString current;
+        QString first;
+        bool previousStillOffered = false;
         for (const QVariant &entry : models) {
             const QVariantMap model = entry.toMap();
             const QString id = model.value(QStringLiteral("id")).toString();
@@ -956,9 +1013,12 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
                 continue;
             choices.append(QVariantMap{{QStringLiteral("value"), id},
                                        {QStringLiteral("label"), id}});
-            if (current.isEmpty())
-                current = id;
+            if (first.isEmpty())
+                first = id;
+            if (!previous.isEmpty() && id == previous)
+                previousStillOffered = true;
         }
+        const QString current = previousStillOffered ? previous : first;
         if (!choices.isEmpty()) {
             m_configOptions = QVariantList{QVariantMap{
                 {QStringLiteral("id"), QStringLiteral("model")},
@@ -1092,7 +1152,9 @@ void WardClient::handleEvent(uint64_t sub, uint64_t seq, const QString &kind,
         applySession(payload.value(QStringLiteral("session")).toMap());
     } else if (kind == QLatin1String("session.prompted")) {
         const QString text = payload.value(QStringLiteral("text")).toString();
-        appendRow(QStringLiteral("user"), text);
+        if (m_pendingSendActive && text == m_pendingSendText)
+            m_pendingSendEchoed = true;
+        appendRow(QStringLiteral("user"), text, {}, {}, {}, {}, -1, qint64(seq));
         addTrajectory(QVariantMap{
             {QStringLiteral("id"), QStringLiteral("prompt-%1-%2").arg(m_turn).arg(seq)},
             {QStringLiteral("turn"), m_turn},
@@ -1107,7 +1169,8 @@ void WardClient::handleEvent(uint64_t sub, uint64_t seq, const QString &kind,
     } else if (kind == QLatin1String("text.delta")) {
         const QString piece = payload.value(QStringLiteral("text")).toString();
         m_transcript->appendOrExtend(QStringLiteral("agent"), piece,
-                                     QDateTime::currentMSecsSinceEpoch(), m_turn);
+                                     QDateTime::currentMSecsSinceEpoch(), m_turn,
+                                     qint64(seq));
         const QString id = QStringLiteral("agent-%1").arg(m_turn);
         bool found = false;
         for (int i = 0; i < m_trajectory.size(); ++i) {
@@ -1138,7 +1201,8 @@ void WardClient::handleEvent(uint64_t sub, uint64_t seq, const QString &kind,
     } else if (kind == QLatin1String("reasoning.delta")) {
         const QString piece = payload.value(QStringLiteral("text")).toString();
         m_transcript->appendOrExtend(QStringLiteral("thought"), piece,
-                                     QDateTime::currentMSecsSinceEpoch(), m_turn);
+                                     QDateTime::currentMSecsSinceEpoch(), m_turn,
+                                     qint64(seq));
         const QString id = QStringLiteral("thought-%1").arg(m_turn);
         bool found = false;
         for (int i = 0; i < m_trajectory.size(); ++i) {
@@ -1209,7 +1273,7 @@ void WardClient::handleEvent(uint64_t sub, uint64_t seq, const QString &kind,
         const QString tool = payload.value(QStringLiteral("tool")).toString();
         const QString call = QString::number(payload.value(QStringLiteral("call")).toULongLong());
         appendRow(QStringLiteral("tool"), tool, tool, QStringLiteral("pending"), tool, call,
-                  m_turn);
+                  m_turn, qint64(seq));
         addTrajectory(QVariantMap{
             {QStringLiteral("id"), QStringLiteral("tool-%1").arg(call)},
             {QStringLiteral("turn"), m_turn},
@@ -1232,13 +1296,13 @@ void WardClient::handleEvent(uint64_t sub, uint64_t seq, const QString &kind,
                     || lower.endsWith(QStringLiteral(".gif"))
                     || lower.endsWith(QStringLiteral(".webp")))) {
             appendRow(QStringLiteral("image"), tool + QLatin1Char(' ') + path, tool,
-                      QStringLiteral("completed"), path, {}, m_turn);
+                      QStringLiteral("completed"), path, {}, m_turn, qint64(seq));
         } else if (!path.isEmpty()) {
             appendRow(QStringLiteral("file"), path, tool, QStringLiteral("openable"), path,
-                      {}, m_turn);
+                      {}, m_turn, qint64(seq));
         } else {
             appendRow(QStringLiteral("tool"), tool, tool, QStringLiteral("completed"), tool,
-                      {}, m_turn);
+                      {}, m_turn, qint64(seq));
         }
         for (int i = m_trajectory.size() - 1; i >= 0; --i) {
             QVariantMap cell = m_trajectory.at(i).toMap();
@@ -1433,9 +1497,11 @@ void WardClient::applySession(const QVariantMap &session)
 
     if (id == m_sessionId) {
         const QString model = row.value(QStringLiteral("model")).toString();
-        if (!model.isEmpty())
+        if (!model.isEmpty()) {
             m_modelNotice = model;
-        emit modelNoticeChanged();
+            emit modelNoticeChanged();
+            syncModelChoice(model, false);
+        }
     }
 }
 
@@ -1518,6 +1584,7 @@ void WardClient::createSession()
     if (!m_terminalId.isEmpty())
         closeTerminal();
     m_pendingSession = true;
+    m_pendingModel.clear();
     m_queuedPrompt.clear();
     m_sessionId.clear();
     clearTranscript();
@@ -1530,10 +1597,14 @@ void WardClient::createSessionNow()
 {
     const QString cwd = m_createCwd.isEmpty() ? QDir::currentPath() : m_createCwd;
     m_createCwd.clear();
+    const QString model = m_pendingModel;
+    m_pendingModel.clear();
     m_pendingSession = true;
     emit pendingSessionChanged();
-    sendRequest(QStringLiteral("session.create"),
-                {{QStringLiteral("cwd"), cwd}});
+    QVariantMap params{{QStringLiteral("cwd"), cwd}};
+    if (!model.isEmpty())
+        params.insert(QStringLiteral("model"), model);
+    sendRequest(QStringLiteral("session.create"), params);
 }
 
 void WardClient::createSessionInWorkspace(const QString &workspaceId)
@@ -1705,6 +1776,10 @@ void WardClient::sendPrompt(const QString &text, const QString &mode)
 void WardClient::doPrompt(const QString &text, bool steer)
 {
     m_sentPrompt = text;
+    m_pendingSendText = text;
+    m_pendingSendAttachments = m_pendingAttachments;
+    m_pendingSendEchoed = false;
+    m_pendingSendActive = true;
     if (steer && m_turnOpen) {
         m_steerAttempt = true;
         setState(Ready, QStringLiteral("steering…"));
@@ -1731,6 +1806,29 @@ void WardClient::doPrompt(const QString &text, bool steer)
     }
     sendRequest(QStringLiteral("session.prompt"),
                 {{QStringLiteral("id"), m_sessionId}, {QStringLiteral("text"), text}});
+}
+
+void WardClient::restorePendingPrompt()
+{
+    const QString text = m_pendingSendText;
+    QVariantList attachments = m_pendingSendAttachments;
+    m_pendingSendActive = false;
+    m_pendingSendEchoed = false;
+    m_pendingSendText.clear();
+    m_pendingSendAttachments.clear();
+    if (text.trimmed().isEmpty())
+        return;
+
+    if (!attachments.isEmpty()) {
+        attachments += m_pendingAttachments;
+        m_pendingAttachments = attachments;
+        emit pendingAttachmentsChanged();
+    }
+    emit promptRestored(text);
+    setState(Ready, QStringLiteral("the prompt was not delivered; it is back in the composer"));
+    qInfo() << "session.prompt undelivered; returned to the composer:"
+            << "text chars" << text.size()
+            << "| pending attachments now" << m_pendingAttachments.size();
 }
 
 void WardClient::cancel()
@@ -1992,12 +2090,80 @@ void WardClient::confirmPermissionPreset(const QString &value)
                 {{QStringLiteral("id"), value}, {QStringLiteral("confirm"), true}});
 }
 
+void WardClient::syncModelChoice(const QString &model, bool clearNotice)
+{
+    if (model.isEmpty())
+        return;
+    QVariantList options = m_configOptions;
+    bool changed = false;
+    for (QVariant &entry : options) {
+        QVariantMap option = entry.toMap();
+        if (option.value(QStringLiteral("id")).toString() != QLatin1String("model"))
+            continue;
+        if (option.value(QStringLiteral("currentValue")).toString() == model)
+            continue;
+        option.insert(QStringLiteral("currentValue"), model);
+        entry = option;
+        changed = true;
+    }
+    if (changed) {
+        m_configOptions = options;
+        emit configOptionsChanged();
+    }
+    if (clearNotice && !m_modelNotice.isEmpty()) {
+        m_modelNotice.clear();
+        emit modelNoticeChanged();
+    }
+}
+
 void WardClient::setConfigOption(const QString &configId, const QString &value)
 {
-    if (configId == QLatin1String("model") && !m_sessionId.isEmpty())
+    if (configId != QLatin1String("model"))
+        return;
+
+    if (!m_sessionId.isEmpty()) {
+        m_pendingModel.clear();
+        if (!m_modelNotice.isEmpty()) {
+            m_modelNotice.clear();
+            emit modelNoticeChanged();
+        }
         sendRequest(QStringLiteral("session.set_model"),
                     {{QStringLiteral("id"), m_sessionId},
                      {QStringLiteral("model"), value}});
+        return;
+    }
+
+    if (m_pendingSession) {
+        m_pendingModel = value;
+        syncModelChoice(value);
+        setState(Ready, QStringLiteral("model chosen for the new session"));
+        qInfo().nospace() << "model staged for the new session: " << value;
+        return;
+    }
+
+    const QString message = QStringLiteral("no session to change the model for");
+    m_modelNotice = message;
+    emit modelNoticeChanged();
+    setState(Ready, message);
+    qWarning().noquote() << "model select refused locally:" << message;
+}
+
+void WardClient::forkSession(const QString &sessionId, qint64 atSeq)
+{
+    const QString from = sessionId.isEmpty() ? m_sessionId : sessionId;
+    if (from.isEmpty()) {
+        emit railNotice(QStringLiteral("no session to fork"), true);
+        return;
+    }
+    QVariantMap params{{QStringLiteral("id"), from}};
+    if (atSeq > 0)
+        params.insert(QStringLiteral("from"), atSeq);
+    setState(Ready, atSeq > 0 ? QStringLiteral("forking at that message…")
+                              : QStringLiteral("forking…"));
+    qInfo().nospace() << "session.fork: " << from
+                      << (atSeq > 0 ? QStringLiteral(" at seq %1").arg(atSeq)
+                                    : QStringLiteral(" at its latest turn"));
+    sendRequest(QStringLiteral("session.fork"), params);
 }
 
 void WardClient::pinSession(const QString &sessionId)
@@ -2484,10 +2650,11 @@ void WardClient::updateTrajectory(const QString &id, const QVariantMap &patch)
 
 void WardClient::appendRow(const QString &kind, const QString &text, const QString &title,
                            const QString &status, const QString &detail, const QString &key,
-                           int turn)
+                           int turn, qint64 seq)
 {
     m_transcript->append(kind, text, title, status, detail, key,
-                         QDateTime::currentMSecsSinceEpoch(), turn);
+                         QDateTime::currentMSecsSinceEpoch(), turn, QString(), QString(),
+                         seq);
 }
 
 void WardClient::clearTranscript()

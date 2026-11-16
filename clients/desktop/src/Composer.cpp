@@ -1086,6 +1086,8 @@ Composer::Composer(ClientFacade *facade, QWidget *parent)
                      [this]() { refreshQueueChip(); });
     QObject::connect(m_facade, &ClientFacade::pendingAttachmentsChanged, this,
                      [this]() { refreshAttachments(); });
+    QObject::connect(m_facade, &ClientFacade::promptRestored, this,
+                     [this](const QString &text) { restorePrompt(text); });
 
     // ---- first state ------------------------------------------------------
     m_draftSession = m_facade->sessionId();
@@ -1451,6 +1453,22 @@ void Composer::adoptDraft(const QString &sessionId)
     m_entry->moveCursor(QTextCursor::End);
     qInfo().nospace() << "composer draft: session " << (next.isEmpty() ? "<none>" : next)
                       << ", restored " << restored.size() << " chars";
+}
+
+void Composer::restorePrompt(const QString &text)
+{
+    if (text.isEmpty())
+        return;
+    if (m_draftSession != m_facade->sessionId())
+        adoptDraft(m_facade->sessionId());
+    const QString draft = m_entry->toPlainText();
+    QTextCursor cursor = m_entry->textCursor();
+    cursor.movePosition(QTextCursor::Start);
+    cursor.insertText(draft.isEmpty() ? text : text + QStringLiteral("\n\n"));
+    m_entry->setTextCursor(cursor);
+    relayoutField();
+    qInfo().nospace() << "composer restore: " << text.size() << " chars in front of "
+                      << draft.size() << " chars of draft";
 }
 
 // ---- the two invented-from-the-dock actions --------------------------------
