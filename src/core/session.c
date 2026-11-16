@@ -824,7 +824,7 @@ int wd_session_history_ex(wd_session *s, size_t budget, cbor_item_t **out,
   for (size_t i = 0; i < hc.len; i++)
     total += strlen(hc.turns[i].role) + strlen(hc.turns[i].text) + 64;
   size_t omitted = 0;
-  while (total > budget && hc.len > 1) {
+  while (budget > 0 && total > budget && hc.len > 1) {
     size_t entry = strlen(hc.turns[0].role) + strlen(hc.turns[0].text) + 64;
     total -= entry;
     omitted += entry;

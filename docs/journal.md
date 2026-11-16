@@ -2522,3 +2522,9 @@ array, `wd_session_history_ex` measures role+text+overhead per entry and drops t
 keeping at least one; the omitted byte count is reported as `session.overflow {omitted}` on both the live-turn path and the prompt
 preview, so the notice now fires at deepseek's ~258 KiB budget instead of waiting for the guest cap. The guest's newest-32 window
 with its head slot preserved stays as the backstop. gate_tool is green; the Android and desktop estate ports are in flight.
+
+Hundred-and-ninetieth: the tool gate is fast enough to be a gate again. Its fixed fake-provider delay dropped from 3 s to 1.5 s
+(2 s under ASan) and its watchdog sits at 400 s, so the slice tests added over the last rounds fit under the suite's 500 s cap
+instead of hanging at the alarm. `wd_session_history` also treats a budget of 0 as unlimited again — the unit test used 0 to
+mean "no trim", which the new trimming had broken — and a small budget now keeps the newest entry, which `session_test` asserts
+explicitly. Full suite green at 52 tests.

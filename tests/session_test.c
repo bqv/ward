@@ -140,7 +140,10 @@ int main(void) {
   wd_free(built);
 
   assert(wd_session_history(hist, 30, &built) == 0);
-  assert(cbor_array_size(built) == 4);
+  assert(cbor_array_size(built) == 1);
+  role = wd_text_copy(wd_get(cbor_array_handle(built)[0], "text"));
+  assert(role != NULL && strcmp(role, "second answer") == 0);
+  free(role);
   wd_free(built);
 
   cbor_item_t *compacted = wd_map(2);

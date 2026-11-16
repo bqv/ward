@@ -332,9 +332,9 @@ int main(void) {
   int endpoint_port = 0;
   pid_t endpoint = 0;
 #ifdef __SANITIZE_ADDRESS__
-  setenv("WARD_FAKE_DELAY_MS", "4000", 1);
+  setenv("WARD_FAKE_DELAY_MS", "2000", 1);
 #else
-  setenv("WARD_FAKE_DELAY_MS", "3000", 1);
+  setenv("WARD_FAKE_DELAY_MS", "1500", 1);
 #endif
   setenv("WARD_MAX_RUNS", "2", 1);
   sweep_test_cgroups();
