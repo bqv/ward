@@ -2560,3 +2560,11 @@ gate failed at the pre-existing timeout test, where approval.respond was rejecte
 is the new failure/turn-end path's interaction with the parked run, which needs isolating. The Android Router-tab wiring is in
 `stash@{0}` and cannot be verified because AAPT2 now fails for debug resources as well as release, so no Android build or test
 runs here at all. Until that environment issue is fixed or routed around, every Android item is ungateable.
+
+Hundred-and-ninety-fifth: failed turns now close. In the daemon's failure path, `run_after` emits `error {name: "turn_failed",
+message}` and `turn.end {aborted: true, reason: message}` through `wd_session_emit` and `conn_broadcast`, suppressed when the turn
+already ended, so a client sees the turn close and the transcript can record what happened. The gate copies `engine.wasm` to
+`tools@dead.wasm`, upgrades the session's tools module to it, prompts `/read`, asserts the error and the aborted turn.end with
+the same reason, then unlinks the copy. The bisect was the useful part: this daemon change alone passes the whole tool gate,
+including the timeout approval; the same code alongside the observed-version and repeat changes failed at `approval.respond`.
+The culprit in that batch is therefore in `session.c`/`turn.c`, not in the failure emission, which narrows the next attempt.

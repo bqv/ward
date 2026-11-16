@@ -107,6 +107,7 @@ struct wd_run {
   int http_status_seen;
   size_t streamed;
   uint64_t retry_at_ms;
+  bool ended;
 };
 
 
@@ -1247,6 +1248,10 @@ static int turn_emit(void *ctx, const char *event, cbor_item_t *payload,
   cbor_item_t *broadcast = payload != NULL ? dup_item(payload) : wd_map(0);
   if (broadcast != NULL)
     conn_broadcast(tc->srv, tc->session, event, seq, broadcast);
+  if (strcmp(event, "turn.end") == 0) {
+    wd_run *ended = run_find(tc->srv, tc->session->id);
+    if (ended != NULL) ended->ended = true;
+  }
   return 0;
 }
 
@@ -3278,6 +3283,38 @@ static void run_park(wd_server *srv, wd_run *run, int kind) {
   }
 }
 
+static void emit_turn_failure(wd_server *srv, wd_run *run,
+                              const char *message) {
+  wd_session *session = wd_session_find(&srv->store, run->session_id);
+  if (session == NULL || run->ended) return;
+  cbor_item_t *logged = wd_map(2);
+  wd_put(logged, "name", wd_text("turn_failed"));
+  wd_put(logged, "message", wd_text(message));
+  uint64_t seq = 0;
+  if (wd_session_emit(session, "error", logged, &seq) == 0) {
+    cbor_item_t *out = wd_map(2);
+    wd_put(out, "name", wd_text("turn_failed"));
+    wd_put(out, "message", wd_text(message));
+    conn_broadcast(srv, session, "error", seq, out);
+    wd_free(out);
+  }
+  wd_free(logged);
+  cbor_item_t *end = wd_map(3);
+  wd_put(end, "turn", wd_uint(wd_turn_id(run->turn)));
+  wd_put(end, "aborted", cbor_build_bool(true));
+  wd_put(end, "reason", wd_text(message));
+  uint64_t end_seq = 0;
+  if (wd_session_emit(session, "turn.end", end, &end_seq) == 0) {
+    cbor_item_t *out = wd_map(3);
+    wd_put(out, "turn", wd_uint(wd_turn_id(run->turn)));
+    wd_put(out, "aborted", cbor_build_bool(true));
+    wd_put(out, "reason", wd_text(message));
+    conn_broadcast(srv, session, "turn.end", end_seq, out);
+    wd_free(out);
+  }
+  wd_free(end);
+}
+
 static void run_after(wd_server *srv, wd_run *run, int rc, char *err) {
   if (rc == WD_TURN_PENDING) {
     int kind = wd_turn_pending_kind(run->turn);
@@ -3299,9 +3336,11 @@ static void run_after(wd_server *srv, wd_run *run, int rc, char *err) {
     free(err);
     return;
   }
-  if (rc != 0)
+  if (rc != 0) {
     fprintf(stderr, "ward: the turn failed: %s\n",
             err != NULL ? err : "unknown");
+    emit_turn_failure(srv, run, err != NULL ? err : "the turn failed");
+  }
   free(err);
   run_free(srv, run);
   drain_queue(srv);
