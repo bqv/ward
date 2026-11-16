@@ -33,8 +33,12 @@ choice.
 
 ## Paths the daemon writes
 
-`start_pre` creates the state and log directories and clears a stale socket, but
-only when no live pid holds it: a crash leaves the socket inode behind and
+`start_pre` prepares the cgroup fence (`/sys/fs/cgroup/ward`, or `WARD_CGROUP`)
+with passwordless sudo before the daemon starts, because cgroup v2 is empty
+after a reboot and an unprivileged service cannot create a directory at its
+root; if that preparation fails it starts the daemon with `WARD_CGROUP=off` and
+warns. It also creates the state and log directories and clears a stale socket,
+but only when no live pid holds it: a crash leaves the socket inode behind and
 `bind(2)` refuses a path that exists. `stop_post` removes the pidfile and any
 socket the daemon did not unlink itself.
 

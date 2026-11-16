@@ -37,12 +37,18 @@ whose common ancestor with `/ward` is the root cgroup — root-owned. So the
 move of ward's own pid needs privilege once; ward writes the pid directly when
 it can, and otherwise runs `sudo -n tee <path>` with the pid on stdin.
 
-The one-time setup that makes the subtree usable is done by root:
+The setup that makes the subtree usable is done by the user service's
+`start_pre` at every start, idempotently and with passwordless sudo:
 
 ```
-sudo mkdir -p /sys/fs/cgroup/ward
-sudo chown -R "$USER":"$USER" /sys/fs/cgroup/ward
+sudo -n sh -c "mkdir -p /sys/fs/cgroup/ward && chown -R \"$USER:$USER\" /sys/fs/cgroup/ward"
 ```
+
+cgroup v2 is empty after a reboot, so doing this in `start_pre` is what keeps a
+cold boot from leaving the daemon crash-looping on `cannot create
+/sys/fs/cgroup/ward`. If the sudo call fails, `start_pre` starts the daemon with
+`WARD_CGROUP=off` and warns, rather than looping on a fence it cannot build.
+Running the service by hand needs the same step once.
 
 ## Tests
 
