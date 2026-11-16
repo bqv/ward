@@ -2465,3 +2465,15 @@ wasm out-of-bounds trap instead, so the working answer is to keep the model-visi
 reply is clamped at 480 bytes (head plus notice) and the full bytes live at the path. `grep` and `search` still return their
 full output and are the next thing to route through the same bounded reply; until then they remain a latent turn-breaker at
 that size.
+
+Hundred-and-eighty-fourth: spill now covers every text-bearing tool, not just read and exec. The first slice bounded only
+those two at 64 KiB, but the driver's 512-byte window applies to any result, so grep, recall.search, web.search, mcp.call and
+both python paths could still end a turn with a few hundred bytes of output. They share one status reply now, spilling past
+the 256-byte visible window to `<session>/spill/` with a head and a notice naming the path, and the python guest's reply is
+rebuilt from its ok/status/text rather than forwarded whole. The trigger is the window itself, not 64 KiB: everything larger
+than the driver can read is recoverable from a file instead of lost or fatal. gate_tool adds a grep over the 123,000-byte
+file, asserting the truncated flag, the spill path and a spill file larger than the window; the suite is green at 52 tests.
+
+The 256-byte window is a compromise, not a design goal: it is the driver's 512-byte buffer halved for the notice, and raising
+that buffer produced a wasm out-of-bounds trap rather than a working larger window. The next slice — observed file state and
+read-before-write — is the remaining policy item, then provider retry and per-tool timeouts.
