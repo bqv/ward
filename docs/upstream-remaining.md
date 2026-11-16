@@ -25,7 +25,7 @@ Sources: dsh-linux `30981c4..954e32d` (plus `7ebbdfe`) and dsh-android
 
 | upstream | what it does | ward prerequisite | state |
 |---|---|---|---|
-| dsh-linux f009200, 3c0f0f2, 89a8c1a, cd78395; dsh-android estate and tenant clusters | estate/model-load chips, tenant cards, load progress, router tab | `estate.card` currently carries `{group, holders, since_ms, slots[{name,state}]}`; extend it from demesne's `/status` with tenants, loads, resident models, progress and metrics | in progress |
+| dsh-linux f009200, 3c0f0f2, 89a8c1a, cd78395; dsh-android estate and tenant clusters | estate/model-load chips, tenant cards, load progress, router tab | `estate.status` now serves demesne's live `/status` as `{json}`; the Android chips/cards and the desktop local-engine chip are ported. Outstanding: wiring the Android Router tab to the estate document (its host renders empty under test, so the terminal readout stays), and the DSH metrics view, which the payload does not carry | partially done |
 | dsh-linux 96da4a4 queue steer | addressable queued messages | `session.queue` items need stable ids and a `session.unqueue`/steer verb | queued |
 | dsh-linux 105bb10 picker create-folder | create a directory from the picker | a `host.mkdir` method (core + protocol + test) | queued |
 | dsh-linux d7b6d30, 56b548d | one-stream terminal attach, uplink, honest failures, title | terminal attach stream (snapshot + output + writable) in core, daemon and protocol | queued |
