@@ -51,9 +51,11 @@ import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.Hub
 import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DrawerState
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ModalNavigationDrawer
@@ -81,6 +83,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.boundsInParent
@@ -95,8 +98,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import kotlin.math.abs
+import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -117,6 +124,8 @@ import uk.xa0.ward.extension.isVisibleIn
 import uk.xa0.ward.model.GeneralSettings
 import uk.xa0.ward.model.ChatEntry
 import uk.xa0.ward.model.DisplayRow
+import uk.xa0.ward.model.ESTATE_POLL_MS
+import uk.xa0.ward.model.EstateLoad
 import uk.xa0.ward.model.LiveAttempt
 import uk.xa0.ward.model.SessionFiles
 import uk.xa0.ward.model.SessionTarget
@@ -192,6 +201,17 @@ fun ChatScreen(vm: DshViewModel) {
     val header by vm.header.collectAsStateWithLifecycle()
     val terminal by vm.terminal.collectAsStateWithLifecycle()
     val endedTurns by vm.endedTurns.collectAsStateWithLifecycle()
+    val estateLoads by vm.estateLoads.collectAsStateWithLifecycle()
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    LaunchedEffect(lifecycleOwner) {
+        lifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                vm.refreshEstate()
+                delay(ESTATE_POLL_MS)
+            }
+        }
+    }
 
     // Runtime extensions: the tabs the strip draws and the Settings section's rows.
     // The scope each extension content composes with is built below, once the
@@ -1133,6 +1153,8 @@ fun ChatScreen(vm: DshViewModel) {
                     modifier = Modifier.onSizeChanged { bannerPx = it.height },
                 )
             }
+
+            ModelLoadCards(estateLoads)
 
             if (showFiles) {
                 // Derived on demand: the transcript can hold a thousand rows and
@@ -3236,6 +3258,114 @@ private fun ErrorBanner(
             )
         }
         Text("Dismiss", style = DshType.bodySmall, color = colors.link)
+    }
+}
+
+@Composable
+private fun ModelLoadCards(loads: List<EstateLoad>) {
+    if (loads.isEmpty()) return
+    val colors = DshTheme.colors
+    val shape = RoundedCornerShape(DshRadius.card)
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = DshSpacing.xl, vertical = DshSpacing.sm),
+        verticalArrangement = Arrangement.spacedBy(DshSpacing.sm),
+    ) {
+        loads.forEach { load ->
+            val error = load.error
+            val phase = load.phase
+            val failed = phase == "failed"
+            val ready = phase != null && phase != "loading" && phase != "queued" && !failed
+            val name = load.model ?: load.slot
+            val progress = load.progress?.takeIf { load.progressSource != null }
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(shape)
+                    .background(colors.bgLayer1)
+                    .border(1.dp, colors.borderL3, shape)
+                    .padding(
+                        horizontal = DshSpacing.lg,
+                        vertical = if (ready) DshSpacing.xs else DshSpacing.md,
+                    ),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (ready) {
+                        if (load.active) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(8.dp),
+                                color = colors.accent,
+                                strokeWidth = 1.5.dp,
+                            )
+                        } else {
+                            StateDot(state = DotState.DONE, size = 8.dp)
+                        }
+                        Spacer(Modifier.width(DshSpacing.sm))
+                    }
+                    Text(
+                        text = when {
+                            ready -> name
+                            failed -> "Failed $name"
+                            progress != null ->
+                                "Loading $name ${(progress * 100).roundToInt()}%"
+                            else -> "Loading $name"
+                        },
+                        style = DshType.bodyMedium,
+                        color = colors.labelPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                if (!ready) {
+                    Spacer(Modifier.height(DshSpacing.xs))
+                    if (progress != null) {
+                        LinearProgressIndicator(
+                            progress = { progress },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(3.dp)
+                                .clip(RoundedCornerShape(DshRadius.pill)),
+                            color = colors.accent,
+                            trackColor = colors.borderL3,
+                            strokeCap = StrokeCap.Round,
+                        )
+                    }
+                }
+                if (ready) {
+                    if (load.model != null && load.slot != load.model) {
+                        Spacer(Modifier.height(DshSpacing.xxs))
+                        Text(
+                            text = load.slot,
+                            style = DshType.bodySmall,
+                            color = colors.labelSecondary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                } else if (error != null) {
+                    Spacer(Modifier.height(DshSpacing.xxs))
+                    Text(
+                        text = error,
+                        style = DshType.bodySmall,
+                        color = colors.warn,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                } else {
+                    if (load.model != null && load.slot != load.model) {
+                        Spacer(Modifier.height(DshSpacing.xxs))
+                        Text(
+                            text = load.slot,
+                            style = DshType.bodySmall,
+                            color = colors.labelSecondary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 

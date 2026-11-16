@@ -36,6 +36,9 @@ import uk.xa0.ward.model.ApprovalAnswer
 import uk.xa0.ward.diag.ScrollDiag
 import uk.xa0.ward.model.ChatEntry
 import uk.xa0.ward.model.ConnectionRestart
+import uk.xa0.ward.model.ESTATE_STATUS_METHOD
+import uk.xa0.ward.model.EstateLoad
+import uk.xa0.ward.model.estateCards
 import uk.xa0.ward.model.JobsMarker
 import uk.xa0.ward.model.JobObservation
 import uk.xa0.ward.model.JobOutput
@@ -1356,6 +1359,19 @@ class DshViewModel(application: Application) : AndroidViewModel(application) {
     /** Turns the host has closed; only these fold behind a process summary. */
     private val _endedTurns = MutableStateFlow<Set<Int>>(emptySet())
     val endedTurns: StateFlow<Set<Int>> = _endedTurns.asStateFlow()
+    private val _estateLoads = MutableStateFlow<List<EstateLoad>>(emptyList())
+    val estateLoads: StateFlow<List<EstateLoad>> = _estateLoads.asStateFlow()
+
+    suspend fun refreshEstate() {
+        if (_ui.value.phase != AppPhase.READY) return
+        if (!_ui.value.socketConnected) {
+            _estateLoads.value = emptyList()
+            return
+        }
+        _estateLoads.value = runCatching {
+            estateCards(client.rpc(ESTATE_STATUS_METHOD, JSONObject()))
+        }.getOrDefault(emptyList())
+    }
 
     /**
      * PTC dispatch links (sub-call → the call that dispatched it), read at

@@ -347,6 +347,7 @@ class WardBridge(
             "goals/edit", "goals/pause", "goals/resume" -> JSONObject()
             "session/updateQueue" -> JSONObject()
             "session/attachment" -> JSONObject()
+            "estate.status" -> estateStatus()
             "llm/discoverModels", "localRouter/status" -> JSONObject()
             else -> throw DshRpcException(
                 "not_supported",
@@ -456,6 +457,9 @@ class WardBridge(
             .put("queued", queued)
             .put("steered", result.bool("steered") ?: false)
     }
+
+    private suspend fun estateStatus(): JSONObject =
+        JSONObject(api.estateStatus().text("json").orEmpty())
 
     private suspend fun upload(request: JSONObject): JSONObject {
         val session = request.optString("agentId").ifEmpty { request.optString("sessionId") }

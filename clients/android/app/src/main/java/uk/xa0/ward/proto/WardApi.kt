@@ -158,6 +158,9 @@ class WardApi(private val connection: WardConnection) {
 
     suspend fun statsGlobal(): Cbor.Map = connection.call("stats.global", Cbor.Map(emptyList())).asMap()
 
+    suspend fun estateStatus(): Cbor.Map =
+        connection.call("estate.status", Cbor.Map(emptyList())).asMap()
+
     suspend fun setSystem(id: String, text: String): Cbor =
         connection.call("session.set_system", cborMap("id" to id.cbor(), "text" to text.cbor()))
 
