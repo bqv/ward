@@ -790,6 +790,11 @@ static int history_record(void *ctx, uint64_t seq, cbor_item_t *event) {
 }
 
 int wd_session_history(wd_session *s, size_t budget, cbor_item_t **out) {
+  return wd_session_history_ex(s, budget, out, NULL);
+}
+
+int wd_session_history_ex(wd_session *s, size_t budget, cbor_item_t **out,
+                          size_t *omitted_out) {
   hist_ctx hc;
   memset(&hc, 0, sizeof(hc));
   int rc = wd_session_replay(s, 0, history_record, &hc);
@@ -815,7 +820,20 @@ int wd_session_history(wd_session *s, size_t budget, cbor_item_t **out) {
       return -1;
     }
   }
-  (void)budget;
+  size_t total = 0;
+  for (size_t i = 0; i < hc.len; i++)
+    total += strlen(hc.turns[i].role) + strlen(hc.turns[i].text) + 64;
+  size_t omitted = 0;
+  while (total > budget && hc.len > 1) {
+    size_t entry = strlen(hc.turns[0].role) + strlen(hc.turns[0].text) + 64;
+    total -= entry;
+    omitted += entry;
+    free(hc.turns[0].role);
+    free(hc.turns[0].text);
+    memmove(&hc.turns[0], &hc.turns[1], (hc.len - 1) * sizeof(*hc.turns));
+    hc.len--;
+  }
+  if (omitted_out != NULL) *omitted_out = omitted;
   cbor_item_t *array = wd_array(hc.len);
   for (size_t i = 0; i < hc.len; i++) {
     cbor_item_t *entry = wd_map(2);

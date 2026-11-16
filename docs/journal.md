@@ -2516,3 +2516,9 @@ remaining half is core trimming by the byte budget instead of the guest cap, an 
 post-stream guest call fails, and the tools array the provider never sends — the model emits raw DSML markup because it has no
 tool schema, and the driver's model path only runs read/write/grep. gate_tool is green; the full suite waits for the desktop
 client work in flight.
+
+Hundred-and-eighty-ninth: history is now trimmed by the byte budget in core, not only by the guest's 32-entry cap. Before building the
+array, `wd_session_history_ex` measures role+text+overhead per entry and drops the oldest conversation turns until the total fits,
+keeping at least one; the omitted byte count is reported as `session.overflow {omitted}` on both the live-turn path and the prompt
+preview, so the notice now fires at deepseek's ~258 KiB budget instead of waiting for the guest cap. The guest's newest-32 window
+with its head slot preserved stays as the backstop. gate_tool is green; the Android and desktop estate ports are in flight.

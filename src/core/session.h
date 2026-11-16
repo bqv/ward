@@ -89,5 +89,7 @@ typedef struct {
 
 int wd_session_measure(wd_session *s, wd_session_stats *out);
 int wd_session_history(wd_session *s, size_t budget, cbor_item_t **out);
+int wd_session_history_ex(wd_session *s, size_t budget, cbor_item_t **out,
+                          size_t *omitted_out);
 
 #endif
