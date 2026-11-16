@@ -69,6 +69,7 @@ struct wd_turn {
   char *head;
   char *spill_dir;
   uint64_t spill_seq;
+  wd_session *session;
   wd_judge *judge_cache;
   cbor_item_t *judge_event;
   char *worker_root;
@@ -197,6 +198,11 @@ void wd_turn_set_endpoint(wd_turn *turn, const char *endpoint) {
   if (turn == NULL) return;
   free(turn->endpoint);
   turn->endpoint = endpoint != NULL ? strdup(endpoint) : NULL;
+}
+
+void wd_turn_set_session(wd_turn *turn, wd_session *session) {
+  if (turn == NULL) return;
+  turn->session = session;
 }
 
 void wd_turn_set_spill_dir(wd_turn *turn, const char *dir) {
@@ -705,6 +711,10 @@ static int fs_read(wd_turn *turn, const uint8_t *in, size_t in_len,
   if (memchr(buf, '\0', got) != NULL) {
     free(buf);
     return tool_fail("fs.read: the file is binary", out, out_len);
+  }
+  if (turn->session != NULL) {
+    uint64_t observed_seq = 0;
+    (void)wd_session_mark_observed(turn->session, path, &observed_seq);
   }
   rc = tool_ok_bounded(turn, "read", buf, got, out, out_len);
   free(buf);
@@ -1301,6 +1311,12 @@ static int fs_write(wd_turn *turn, const uint8_t *in, size_t in_len,
   if (text == NULL || len > WD_TOOL_MAX) {
     free(text);
     return tool_fail("fs.write: the text is missing or too long", out, out_len);
+  }
+  if (turn->session != NULL && access(path, F_OK) == 0 &&
+      !wd_session_observed(turn->session, path)) {
+    free(text);
+    return tool_fail("fs.write: read the file before overwriting it", out,
+                     out_len);
   }
   int written = write_atomic(path, text, len);
   free(text);

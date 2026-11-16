@@ -29,6 +29,7 @@ void wd_turn_set_session_system(wd_turn *turn, const char *text);
 void wd_turn_set_api_key(wd_turn *turn, const char *key);
 void wd_turn_allow_remote(wd_turn *turn);
 void wd_turn_set_model_name(wd_turn *turn, const char *name);
+void wd_turn_set_session(wd_turn *turn, wd_session *session);
 void wd_turn_set_endpoint(wd_turn *turn, const char *endpoint);
 void wd_turn_set_spill_dir(wd_turn *turn, const char *dir);
 bool wd_turn_trapped(wd_turn *turn, char *name, size_t cap);

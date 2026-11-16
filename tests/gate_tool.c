@@ -581,6 +581,50 @@ int main(void) {
 
 
 
+  char guard_path[512];
+  snprintf(guard_path, sizeof(guard_path), "%s/guard.txt", root);
+  int guard_fd = open(guard_path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+  assert(guard_fd >= 0);
+  assert(write(guard_fd, "guard\n", 6) == 6);
+  close(guard_fd);
+  cbor_item_t *guard_ack = NULL;
+  cbor_item_t *guard_prompt = wd_map(2);
+  wd_put(guard_prompt, "id", wd_text(session));
+  wd_put(guard_prompt, "text", wd_text("/write guard.txt changed"));
+  assert(request(&a, a.next_id++, "session.prompt", guard_prompt, &guard_ack, NULL) == 0);
+  cbor_item_t *guard_approval = wd_get(guard_ack, "approval");
+  assert(guard_approval != NULL);
+  uint64_t guard_call = 0;
+  uint64_t guard_epoch = 0;
+  assert(wd_uint_of(wd_get(guard_approval, "call"), &guard_call));
+  assert(wd_uint_of(wd_get(guard_approval, "epoch"), &guard_epoch));
+  wd_free(guard_ack);
+  cbor_item_t *guard_answered = NULL;
+  cbor_item_t *guard_respond = wd_map(4);
+  wd_put(guard_respond, "session", wd_text(session));
+  wd_put(guard_respond, "call", wd_uint(guard_call));
+  wd_put(guard_respond, "epoch", wd_uint(guard_epoch));
+  wd_put(guard_respond, "allow", cbor_build_bool(true));
+  bool guard_ok = false;
+  assert(request(&a, a.next_id++, "approval.respond", guard_respond, &guard_answered, &guard_ok) == 0);
+  assert(guard_ok);
+  wd_free(guard_answered);
+  cbor_item_t *guard_event = wait_event(&a, "approval.resolved", NULL);
+  assert(guard_event != NULL);
+  wd_free(guard_event);
+  guard_event = wait_event(&a, "tool.result", NULL);
+  assert(guard_event != NULL);
+  wd_free(guard_event);
+  guard_event = wait_event(&a, "turn.end", NULL);
+  assert(guard_event != NULL);
+  wd_free(guard_event);
+  char guard_text[32] = {0};
+  int guard_read = open(guard_path, O_RDONLY | O_CLOEXEC);
+  assert(guard_read >= 0);
+  ssize_t guard_len = read(guard_read, guard_text, sizeof(guard_text) - 1);
+  close(guard_read);
+  assert(guard_len == 6 && memcmp(guard_text, "guard\n", 6) == 0);
+
   cbor_item_t *answered = NULL;
   cbor_item_t *prompt = wd_map(2);
   wd_put(prompt, "id", wd_text(session));
@@ -591,6 +635,19 @@ int main(void) {
   assert(seed >= 0);
   assert(write(seed, "before\n", 7) == 7);
   close(seed);
+  cbor_item_t *read_ack = NULL;
+  cbor_item_t *read_prompt = wd_map(2);
+  wd_put(read_prompt, "id", wd_text(session));
+  wd_put(read_prompt, "text", wd_text("/read out.txt"));
+  assert(request(&a, a.next_id++, "session.prompt", read_prompt, &read_ack, NULL) == 0);
+  wd_free(read_ack);
+  cbor_item_t *read_event = wait_event(&a, "tool.result", NULL);
+  assert(read_event != NULL);
+  wd_free(read_event);
+  read_event = wait_event(&a, "turn.end", NULL);
+  assert(read_event != NULL);
+  wd_free(read_event);
+
   assert(request(&a, a.next_id++, "session.prompt", prompt, &answered, NULL) ==
          0);
   cbor_item_t *approval = wd_get(answered, "approval");

@@ -2900,6 +2900,7 @@ static wd_run *run_new(wd_server *srv, wd_session *session, char **err) {
       wd_turn_set_spill_dir(run->turn, spill);
       free(spill);
     }
+    wd_turn_set_session(run->turn, session);
   }
   if (device_acquire(srv, session, &run->devlock) != 0) {
     wd_turn_free(run->turn);
@@ -2958,6 +2959,7 @@ static wd_run *run_new(wd_server *srv, wd_session *session, char **err) {
         wd_turn_set_spill_dir(run->turn, spill);
         free(spill);
       }
+      wd_turn_set_session(run->turn, session);
     }
     if (session->system != NULL)
       wd_turn_set_session_system(run->turn, session->system);

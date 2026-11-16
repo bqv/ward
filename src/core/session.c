@@ -65,6 +65,8 @@ static void session_free(wd_session *s) {
   free(s->model);
   free(s->system);
   free(s->head);
+  for (size_t i = 0; i < s->observed_len; i++) free(s->observed[i]);
+  free(s->observed);
   free(s);
 }
 
@@ -95,6 +97,54 @@ static int apply_model(void *ctx, uint64_t seq, cbor_item_t *event) {
   }
   free(kind);
   return 0;
+}
+
+static bool observed_add(wd_session *s, const char *path) {
+  for (size_t i = 0; i < s->observed_len; i++)
+    if (strcmp(s->observed[i], path) == 0) return true;
+  if (s->observed_len == s->observed_cap) {
+    size_t grown = s->observed_cap == 0 ? 8 : s->observed_cap * 2;
+    char **next = realloc(s->observed, grown * sizeof(*next));
+    if (next == NULL) return false;
+    s->observed = next;
+    s->observed_cap = grown;
+  }
+  char *copy = strdup(path);
+  if (copy == NULL) return false;
+  s->observed[s->observed_len++] = copy;
+  return true;
+}
+
+static int apply_observed(void *ctx, uint64_t seq, cbor_item_t *event) {
+  wd_session *s = ctx;
+  (void)seq;
+  char *kind = wd_text_copy(wd_get(event, "kind"));
+  if (kind != NULL && strcmp(kind, "session.observed") == 0) {
+    char *path = wd_text_copy(wd_get(wd_get(event, "payload"), "path"));
+    if (path != NULL) {
+      (void)observed_add(s, path);
+      free(path);
+    }
+  }
+  free(kind);
+  return 0;
+}
+
+bool wd_session_observed(const wd_session *s, const char *path) {
+  if (s == NULL || path == NULL) return false;
+  for (size_t i = 0; i < s->observed_len; i++)
+    if (strcmp(s->observed[i], path) == 0) return true;
+  return false;
+}
+
+int wd_session_mark_observed(wd_session *s, const char *path, uint64_t *seq_out) {
+  if (s == NULL || path == NULL || path[0] == '\0') return -1;
+  if (wd_session_observed(s, path)) return 0;
+  cbor_item_t *payload = wd_map(1);
+  wd_put(payload, "path", wd_text(path));
+  int rc = wd_session_emit(s, "session.observed", payload, seq_out);
+  if (rc != 0) return -1;
+  return observed_add(s, path) ? 0 : -1;
 }
 
 static int apply_upgrade(void *ctx, uint64_t seq, cbor_item_t *event) {
@@ -249,6 +299,7 @@ static int session_load(const char *root, const char *id, wd_session **out) {
   if (wd_session_replay(s, 0, apply_model, s) < 0) goto fail;
   if (wd_session_replay(s, 0, apply_pins, s) < 0) goto fail;
   if (wd_session_replay(s, 0, apply_upgrade, s) < 0) goto fail;
+  if (wd_session_replay(s, 0, apply_observed, s) < 0) goto fail;
   *out = s;
   return 0;
 fail:
