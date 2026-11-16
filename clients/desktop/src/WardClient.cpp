@@ -855,6 +855,8 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
             emit modelNoticeChanged();
             qWarning().nospace() << "model select failed: " << text;
         }
+        if (method == QLatin1String("host.mkdir"))
+            setDirectoryPickNotice(text);
         if (method == QLatin1String("session.file_read")) {
             m_fileError = text;
             m_fileText.clear();
@@ -1078,6 +1080,9 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
         }
     } else if (method == QLatin1String("settings.set")) {
         refreshSettings();
+    } else if (method == QLatin1String("host.mkdir")) {
+        setDirectoryPickNotice(QString());
+        browseDirectory(m_directoryPickPath);
     } else if (method == QLatin1String("session.queue")) {
         const QVariantList items = result.value(QStringLiteral("items")).toList();
         QVariantList rows;
@@ -2118,8 +2123,14 @@ void WardClient::createDirectory(const QString &name)
 {
     if (name.trimmed().isEmpty())
         return;
-    setDirectoryPickNotice(QStringLiteral("ward has no method to create a folder; "
-                                          "create it in a terminal and refresh."));
+    if (m_state != Ready) {
+        setDirectoryPickNotice(QStringLiteral("Not connected yet."));
+        return;
+    }
+    const QString dir = m_directoryPickPath.isEmpty() ? QDir::homePath()
+                                                     : m_directoryPickPath;
+    sendRequest(QStringLiteral("host.mkdir"),
+                QVariantMap{{QStringLiteral("path"), dir + QLatin1Char('/') + name.trimmed()}});
 }
 
 void WardClient::addWorkspaceAt(const QString &path)

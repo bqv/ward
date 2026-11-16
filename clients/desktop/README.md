@@ -124,8 +124,8 @@ and are never silently dropped by the wire layer.
 
 ## Not adopted yet
 
-- **New folder from the workspace picker.** ward serves `host.list` but has no method to create a
-  directory, so Create reports that rather than sending a call.
+- **New folder from the workspace picker** now calls `host.mkdir` and refreshes the listing; a path
+  outside the host root is refused by the daemon.
 - **Per-message Fork on the DSH transport.** ward's event seqs let a row offer a fork from that
   message; the retained DSH transport publishes no row seqs, so its Fork is the rail's
   whole-session one.
