@@ -2503,3 +2503,16 @@ The fixture can answer 429 once when a trigger file exists, and gate_tool create
 `turn.retry` with status 429, then waits for the retried 200 to finish the turn. The suite is green at 52 tests. A transport
 failure before the response headers — a refused connection, a DNS failure — is still a failure; retrying that needs the error
 path and is the next part of this item. Next in the programme after that: per-tool timeout outcomes.
+
+Hundred-and-eighty-eighth: a cross-session investigation of session `076a0aad` found why the model forgets. The provider guest kept
+the FIRST 32 history entries and dropped the tail, so with a head plus a timestamp, user and assistant per turn the window froze
+after about ten turns; core's byte budget was ignored by `wd_session_history`. The same report found that the driver's `pair()`
+advertised the full reply length while copying only `REPLY_SIZE` bytes, which is the "ward_call returned an out-of-bounds span"
+and "allocator returned a null address" seen in `ward.err`; those guest failures also explain seven turns in that session whose
+assistant text never entered history. Two fixes are in: the provider now keeps the newest 32 entries, rotating 2..31 and
+preserving slot 0 (the head, which carries the system prompt and attachment context — the naive oldest-first shift failed
+`gate_tool`'s attachment echo, which is how the head was identified), and `pair()` clamps its descriptor to what it copied. The
+remaining half is core trimming by the byte budget instead of the guest cap, an `error` plus `turn.end{aborted}` when a
+post-stream guest call fails, and the tools array the provider never sends — the model emits raw DSML markup because it has no
+tool schema, and the driver's model path only runs read/write/grep. gate_tool is green; the full suite waits for the desktop
+client work in flight.

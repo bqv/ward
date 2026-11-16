@@ -287,7 +287,16 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
             return;
           }
         }
-        if (tp != 0 && rp != 0 && hist_count < 32) {
+        if (tp != 0 && rp != 0) {
+          if (hist_count == 32) {
+            for (uint32_t k = 2; k < 32; k++) {
+              hist_text[k - 1] = hist_text[k];
+              hist_text_len[k - 1] = hist_text_len[k];
+              hist_role[k - 1] = hist_role[k];
+              hist_role_len[k - 1] = hist_role_len[k];
+            }
+            hist_count = 31;
+          }
           hist_text[hist_count] = tp;
           hist_text_len[hist_count] = tn;
           hist_role[hist_count] = rp;

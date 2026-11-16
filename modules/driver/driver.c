@@ -26,7 +26,8 @@ uint32_t ward_alloc(uint32_t len) {
 
 static void pair(uint32_t out, const uint8_t *data, uint32_t n) {
   uint32_t at = (uint32_t)(uintptr_t)reply;
-  for (uint32_t i = 0; i < n && i < REPLY_SIZE; i++) reply[i] = data[i];
+  if (n > REPLY_SIZE) n = REPLY_SIZE;
+  for (uint32_t i = 0; i < n; i++) reply[i] = data[i];
   uint8_t *o = (uint8_t *)(uintptr_t)out;
   wd_put32(o, at);
   wd_put32(o + 4, n);
