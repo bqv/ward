@@ -86,6 +86,7 @@ struct wd_turn {
   uint64_t park_epoch;
   char *park_reason;
   char park_tool[64];
+  char park_capability[64];
   char *steers[8];
   size_t steer_count;
   uint64_t epoch;
@@ -398,6 +399,18 @@ static int tool_fail(const char *message, uint8_t **out, size_t *out_len) {
   cbor_item_t *reply = wd_map(2);
   wd_put(reply, "ok", cbor_build_bool(false));
   wd_put(reply, "error", wd_text(message));
+  return tool_reply(reply, out, out_len);
+}
+
+static int tool_timeout(const char *tool, uint64_t ms, uint8_t **out,
+                        size_t *out_len) {
+  char text[160];
+  snprintf(text, sizeof(text), "%s: exceeded its %llu ms timeout", tool,
+           (unsigned long long)ms);
+  cbor_item_t *reply = wd_map(3);
+  wd_put(reply, "ok", cbor_build_bool(false));
+  wd_put(reply, "timed_out", cbor_build_bool(true));
+  wd_put(reply, "error", wd_text(text));
   return tool_reply(reply, out, out_len);
 }
 
@@ -783,6 +796,10 @@ static int recall_search_run(wd_turn *turn, const uint8_t *in, size_t in_len,
   int rc = wd_proc_run(argv, turn->root, 20000, WD_SPILL_MAX, &result, &err);
   free(query);
   free(err);
+  if (result.timed_out) {
+    wd_proc_result_free(&result);
+    return tool_timeout("recall.search", 20000, out, out_len);
+  }
   if (rc != 0)
     return tool_fail("recall.search: cannot run dsh-recall", out, out_len);
   int status = WIFEXITED(result.status) ? WEXITSTATUS(result.status) : 127;
@@ -836,6 +853,10 @@ static int mcp_call_run(wd_turn *turn, const uint8_t *in, size_t in_len,
   free(input);
   free(line);
   free(err);
+  if (result.timed_out) {
+    wd_proc_result_free(&result);
+    return tool_timeout("mcp.call", 20000, out, out_len);
+  }
   if (rc != 0) return tool_fail("mcp.call: cannot start the server", out,
                                 out_len);
   int status = WIFEXITED(result.status) ? WEXITSTATUS(result.status) : 127;
@@ -887,6 +908,10 @@ static int web_search_run(wd_turn *turn, const uint8_t *in, size_t in_len,
   int rc = wd_proc_run(argv, turn->root, 20000, WD_SPILL_MAX, &result, &err);
   free(query);
   free(err);
+  if (result.timed_out) {
+    wd_proc_result_free(&result);
+    return tool_timeout("web.search", 20000, out, out_len);
+  }
   if (rc != 0) return tool_fail("web.search: cannot run srchdsh", out, out_len);
   int status = WIFEXITED(result.status) ? WEXITSTATUS(result.status) : 127;
   int made = status_reply(turn, "web", status, result.out, result.len,
@@ -919,6 +944,10 @@ static int python_run_exec(wd_turn *turn, const uint8_t *in, size_t in_len,
   int rc = wd_proc_run(argv, turn->root, 15000, WD_SPILL_MAX, &result, &err);
   free(program);
   free(err);
+  if (result.timed_out) {
+    wd_proc_result_free(&result);
+    return tool_timeout("python.run", 15000, out, out_len);
+  }
   if (rc != 0) return tool_fail("python.run: cannot start python", out, out_len);
   int status = WIFEXITED(result.status) ? WEXITSTATUS(result.status) : 127;
   int made = status_reply(turn, "python", status, result.out, result.len, "",
@@ -1021,6 +1050,10 @@ static int grep_run(wd_turn *turn, const uint8_t *in, size_t in_len,
   int rc = wd_proc_run(argv, turn->root, 10000, WD_SPILL_MAX, &result, &err);
   free(pattern);
   free(path);
+  if (result.timed_out) {
+    wd_proc_result_free(&result);
+    return tool_timeout("grep.run", 10000, out, out_len);
+  }
   if (rc != 0) {
     char message[256];
     snprintf(message, sizeof(message), "%s",
@@ -1937,8 +1970,11 @@ static int exec_submit(wd_turn *turn, cbor_item_t *args, char **err) {
 static int perform_capability(wd_turn *turn, const char *capability,
                               cbor_item_t *args, cbor_item_t **result,
                               char **err) {
-  if (strcmp(capability, "exec.run") == 0)
+  if (strcmp(capability, "exec.run") == 0) {
+    snprintf(turn->park_capability, sizeof(turn->park_capability), "%s",
+             capability);
     return exec_submit(turn, args, err);
+  }
   size_t len = 0;
   uint8_t *bytes = encode_keep(args, &len);
   if (bytes == NULL) {
@@ -2115,6 +2151,9 @@ static int process_action(wd_turn *turn, cbor_item_t *action, wd_turn_emit emit,
           bool spilled = false;
           if (wd_bool_of(wd_get(result, "truncated"), &spilled) && spilled)
             wd_put(done, "truncated", cbor_build_bool(true));
+          bool timed_out = false;
+          if (wd_bool_of(wd_get(result, "timed_out"), &timed_out) && timed_out)
+            wd_put(done, "timed_out", cbor_build_bool(true));
           char *spill = wd_text_copy(wd_get(result, "spill"));
           if (spill != NULL) {
             wd_put(done, "spill", wd_text(spill));
@@ -2323,6 +2362,32 @@ int wd_turn_resume_tool(wd_turn *turn, wd_turn_emit emit, void *ctx,
   if (rc == 0) {
     exec_reply(turn, &result, &reply);
     wd_proc_result_free(&result);
+    if (reply != NULL) {
+      cbor_item_t *done = wd_map(8);
+      const char *tool = turn->park_capability[0] != '\0'
+                             ? turn->park_capability
+                             : "exec.run";
+      wd_put(done, "tool", wd_text(tool));
+      wd_put(done, "call", wd_uint(0));
+      bool timed = false;
+      if (wd_bool_of(wd_get(reply, "timed_out"), &timed) && timed)
+        wd_put(done, "timed_out", cbor_build_bool(true));
+      bool trunc = false;
+      if (wd_bool_of(wd_get(reply, "truncated"), &trunc) && trunc)
+        wd_put(done, "truncated", cbor_build_bool(true));
+      char *spill = wd_text_copy(wd_get(reply, "spill"));
+      if (spill != NULL) {
+        wd_put(done, "spill", wd_text(spill));
+        free(spill);
+      }
+      uint64_t spill_size = 0;
+      if (wd_uint_of(wd_get(reply, "spill_size"), &spill_size))
+        wd_put(done, "spill_size", wd_uint(spill_size));
+      char *emit_err = NULL;
+      (void)emit(ctx, "tool.result", done, &emit_err);
+      free(emit_err);
+      wd_free(done);
+    }
   } else {
     free(err != NULL ? *err : NULL);
     if (err != NULL) *err = NULL;

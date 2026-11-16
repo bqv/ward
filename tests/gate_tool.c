@@ -323,7 +323,7 @@ static long proc_status_kb(pid_t pid, const char *key) {
 }
 
 int main(void) {
-  alarm(120);
+  alarm(180);
   const char *bin = getenv("WARD_BIN");
   const char *modules = getenv("WARD_MODULE_DIR");
   if (bin == NULL || modules == NULL) {
@@ -606,6 +606,54 @@ int main(void) {
   assert(retry_event != NULL);
   wd_free(retry_event);
   assert(access(retry_path, F_OK) != 0);
+
+  cbor_item_t *timeout_ack = NULL;
+  cbor_item_t *timeout_prompt = wd_map(2);
+  wd_put(timeout_prompt, "id", wd_text(session));
+  wd_put(timeout_prompt, "text", wd_text("/run tail -f /dev/null"));
+  assert(request(&a, a.next_id++, "session.prompt", timeout_prompt, &timeout_ack, NULL) == 0);
+  wd_free(timeout_ack);
+  fprintf(stderr, "to: prompted\n");
+  cbor_item_t *timeout_ask = wait_event(&a, "approval.requested", NULL);
+  assert(timeout_ask != NULL);
+  uint64_t timeout_call = 0;
+  uint64_t timeout_epoch = 0;
+  assert(wd_uint_of(wd_get(timeout_ask, "call"), &timeout_call));
+  assert(wd_uint_of(wd_get(timeout_ask, "epoch"), &timeout_epoch));
+  wd_free(timeout_ask);
+  fprintf(stderr, "to: asked\n");
+  cbor_item_t *timeout_allowed = NULL;
+  cbor_item_t *timeout_respond = wd_map(4);
+  wd_put(timeout_respond, "session", wd_text(session));
+  wd_put(timeout_respond, "call", wd_uint(timeout_call));
+  wd_put(timeout_respond, "epoch", wd_uint(timeout_epoch));
+  wd_put(timeout_respond, "allow", cbor_build_bool(true));
+  bool timeout_ok = false;
+  assert(request(&a, a.next_id++, "approval.respond", timeout_respond, &timeout_allowed, &timeout_ok) == 0);
+  assert(timeout_ok);
+  wd_free(timeout_allowed);
+  fprintf(stderr, "to: responded\n");
+  cbor_item_t *timeout_event = wait_event(&a, "approval.resolved", NULL);
+  assert(timeout_event != NULL);
+  wd_free(timeout_event);
+  timeout_event = wait_event(&a, "tool.call", NULL);
+  assert(timeout_event != NULL);
+  fprintf(stderr, "to: called\n");
+  char *timeout_tool = wd_text_copy(wd_get(timeout_event, "tool"));
+  assert(timeout_tool != NULL && strcmp(timeout_tool, "exec.run") == 0);
+  free(timeout_tool);
+  wd_free(timeout_event);
+  timeout_event = wait_event(&a, "tool.result", NULL);
+  assert(timeout_event != NULL);
+  fprintf(stderr, "to: resulted\n");
+  bool timed_out = false;
+  assert(wd_bool_of(wd_get(timeout_event, "timed_out"), &timed_out));
+  assert(timed_out);
+  wd_free(timeout_event);
+  timeout_event = wait_event(&a, "turn.end", NULL);
+  assert(timeout_event != NULL);
+  fprintf(stderr, "to: ended\n");
+  wd_free(timeout_event);
 
   char guard_path[512];
   snprintf(guard_path, sizeof(guard_path), "%s/guard.txt", root);

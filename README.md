@@ -7,8 +7,8 @@ Status: M0 to M5 are implemented and gated; M6 is in progress. The daemon serves
 UDS, TCP and QUIC; the desktop client (`clients/desktop`, `ward-gui`, the dsh-native Qt Widgets
 shell) and the Android client (`clients/android`) speak the protocol. The parity audit
 (`docs/parity.md`, `docs/audit-dsh.md`) and the reliability programme (`docs/reliability.md`) are
-open: atomic writes, tool-output spill, read-before-write and provider retry are closed, with
-per-tool timeout outcomes, the compaction pruner, checkpoint policy, the repeat-tool reminder and
+open: atomic writes, tool-output spill, read-before-write, provider retry and per-tool timeout
+outcomes are closed, with the compaction pruner, checkpoint policy, the repeat-tool reminder and
 secret masking still to come.
 
 ## Thesis
