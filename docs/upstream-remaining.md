@@ -32,7 +32,7 @@ Sources: dsh-linux `30981c4..954e32d` (plus `7ebbdfe`) and dsh-android
 | dsh-linux 4dc7504, 7e2e09d, ed3b7c0, 34fde91 | agent presets: read, choose, strip | an agent-preset concept in ward (session preset: system prompt, tool set, model defaults) plus protocol and storage | queued |
 | dsh-linux 788246f, 176f55d; dsh-android e975536 | attachment references, image content; DSH 0.2.2 schedule verbs | attachment reference model (path + hash + media type) and provider image parts; `schedule.update` | queued |
 | dsh-linux c581446, 05cd5fa | schedule edit and target | `schedule.update` in core and protocol | queued |
-| dsh-linux 5776d71 | workspaceFiles/settings renamed calls | ward equivalents: session file listing and `settings.get/set`; a changes view over `session.file_list` | queued |
+| dsh-linux 5776d71 | workspaceFiles/settings renamed calls | the desktop FilesDock now shows a workspace listing from `session.file_list` (cwd plus one level, sizes, best-effort mtime, refresh, open); `settings.get/set` already exist | done (desktop view) |
 
 ## Not applicable, with the reason kept on the record
 

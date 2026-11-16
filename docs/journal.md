@@ -2546,3 +2546,17 @@ Gradle with `--no-daemon`, so a stale Gradle daemon is ruled out; the remaining 
 GRADLE_USER_HOME means re-downloading the Android dependency set), a different AGP/aapt2 pin, or a host-side build. Version
 0.6.8 (17) is committed and the phone stays on 0.6.7 (16), which already carries the estate cards. The APK item is parked until
 that build can be produced; the rest of the programme does not depend on it.
+
+Hundred-and-ninety-fourth: the delegation batch, measured. The desktop workspace files view landed (`39b1a67`): FilesDock
+lists the followed session's cwd plus one level of subdirectories from `session.file_list`, with sizes, a best-effort local
+mtime, refresh that reloads the workspace at the root, and the existing open path; the facade's file surface now includes ward,
+which is why the dock had been hidden. The tools-array work landed too (`7f48e7c`): every provider request carries the seven
+tools, the provider parses both non-streaming and streamed native tool calls with indexed argument accumulation, and the driver
+dispatches all seven with policy. Its limits are real and recorded: the engine still ends the turn after one tool call, history
+has no assistant tool-call/tool-result message, and DSML is not parsed. The full suite is green at 52.
+
+Two batches did not land. The reliability batch (observed-version guard, repeat reminder, turn.end{aborted}) was reverted: its
+gate failed at the pre-existing timeout test, where approval.respond was rejected after approval.requested; the likely suspect
+is the new failure/turn-end path's interaction with the parked run, which needs isolating. The Android Router-tab wiring is in
+`stash@{0}` and cannot be verified because AAPT2 now fails for debug resources as well as release, so no Android build or test
+runs here at all. Until that environment issue is fixed or routed around, every Android item is ungateable.
