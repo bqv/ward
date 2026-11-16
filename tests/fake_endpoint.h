@@ -80,6 +80,19 @@ static void serve(int fd) {
     }
   }
   request[len] = '\0';
+  const char *slow = getenv("WARD_FAKE_429_FILE");
+  if (slow != NULL && access(slow, F_OK) == 0) {
+    unlink(slow);
+    static const char body[] = "{\"error\":\"slow down\"}";
+    char reply[512];
+    int made = snprintf(reply, sizeof(reply),
+                        "HTTP/1.1 429 Too Many Requests\r\n"
+                        "Content-Type: application/json\r\n"
+                        "Content-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                        strlen(body), body);
+    if (made > 0) (void)!write(fd, reply, (size_t)made);
+    return;
+  }
   if (strstr(request, "/v1/systemone") != NULL) {
     static const char body[] = "{\"score\":0.9}";
     char reply[512];

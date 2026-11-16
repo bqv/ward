@@ -106,6 +106,7 @@ struct wd_run {
   void *sse_ctx;
   int http_status_seen;
   size_t streamed;
+  uint64_t retry_at_ms;
 };
 
 
@@ -2885,6 +2886,7 @@ static wd_run *run_new(wd_server *srv, wd_session *session, char **err) {
   run->sse_ctx = NULL;
   run->http_status_seen = 0;
   run->streamed = 0;
+  run->retry_at_ms = 0;
   run->devlock.fd = -1;
   snprintf(run->session_id, sizeof(run->session_id), "%s", session->id);
   run->turn = wd_turn_new_pinned(srv->engine, dir, session->cwd, session->pins,
@@ -3189,6 +3191,23 @@ static void emit_state(wd_server *srv, wd_run *run, const char *state) {
   conn_broadcast(srv, session, "turn.state", seq, out);
 }
 
+static void emit_retry(wd_server *srv, wd_run *run, long status,
+                       uint64_t delay) {
+  wd_session *session = wd_session_find(&srv->store, run->session_id);
+  if (session == NULL) return;
+  cbor_item_t *logged = wd_map(3);
+  wd_put(logged, "turn", wd_uint(wd_turn_id(run->turn)));
+  wd_put(logged, "status", wd_uint((uint64_t)status));
+  wd_put(logged, "delay_ms", wd_uint(delay));
+  uint64_t seq = 0;
+  if (wd_session_emit(session, "turn.retry", logged, &seq) != 0) return;
+  cbor_item_t *out = wd_map(3);
+  wd_put(out, "turn", wd_uint(wd_turn_id(run->turn)));
+  wd_put(out, "status", wd_uint((uint64_t)status));
+  wd_put(out, "delay_ms", wd_uint(delay));
+  conn_broadcast(srv, session, "turn.retry", seq, out);
+}
+
 static void run_park(wd_server *srv, wd_run *run, int kind) {
   if (kind == 3) {
     emit_state(srv, run, "prefilling");
@@ -3230,6 +3249,32 @@ static void run_after(wd_server *srv, wd_run *run, int rc, char *err) {
   free(err);
   run_free(srv, run);
   drain_queue(srv);
+}
+
+static void service_retries(wd_server *srv, uint64_t now) {
+  wd_run *run = srv->runs;
+  while (run != NULL) {
+    wd_run *next = run->next;
+    if (run->retry_at_ms != 0 && run->retry_at_ms <= now) {
+      run->retry_at_ms = 0;
+      char *err = NULL;
+      if (wd_turn_retry_http(run->turn, &err) != 1) {
+        run_after(srv, run, -1,
+                  err != NULL ? err : strdup("the provider retry failed"));
+        run = next;
+        continue;
+      }
+      run->http_len = 0;
+      run->http_status_seen = 0;
+      if (run->sse != NULL) {
+        wd_sse_destroy(run->sse);
+        stream_ctx *sc = run->sse_ctx;
+        run->sse = wd_sse_create(stream_event, sc);
+      }
+      run_watch(srv, run, 3);
+    }
+    run = next;
+  }
 }
 
 static void handle_session_prompt(wd_server *srv, wd_conn *conn, uint64_t id,
@@ -3651,6 +3696,14 @@ static void http_done(wd_server *srv, wd_run *run) {
                     ((uint32_t)run->http_body[1] << 8) |
                     ((uint32_t)run->http_body[2] << 16) |
                     ((uint32_t)run->http_body[3] << 24));
+  }
+  if ((status == 429 || (status >= 500 && status < 600)) &&
+      wd_turn_retry_ready(run->turn)) {
+    uint64_t delay = wd_turn_retry_delay_ms(run->turn);
+    run->retry_at_ms = wd_now_ms() + delay;
+    emit_retry(srv, run, status, delay);
+    run_unwatch(srv, run, 3);
+    return;
   }
   size_t had = run->http_len;
   int rc = wd_turn_resume_http_body(
@@ -4343,7 +4396,14 @@ static int next_timeout(wd_server *srv, uint64_t now) {
     if (best == 0 || conn->deadline_ms < best) best = conn->deadline_ms;
   }
   int quic_timeout = srv->quic != NULL ? wd_quic_next_timeout(srv->quic, now) : -1;
-  if (best == 0 && quic_timeout < 0) return -1;
+  int retry_timeout = -1;
+  for (wd_run *run = srv->runs; run != NULL; run = run->next) {
+    if (run->retry_at_ms == 0) continue;
+    uint64_t delta = run->retry_at_ms > now ? run->retry_at_ms - now : 0;
+    int wait = delta > 60000 ? 60000 : (int)delta;
+    if (retry_timeout < 0 || wait < retry_timeout) retry_timeout = wait;
+  }
+  if (best == 0 && quic_timeout < 0 && retry_timeout < 0) return -1;
   int socket_timeout = -1;
   if (best != 0) {
     if (best <= now)
@@ -4355,6 +4415,8 @@ static int next_timeout(wd_server *srv, uint64_t now) {
   }
   if (quic_timeout >= 0 && (socket_timeout < 0 || quic_timeout < socket_timeout))
     socket_timeout = quic_timeout;
+  if (retry_timeout >= 0 && (socket_timeout < 0 || retry_timeout < socket_timeout))
+    socket_timeout = retry_timeout;
   return socket_timeout;
 }
 
@@ -4769,6 +4831,7 @@ int wd_up_run(const wd_up_config *cfg) {
       if (errno == EINTR) continue;
       break;
     }
+    service_retries(&srv, wd_now_ms());
     if (srv.schedules != NULL) drain_schedules(&srv, wd_now_ms());
     if (n == 0 && srv.quic != NULL) {
       (void)wd_quic_service(srv.quic, wd_now_ms());

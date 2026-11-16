@@ -70,6 +70,10 @@ struct wd_turn {
   char *spill_dir;
   uint64_t spill_seq;
   wd_session *session;
+  char *http_url;
+  char *http_body;
+  char *http_key;
+  int http_attempts;
   wd_judge *judge_cache;
   cbor_item_t *judge_event;
   char *worker_root;
@@ -1868,8 +1872,41 @@ static int net_submit(wd_turn *turn, cbor_item_t *reply, char **err) {
   turn->http_job =
       wd_http_start(url, "POST", body != NULL ? body : "", turn->api_key, 300000,
                     4u << 20, err);
+  if (turn->http_job == NULL) {
+    free(body);
+    return -1;
+  }
+  free(turn->http_url);
+  free(turn->http_body);
+  free(turn->http_key);
+  turn->http_url = strdup(url);
+  turn->http_body = strdup(body != NULL ? body : "");
+  turn->http_key = strdup(turn->api_key);
+  turn->http_attempts = 0;
   free(body);
+  turn->pending_kind = 3;
+  if (turn->http_url == NULL || turn->http_body == NULL) return -1;
+  return 1;
+}
+
+bool wd_turn_retry_ready(wd_turn *turn) {
+  return turn != NULL && turn->http_attempts < 3 && turn->http_url != NULL;
+}
+
+uint64_t wd_turn_retry_delay_ms(wd_turn *turn) {
+  if (turn == NULL) return 0;
+  uint64_t delay = 300ull << (turn->http_attempts < 2 ? turn->http_attempts : 2);
+  return delay > 4000 ? 4000 : delay;
+}
+
+int wd_turn_retry_http(wd_turn *turn, char **err) {
+  if (turn == NULL || turn->http_url == NULL || turn->http_body == NULL)
+    return -1;
+  wd_http_job_free(turn->http_job);
+  turn->http_job = wd_http_start(turn->http_url, "POST", turn->http_body,
+                                 turn->http_key, 300000, 4u << 20, err);
   if (turn->http_job == NULL) return -1;
+  turn->http_attempts++;
   turn->pending_kind = 3;
   return 1;
 }

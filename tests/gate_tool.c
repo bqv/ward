@@ -340,6 +340,9 @@ int main(void) {
   sweep_test_cgroups();
   unlink("/tmp/ward-fake-counter");
   setenv("WARD_FAKE_COUNTER", "/tmp/ward-fake-counter", 1);
+  char retry_path[128];
+  snprintf(retry_path, sizeof(retry_path), "/tmp/ward-retry-once-%d", (int)getpid());
+  setenv("WARD_FAKE_429_FILE", retry_path, 1);
   fake_endpoint(&endpoint_port, &endpoint);
   char root[] = "/tmp/ward-tool-gate-XXXXXX";
   assert(mkdtemp(root) != NULL);
@@ -580,6 +583,29 @@ int main(void) {
   assert(turn_reasoning >= 1);
 
 
+
+  FILE *retry_trigger = fopen(retry_path, "wb");
+  assert(retry_trigger != NULL);
+  fclose(retry_trigger);
+  cbor_item_t *retry_ack = NULL;
+  cbor_item_t *retry_prompt = wd_map(2);
+  wd_put(retry_prompt, "id", wd_text(session));
+  wd_put(retry_prompt, "text", wd_text("retry please"));
+  assert(request(&a, a.next_id++, "session.prompt", retry_prompt, &retry_ack, NULL) == 0);
+  wd_free(retry_ack);
+  cbor_item_t *retry_event = wait_event(&a, "turn.retry", NULL);
+  assert(retry_event != NULL);
+  uint64_t retry_status = 0;
+  assert(wd_uint_of(wd_get(retry_event, "status"), &retry_status));
+  assert(retry_status == 429);
+  wd_free(retry_event);
+  retry_event = wait_event(&a, "text.delta", NULL);
+  assert(retry_event != NULL);
+  wd_free(retry_event);
+  retry_event = wait_event(&a, "turn.end", NULL);
+  assert(retry_event != NULL);
+  wd_free(retry_event);
+  assert(access(retry_path, F_OK) != 0);
 
   char guard_path[512];
   snprintf(guard_path, sizeof(guard_path), "%s/guard.txt", root);

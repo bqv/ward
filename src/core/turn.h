@@ -64,6 +64,9 @@ int wd_turn_resume_http_body(wd_turn *turn, long status, const char *body,
                              size_t len, wd_turn_emit emit, void *ctx,
                              char **err);
 int wd_turn_http_fd(wd_turn *turn);
+bool wd_turn_retry_ready(wd_turn *turn);
+uint64_t wd_turn_retry_delay_ms(wd_turn *turn);
+int wd_turn_retry_http(wd_turn *turn, char **err);
 uint64_t wd_turn_id(wd_turn *turn);
 void wd_turn_set_context(wd_turn *turn, const char *text);
 int wd_turn_abort(wd_turn *turn, const char *reason, wd_turn_emit emit,
