@@ -2490,3 +2490,16 @@ session never read it; then it reads `out.txt` and writes it through, and the ea
 kept) still hold. The suite is green at 52 tests. A version guard — refusing the write when the file changed between the read
 and the write — is the remaining half of the DSH policy and is not in this slice. Next in the programme: provider retry with
 backoff.
+
+Hundred-and-eighty-sixth: provider retries. A 429 or a 5xx used to end the turn outright; now the turn keeps the URL, body and
+key of the request it started, and when a 429 or 5xx arrives with attempts left the daemon schedules a retry instead of handing
+the error to the provider path. The delays are 300, 600 and 1,200 ms, at most three retries, and each one emits
+`turn.retry {turn, status, delay_ms}` before it happens. The timer lives on the run (`retry_at_ms`), is folded into
+`next_timeout` so the epoll wait wakes for it, and `service_retries` restarts the request from the saved copies, resets the
+HTTP buffer and the SSE, and re-arms the new fd. Nothing is retried once a stream has started, because only a non-200 status
+reaches this path.
+
+The fixture can answer 429 once when a trigger file exists, and gate_tool creates that file before a prompt, waits for
+`turn.retry` with status 429, then waits for the retried 200 to finish the turn. The suite is green at 52 tests. A transport
+failure before the response headers — a refused connection, a DNS failure — is still a failure; retrying that needs the error
+path and is the next part of this item. Next in the programme after that: per-tool timeout outcomes.
