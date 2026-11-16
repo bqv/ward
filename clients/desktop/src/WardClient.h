@@ -242,6 +242,7 @@ public:
                                       const QString &prompt);
     Q_INVOKABLE void listFileReferences(const QString &prefix);
     Q_INVOKABLE void listDirectory(const QString &path);
+    Q_INVOKABLE void listWorkspaceFiles();
     Q_INVOKABLE void toggleDirectory(const QString &path);
     Q_INVOKABLE void readFile(const QString &path);
     Q_INVOKABLE void goUpDirectory();
@@ -369,6 +370,8 @@ private:
     void applySession(const QVariantMap &session);
     void setSessions(const QVariantList &sessions);
     void rebuildWorkspaces();
+    QString sessionCwd() const;
+    void sendNextWorkspaceList();
     void syncModelChoice(const QString &model, bool clearNotice = true);
     void applyHostListing(const QVariantMap &result);
     void setDirectoryPickLoading(bool loading);
@@ -470,6 +473,11 @@ private:
     int m_fileBytes = 0;
     bool m_fileTruncated = false;
     QString m_fileError;
+    bool m_workspaceListing = false;
+    QString m_workspaceCwd;
+    QString m_workspaceCurrent;
+    QStringList m_workspaceQueue;
+    QVariantList m_workspaceRows;
 
     QVariantList m_scheduleTasks;
     bool m_scheduleLoading = false;

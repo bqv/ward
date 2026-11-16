@@ -243,6 +243,7 @@ public:
     Q_INVOKABLE void followSubagent(const QString &, const QString &, const QString & = QString()) {}
     Q_INVOKABLE void openTerminal(int cols = 80, int rows = 24) {}
     Q_INVOKABLE void listDirectory(const QString &) {}
+    Q_INVOKABLE void listWorkspaceFiles() {}
     Q_INVOKABLE void toggleDirectory(const QString &) {}
     Q_INVOKABLE void readFile(const QString &) {}
     Q_INVOKABLE void goUpDirectory() {}

@@ -513,6 +513,7 @@ public:
     void listFileReferences(const QString &prefix);
 
     void listDirectory(const QString &path);
+    void listWorkspaceFiles();
     void toggleDirectory(const QString &path);
     void readFile(const QString &path);
     void goUpDirectory();

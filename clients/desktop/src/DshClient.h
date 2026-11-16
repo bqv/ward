@@ -427,6 +427,7 @@ public:
     /// List a directory and adopt it as the current one. `path` is
     /// workspace-relative; "." and "" both mean the root.
     Q_INVOKABLE void listDirectory(const QString &path);
+    Q_INVOKABLE void listWorkspaceFiles() { listDirectory(QString()); }
 
     /// Unfold or fold one directory in the tree, fetching its children the first
     /// time it is unfolded. Collapsing is free — the cache is kept.

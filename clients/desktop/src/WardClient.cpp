@@ -237,6 +237,14 @@ QString defaultPath()
     return out;
 }
 
+qint64 pathMtime(const QString &cwd, const QString &path)
+{
+    if (cwd.isEmpty() || path.isEmpty())
+        return 0;
+    const QFileInfo info(QDir(cwd).filePath(path));
+    return info.exists() ? info.lastModified().toMSecsSinceEpoch() : 0;
+}
+
 } // namespace
 
 static QString rosterSavedWord(const QDateTime &savedAt)
@@ -895,7 +903,14 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
         }
         if (method == QLatin1String("session.file_list")) {
             m_fileError = text;
-            m_fileEntries.clear();
+            if (m_workspaceListing) {
+                m_workspaceListing = false;
+                m_workspaceQueue.clear();
+                m_workspaceCurrent.clear();
+                m_fileEntries = m_workspaceRows;
+            } else {
+                m_fileEntries.clear();
+            }
             emit fileEntriesChanged();
             emit fileErrorChanged();
         }
@@ -1215,33 +1230,71 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
         m_goal = result.value(QStringLiteral("goal")).toMap();
         emit goalChanged();
     } else if (method == QLatin1String("session.file_list")) {
-        const QVariantList entries = result.value(QStringLiteral("entries")).toList();
-        QVariantList rows;
-        for (const QVariant &entry : entries) {
-            const QVariantMap item = entry.toMap();
-            const QString name = item.value(QStringLiteral("name")).toString();
-            if (name.isEmpty())
-                continue;
-            const QString kind = item.value(QStringLiteral("kind")).toString();
-            const QString path = m_filePath.isEmpty()
-                                     ? name
-                                     : m_filePath + QLatin1Char('/') + name;
-            rows.append(QVariantMap{
-                {QStringLiteral("name"), name},
-                {QStringLiteral("path"), path},
-                {QStringLiteral("type"), kind == QLatin1String("dir")
-                                              ? QStringLiteral("directory")
-                                              : QStringLiteral("file")},
-                {QStringLiteral("depth"), 0},
-                {QStringLiteral("expanded"), false},
-                {QStringLiteral("size"), item.value(QStringLiteral("size"))}});
+        if (m_workspaceListing
+            && result.value(QStringLiteral("path")).toString() == m_workspaceCurrent) {
+            const QString requested = m_workspaceCurrent;
+            const bool root = requested.isEmpty();
+            const QVariantList entries = result.value(QStringLiteral("entries")).toList();
+            QStringList directories;
+            QVariantList rows = m_workspaceRows;
+            for (const QVariant &entry : entries) {
+                const QVariantMap item = entry.toMap();
+                const QString name = item.value(QStringLiteral("name")).toString();
+                if (name.isEmpty())
+                    continue;
+                const QString kind = item.value(QStringLiteral("kind")).toString();
+                const bool directory = kind == QLatin1String("dir");
+                const QString path = root ? name : requested + QLatin1Char('/') + name;
+                if (root && directory)
+                    directories.append(path);
+                rows.append(QVariantMap{
+                    {QStringLiteral("name"), name},
+                    {QStringLiteral("path"), path},
+                    {QStringLiteral("type"), directory ? QStringLiteral("directory")
+                                                        : QStringLiteral("file")},
+                    {QStringLiteral("depth"), root ? 0 : 1},
+                    {QStringLiteral("expanded"), root && directory},
+                    {QStringLiteral("size"), item.value(QStringLiteral("size"))},
+                    {QStringLiteral("mtime"), pathMtime(m_workspaceCwd, path)}});
+            }
+            m_workspaceRows = rows;
+            m_fileTruncated =
+                m_fileTruncated || result.value(QStringLiteral("truncated")).toBool();
+            if (root)
+                m_workspaceQueue = directories.mid(0, 64);
+            sendNextWorkspaceList();
+            emit fileTruncatedChanged();
+        } else if (!m_workspaceListing) {
+            const QVariantList entries = result.value(QStringLiteral("entries")).toList();
+            const QString cwd = sessionCwd();
+            QVariantList rows;
+            for (const QVariant &entry : entries) {
+                const QVariantMap item = entry.toMap();
+                const QString name = item.value(QStringLiteral("name")).toString();
+                if (name.isEmpty())
+                    continue;
+                const QString kind = item.value(QStringLiteral("kind")).toString();
+                const QString path = m_filePath.isEmpty()
+                                         ? name
+                                         : m_filePath + QLatin1Char('/') + name;
+                rows.append(QVariantMap{
+                    {QStringLiteral("name"), name},
+                    {QStringLiteral("path"), path},
+                    {QStringLiteral("type"), kind == QLatin1String("dir")
+                                                  ? QStringLiteral("directory")
+                                                  : QStringLiteral("file")},
+                    {QStringLiteral("depth"), 0},
+                    {QStringLiteral("expanded"), false},
+                    {QStringLiteral("size"), item.value(QStringLiteral("size"))},
+                    {QStringLiteral("mtime"), pathMtime(cwd, path)}});
+            }
+            m_fileEntries = rows;
+            m_fileTruncated = result.value(QStringLiteral("truncated")).toBool();
+            m_fileError.clear();
+            emit fileEntriesChanged();
+            emit fileTruncatedChanged();
+            emit fileErrorChanged();
         }
-        m_fileEntries = rows;
-        m_fileTruncated = result.value(QStringLiteral("truncated")).toBool();
-        m_fileError.clear();
-        emit fileEntriesChanged();
-        emit fileTruncatedChanged();
-        emit fileErrorChanged();
     } else if (method == QLatin1String("attachment.read_blob")) {
         emit blobRead(m_attachmentPath,
                       qint64(result.value(QStringLiteral("offset")).toULongLong()),
@@ -2817,6 +2870,9 @@ void WardClient::listDirectory(const QString &path)
         emit fileErrorChanged();
         return;
     }
+    m_workspaceListing = false;
+    m_workspaceQueue.clear();
+    m_workspaceCurrent.clear();
     m_filePath = path;
     m_fileError.clear();
     m_fileEntries.clear();
@@ -2828,6 +2884,60 @@ void WardClient::listDirectory(const QString &path)
     sendRequest(QStringLiteral("session.file_list"),
                 {{QStringLiteral("id"), m_sessionId},
                  {QStringLiteral("path"), path}});
+}
+
+QString WardClient::sessionCwd() const
+{
+    for (const QVariant &value : m_sessions) {
+        const QVariantMap row = value.toMap();
+        if (row.value(QStringLiteral("sessionId")).toString() == m_sessionId)
+            return row.value(QStringLiteral("cwd")).toString();
+    }
+    return QString();
+}
+
+void WardClient::listWorkspaceFiles()
+{
+    if (m_sessionId.isEmpty()) {
+        m_workspaceListing = false;
+        m_workspaceQueue.clear();
+        m_workspaceCurrent.clear();
+        m_fileError = QStringLiteral("no session to list files in");
+        emit fileErrorChanged();
+        return;
+    }
+    m_workspaceListing = true;
+    m_workspaceCwd = sessionCwd();
+    m_workspaceQueue.clear();
+    m_workspaceRows.clear();
+    m_workspaceCurrent.clear();
+    m_filePath.clear();
+    m_fileSelectedPath.clear();
+    m_fileError.clear();
+    m_fileEntries.clear();
+    m_fileTruncated = false;
+    emit filePathChanged();
+    emit fileSelectedPathChanged();
+    emit fileEntriesChanged();
+    emit fileErrorChanged();
+    emit fileTruncatedChanged();
+    m_workspaceQueue.append(QString());
+    sendNextWorkspaceList();
+}
+
+void WardClient::sendNextWorkspaceList()
+{
+    if (m_workspaceQueue.isEmpty()) {
+        m_workspaceListing = false;
+        m_workspaceCurrent.clear();
+        m_fileEntries = m_workspaceRows;
+        emit fileEntriesChanged();
+        return;
+    }
+    m_workspaceCurrent = m_workspaceQueue.takeFirst();
+    sendRequest(QStringLiteral("session.file_list"),
+                {{QStringLiteral("id"), m_sessionId},
+                 {QStringLiteral("path"), m_workspaceCurrent}});
 }
 
 void WardClient::toggleDirectory(const QString &path)
@@ -2883,7 +2993,11 @@ void WardClient::goUpDirectory()
     if (m_filePath.isEmpty())
         return;
     const int slash = m_filePath.lastIndexOf(QLatin1Char('/'));
-    listDirectory(slash < 0 ? QString() : m_filePath.left(slash));
+    if (slash < 0) {
+        listWorkspaceFiles();
+        return;
+    }
+    listDirectory(m_filePath.left(slash));
 }
 
 void WardClient::clearChangedFiles()

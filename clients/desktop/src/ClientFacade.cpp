@@ -176,7 +176,8 @@ ClientFacade::ClientFacade(QObject *transport, QObject *parent)
                           || m_transportName == QLatin1String("ward");
     m_hasAttachmentStaging = m_transportName == QLatin1String("dsh")
                           || m_transportName == QLatin1String("ward");
-    m_hasFileSurface = m_transportName == QLatin1String("dsh");
+    m_hasFileSurface = m_transportName == QLatin1String("dsh")
+                    || m_transportName == QLatin1String("ward");
     m_hasTrajectory = roster;
     m_hasGoalEditing = m_transportName == QLatin1String("dsh");
 
@@ -725,6 +726,11 @@ void ClientFacade::listFileReferences(const QString &prefix)
 void ClientFacade::listDirectory(const QString &path)
 {
     call("listDirectory(QString)", QGenericReturnArgument(), stringArg(path));
+}
+
+void ClientFacade::listWorkspaceFiles()
+{
+    call("listWorkspaceFiles()");
 }
 
 void ClientFacade::toggleDirectory(const QString &path)

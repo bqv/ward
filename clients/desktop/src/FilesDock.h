@@ -41,6 +41,7 @@ private:
     void refreshViewer();
     void refreshFooter();
     void loadRootIfNeeded();
+    void sessionChanged();
     void applyWidth();
 
     ClientFacade *m_facade = nullptr;

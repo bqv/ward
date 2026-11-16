@@ -4,6 +4,7 @@
 #include "ShellChrome.h"
 #include "Theme.h"
 
+#include <QDateTime>
 #include <QEnterEvent>
 #include <QFont>
 #include <QFontMetrics>
@@ -320,6 +321,11 @@ protected:
             const QVariant size = entry.value(QStringLiteral("size"));
             const bool hasSize = !isDirectory && size.isValid() && size.toInt() >= 0;
             const QString sizeText = hasSize ? grouped(size.toLongLong()) : QString();
+            const qint64 mtime = entry.value(QStringLiteral("mtime")).toLongLong();
+            const QString mtimeText = mtime > 0
+                                          ? QDateTime::fromMSecsSinceEpoch(mtime)
+                                                .toString(QStringLiteral("yyyy-MM-dd HH:mm"))
+                                          : QString();
             int right = width() - theme->space4();
             if (hasSize) {
                 const int sizeWidth = dataMetrics.horizontalAdvance(sizeText);
@@ -328,6 +334,14 @@ protected:
                 painter.drawText(QRect(right - sizeWidth, y, sizeWidth, rowHeight),
                                  Qt::AlignRight | Qt::AlignVCenter, sizeText);
                 right -= sizeWidth + theme->space3();
+            }
+            if (!mtimeText.isEmpty()) {
+                const int mtimeWidth = dataMetrics.horizontalAdvance(mtimeText);
+                painter.setFont(dataFont);
+                painter.setPen(theme->dim());
+                painter.drawText(QRect(right - mtimeWidth, y, mtimeWidth, rowHeight),
+                                 Qt::AlignRight | Qt::AlignVCenter, mtimeText);
+                right -= mtimeWidth + theme->space3();
             }
 
             const int nameX = glyphX + glyphWidth + theme->space2();
@@ -456,7 +470,11 @@ FilesDock::FilesDock(ClientFacade *facade, QWidget *parent)
 
     m_header = new Header(this);
     m_header->setRefreshHandler([this]() {
-        if (available() && m_facade)
+        if (!available() || !m_facade)
+            return;
+        if (m_facade->filePath().isEmpty())
+            m_facade->listWorkspaceFiles();
+        else
             m_facade->listDirectory(m_facade->filePath());
     });
     m_header->setCloseHandler([this]() { setShown(false); });
@@ -551,7 +569,7 @@ FilesDock::FilesDock(ClientFacade *facade, QWidget *parent)
         connect(m_facade, &ClientFacade::fileBytesChanged, this, &FilesDock::refresh);
         connect(m_facade, &ClientFacade::fileTruncatedChanged, this, &FilesDock::refresh);
         connect(m_facade, &ClientFacade::fileErrorChanged, this, &FilesDock::refresh);
-        connect(m_facade, &ClientFacade::sessionIdChanged, this, &FilesDock::loadRootIfNeeded);
+        connect(m_facade, &ClientFacade::sessionIdChanged, this, &FilesDock::sessionChanged);
     }
 
     applyWidth();
@@ -614,7 +632,7 @@ void FilesDock::refresh()
     const QString path = m_facade->filePath();
     const QString selected = m_facade->fileSelectedPath();
     const QString error = m_facade->fileError();
-    const QString display = path.isEmpty() ? QStringLiteral("/") : path;
+    const QString display = path.isEmpty() ? QStringLiteral("workspace") : path;
 
     m_header->setAvailable(available());
     if (m_path->text() != display)
@@ -659,7 +677,7 @@ void FilesDock::refreshFooter()
     }
 
     const QString path = m_facade->filePath();
-    const QString display = path.isEmpty() ? QStringLiteral("/") : path;
+    const QString display = path.isEmpty() ? QStringLiteral("workspace") : path;
     const QString selected = m_facade->fileSelectedPath();
     if (selected.isEmpty()) {
         m_footer->setText(QStringLiteral("browsing ") + display, false);
@@ -679,9 +697,17 @@ void FilesDock::loadRootIfNeeded()
 {
     if (!available() || !m_shown || !m_facade)
         return;
-    if (m_facade->fileEntries().isEmpty() && m_facade->fileError().isEmpty()
-        && m_facade->filePath().isEmpty())
-        m_facade->listDirectory(QString());
+    if (m_facade->filePath().isEmpty())
+        m_facade->listWorkspaceFiles();
+    else
+        m_facade->listDirectory(m_facade->filePath());
+}
+
+void FilesDock::sessionChanged()
+{
+    if (!available() || !m_facade)
+        return;
+    m_facade->listWorkspaceFiles();
 }
 
 void FilesDock::paintEvent(QPaintEvent *)
