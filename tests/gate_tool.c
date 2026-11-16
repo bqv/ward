@@ -666,6 +666,36 @@ int main(void) {
   assert(event != NULL);
   wd_free(event);
 
+  const char *row = "0123456789012345678901234567890123456789\n";
+  const size_t row_len = strlen(row);
+  char big_path[512];
+  snprintf(big_path, sizeof(big_path), "%s/big.txt", root);
+  FILE *big = fopen(big_path, "wb");
+  assert(big != NULL);
+  for (int i = 0; i < 3000; i++) assert(fputs(row, big) >= 0);
+  fclose(big);
+  cbor_item_t *big_ack = NULL;
+  cbor_item_t *big_prompt = wd_map(2);
+  wd_put(big_prompt, "id", wd_text(session));
+  wd_put(big_prompt, "text", wd_text("/read big.txt"));
+  assert(request(&a, a.next_id++, "session.prompt", big_prompt, &big_ack, NULL) == 0);
+  wd_free(big_ack);
+  cbor_item_t *big_event = wait_event(&a, "tool.result", NULL);
+  assert(big_event != NULL);
+  bool big_truncated = false;
+  assert(wd_bool_of(wd_get(big_event, "truncated"), &big_truncated));
+  assert(big_truncated);
+  char *big_spill = wd_text_copy(wd_get(big_event, "spill"));
+  assert(big_spill != NULL);
+  struct stat big_stat;
+  assert(stat(big_spill, &big_stat) == 0);
+  assert(big_stat.st_size == (off_t)(3000 * row_len));
+  free(big_spill);
+  wd_free(big_event);
+  big_event = wait_event(&a, "turn.end", NULL);
+  assert(big_event != NULL);
+  wd_free(big_event);
+
   cbor_item_t *stats_one = NULL;
   cbor_item_t *stats_params = wd_map(1);
   wd_put(stats_params, "id", wd_text(session));

@@ -67,6 +67,8 @@ struct wd_turn {
   char api_key[256];
   char *session_system;
   char *head;
+  char *spill_dir;
+  uint64_t spill_seq;
   wd_judge *judge_cache;
   cbor_item_t *judge_event;
   char *worker_root;
@@ -93,11 +95,13 @@ static const wd_limits PYTHON_LIMITS = {.fuel = 1000000000ull,
                                        .max_instances = 8};
 
 #define WD_TOOL_MAX (64u * 1024u)
+#define WD_TOOL_SHOWN (256u)
+#define WD_SPILL_MAX (4u * 1024u * 1024u)
 
 static wd_worker *worker_for(wd_turn *turn);
 static int provider_phase(wd_turn *turn, cbor_item_t *payload,
                           cbor_item_t **reply, char **err);
-static int exec_reply(wd_proc_result *result, cbor_item_t **out);
+static int exec_reply(wd_turn *turn, wd_proc_result *result, cbor_item_t **out);
 
 static uint8_t *read_file(const char *path, size_t *len) {
   FILE *f = fopen(path, "rb");
@@ -193,6 +197,12 @@ void wd_turn_set_endpoint(wd_turn *turn, const char *endpoint) {
   if (turn == NULL) return;
   free(turn->endpoint);
   turn->endpoint = endpoint != NULL ? strdup(endpoint) : NULL;
+}
+
+void wd_turn_set_spill_dir(wd_turn *turn, const char *dir) {
+  if (turn == NULL) return;
+  free(turn->spill_dir);
+  turn->spill_dir = dir != NULL ? strdup(dir) : NULL;
 }
 
 static const char *module_name_of(wd_turn *turn, wd_instance *instance) {
@@ -399,6 +409,71 @@ static int tool_ok_count(size_t count, uint8_t **out, size_t *out_len) {
   return tool_reply(reply, out, out_len);
 }
 
+static int spill_output(wd_turn *turn, const char *label, const uint8_t *data,
+                        size_t len, char *out, size_t cap) {
+  if (turn == NULL || turn->spill_dir == NULL || len == 0) return -1;
+  if (mkdir(turn->spill_dir, 0700) != 0 && errno != EEXIST) return -1;
+  int n = snprintf(out, cap, "%s/%s-%llu-%llu.txt", turn->spill_dir, label,
+                   (unsigned long long)turn->id,
+                   (unsigned long long)++turn->spill_seq);
+  if (n < 0 || (size_t)n >= cap) return -1;
+  int fd = open(out, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC,
+                0600);
+  if (fd < 0) return -1;
+  int rc = wd_write_all(fd, data, len);
+  close(fd);
+  if (rc != 0) {
+    unlink(out);
+    return -1;
+  }
+  return 0;
+}
+
+static uint8_t *bounded_text(const uint8_t *data, size_t len,
+                             const char *path, size_t *out_len) {
+  size_t head = len < WD_TOOL_SHOWN ? len : WD_TOOL_SHOWN;
+  size_t cap = head + (path != NULL ? strlen(path) : 0) + 128;
+  char *text = malloc(cap + 1);
+  if (text == NULL) return NULL;
+  memcpy(text, data, head);
+  int n = 0;
+  if (path != NULL)
+    n = snprintf(text + head, cap + 1 - head,
+                 "\n[truncated: %zu bytes; full output at %s]", len - head,
+                 path);
+  else
+    n = snprintf(text + head, cap + 1 - head,
+                 "\n[truncated: %zu bytes omitted]", len - head);
+  *out_len = head + (n > 0 ? (size_t)n : 0);
+  if (*out_len > 480) *out_len = 480;
+  text[*out_len] = '\0';
+  return (uint8_t *)text;
+}
+
+static int tool_ok_bounded(wd_turn *turn, const char *label,
+                           const uint8_t *data, size_t len, uint8_t **out,
+                           size_t *out_len) {
+  if (len <= WD_TOOL_MAX) return tool_ok_text(data, len, out, out_len);
+  char path[PATH_MAX];
+  bool spilled =
+      spill_output(turn, label, data, len, path, sizeof(path)) == 0;
+  size_t shown_len = 0;
+  uint8_t *shown = bounded_text(data, len, spilled ? path : NULL, &shown_len);
+  if (shown == NULL) return tool_fail("the output is too large to keep", out, out_len);
+  cbor_item_t *reply = wd_map(spilled ? 5 : 4);
+  wd_put(reply, "ok", cbor_build_bool(true));
+  wd_put(reply, "text", wd_text_len((const char *)shown, shown_len));
+  free(shown);
+  wd_put(reply, "truncated", cbor_build_bool(true));
+  if (spilled) {
+    wd_put(reply, "spill", wd_text(path));
+    wd_put(reply, "spill_size", wd_uint(len));
+  } else {
+    wd_put(reply, "omitted", wd_uint(len - WD_TOOL_SHOWN));
+  }
+  return tool_reply(reply, out, out_len);
+}
+
 static int resolve_path(wd_turn *turn, const char *rel, bool parent, char *out,
                         size_t cap) {
   if (turn->root == NULL || rel == NULL || rel[0] == '\0' || rel[0] == '/')
@@ -571,7 +646,7 @@ static int fs_read(wd_turn *turn, const uint8_t *in, size_t in_len,
   if (fd < 0) return tool_fail("fs.read: cannot open the file", out, out_len);
   struct stat st;
   if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) ||
-      st.st_size > (off_t)WD_TOOL_MAX) {
+      st.st_size > (off_t)WD_SPILL_MAX) {
     close(fd);
     return tool_fail("fs.read: not a regular file under the size limit", out,
                      out_len);
@@ -599,7 +674,7 @@ static int fs_read(wd_turn *turn, const uint8_t *in, size_t in_len,
     free(buf);
     return tool_fail("fs.read: the file is binary", out, out_len);
   }
-  rc = tool_ok_text(buf, got, out, out_len);
+  rc = tool_ok_bounded(turn, "read", buf, got, out, out_len);
   free(buf);
   return rc;
 }
@@ -1039,14 +1114,31 @@ static int edit_run(wd_turn *turn, const uint8_t *in, size_t in_len,
   return tool_ok_count(total, out, out_len);
 }
 
-static int exec_reply(wd_proc_result *result, cbor_item_t **out) {
+static int exec_reply(wd_turn *turn, wd_proc_result *result, cbor_item_t **out) {
   int status = WIFEXITED(result->status) ? WEXITSTATUS(result->status) : 127;
-  cbor_item_t *reply = wd_map(4);
+  const bool over = result->len > WD_TOOL_MAX;
+  char path[PATH_MAX];
+  bool spilled = over && spill_output(turn, "exec", result->out, result->len,
+                                      path, sizeof(path)) == 0;
+  cbor_item_t *reply = wd_map(over ? (spilled ? 7 : 6) : 4);
   wd_put(reply, "ok", cbor_build_bool(!result->timed_out && status == 0));
   wd_put(reply, "status", wd_uint((uint64_t)status));
   wd_put(reply, "timed_out", cbor_build_bool(result->timed_out));
+  if (over) wd_put(reply, "truncated", cbor_build_bool(true));
   if (result->len > 0) {
-    wd_put(reply, "text", wd_text_len((const char *)result->out, result->len));
+    if (over) {
+      size_t shown_len = 0;
+      uint8_t *shown = bounded_text(result->out, result->len,
+                                    spilled ? path : NULL, &shown_len);
+      if (shown != NULL) {
+        wd_put(reply, "text", wd_text_len((const char *)shown, shown_len));
+        free(shown);
+      } else {
+        wd_put(reply, "text", wd_text_len((const char *)result->out, WD_TOOL_SHOWN));
+      }
+    } else {
+      wd_put(reply, "text", wd_text_len((const char *)result->out, result->len));
+    }
   } else {
     char note[96];
     if (result->timed_out)
@@ -1054,6 +1146,12 @@ static int exec_reply(wd_proc_result *result, cbor_item_t **out) {
     else
       snprintf(note, sizeof(note), "the command exited with status %d", status);
     wd_put(reply, "text", wd_text(note));
+  }
+  if (spilled) {
+    wd_put(reply, "spill", wd_text(path));
+    wd_put(reply, "spill_size", wd_uint(result->len));
+  } else if (over) {
+    wd_put(reply, "omitted", wd_uint(result->len - WD_TOOL_SHOWN));
   }
   *out = reply;
   return 0;
@@ -1107,12 +1205,12 @@ static int exec_run(wd_turn *turn, const uint8_t *in, size_t in_len,
   cbor_item_t *reply = NULL;
   int rc = 0;
   wd_worker *worker = worker_for(turn);
-  rc = wd_worker_run(worker, argv, timeout, WD_TOOL_MAX, &result, &err);
+  rc = wd_worker_run(worker, argv, timeout, WD_SPILL_MAX, &result, &err);
   if (rc != 0) {
     free(err);
     err = NULL;
     worker = worker_for(turn);
-    rc = wd_worker_run(worker, argv, timeout, WD_TOOL_MAX, &result, &err);
+    rc = wd_worker_run(worker, argv, timeout, WD_SPILL_MAX, &result, &err);
   }
   free(copy);
   if (rc != 0) {
@@ -1122,7 +1220,7 @@ static int exec_run(wd_turn *turn, const uint8_t *in, size_t in_len,
     free(err);
     return tool_fail(message, out, out_len);
   }
-  rc = exec_reply(&result, &reply);
+  rc = exec_reply(turn, &result, &reply);
   wd_proc_result_free(&result);
   if (rc != 0) return tool_fail("exec.run: cannot build the reply", out, out_len);
   return tool_reply(reply, out, out_len);
@@ -1533,6 +1631,7 @@ void wd_turn_free(wd_turn *turn) {
   wd_http_job_free(turn->http_job);
   wd_worker_free(turn->worker);
   free(turn->worker_root);
+  free(turn->spill_dir);
   wd_instance_free(turn->driver);
   wd_instance_free(turn->provider);
   wd_instance_free(turn->tools);
@@ -1755,12 +1854,12 @@ static int exec_submit(wd_turn *turn, cbor_item_t *args, char **err) {
     return -1;
   }
   wd_worker *worker = worker_for(turn);
-  int rc = wd_worker_submit(worker, argv, timeout, WD_TOOL_MAX, err);
+  int rc = wd_worker_submit(worker, argv, timeout, WD_SPILL_MAX, err);
   if (rc != 0) {
     free(err != NULL ? *err : NULL);
     if (err != NULL) *err = NULL;
     worker = worker_for(turn);
-    rc = wd_worker_submit(worker, argv, timeout, WD_TOOL_MAX, err);
+    rc = wd_worker_submit(worker, argv, timeout, WD_SPILL_MAX, err);
   }
   free(copy);
   if (rc != 0) return -1;
@@ -1942,11 +2041,22 @@ static int process_action(wd_turn *turn, cbor_item_t *action, wd_turn_emit emit,
               strcmp(capability, "fs.write") == 0 ||
               strcmp(capability, "fs.edit") == 0)
             artifact = wd_text_copy(wd_get(args, "path"));
-          cbor_item_t *done = wd_map(artifact != NULL ? 3 : 2);
+          cbor_item_t *done = wd_map(8);
           wd_put(done, "tool", wd_text(capability));
           wd_put(done, "call", wd_uint(0));
           if (artifact != NULL) wd_put(done, "path", wd_text(artifact));
           free(artifact);
+          bool spilled = false;
+          if (wd_bool_of(wd_get(result, "truncated"), &spilled) && spilled)
+            wd_put(done, "truncated", cbor_build_bool(true));
+          char *spill = wd_text_copy(wd_get(result, "spill"));
+          if (spill != NULL) {
+            wd_put(done, "spill", wd_text(spill));
+            free(spill);
+          }
+          uint64_t spill_size = 0;
+          if (wd_uint_of(wd_get(result, "spill_size"), &spill_size))
+            wd_put(done, "spill_size", wd_uint(spill_size));
           char *done_err = NULL;
           (void)emit(ctx, "tool.result", done, &done_err);
           free(done_err);
@@ -2143,9 +2253,9 @@ int wd_turn_resume_tool(wd_turn *turn, wd_turn_emit emit, void *ctx,
   turn->tool_worker = NULL;
   wd_proc_result result;
   cbor_item_t *reply = NULL;
-  int rc = wd_worker_complete(worker, WD_TOOL_MAX, &result, err);
+  int rc = wd_worker_complete(worker, WD_SPILL_MAX, &result, err);
   if (rc == 0) {
-    exec_reply(&result, &reply);
+    exec_reply(turn, &result, &reply);
     wd_proc_result_free(&result);
   } else {
     free(err != NULL ? *err : NULL);

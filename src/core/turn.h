@@ -30,6 +30,7 @@ void wd_turn_set_api_key(wd_turn *turn, const char *key);
 void wd_turn_allow_remote(wd_turn *turn);
 void wd_turn_set_model_name(wd_turn *turn, const char *name);
 void wd_turn_set_endpoint(wd_turn *turn, const char *endpoint);
+void wd_turn_set_spill_dir(wd_turn *turn, const char *dir);
 bool wd_turn_trapped(wd_turn *turn, char *name, size_t cap);
 int wd_turn_state_export(wd_turn *turn, const char *name, uint8_t **blob,
                          size_t *len, char **err);
