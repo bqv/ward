@@ -2528,3 +2528,10 @@ Hundred-and-ninetieth: the tool gate is fast enough to be a gate again. Its fixe
 instead of hanging at the alarm. `wd_session_history` also treats a budget of 0 as unlimited again — the unit test used 0 to
 mean "no trim", which the new trimming had broken — and a small budget now keeps the newest entry, which `session_test` asserts
 explicitly. Full suite green at 52 tests.
+
+Hundred-and-ninety-first: checkpoint policy, and the reason it failed twice before. The checkpoint was emitted from `fs_write`/`fs_edit`
+with `wd_session_checkpoint`, which calls `wd_session_emit` — it writes the durable event but never broadcasts it. A gate client
+therefore never saw it, the wait blocked, and the tool gate died at its watchdog; nothing was wrong with the checkpoint itself.
+The policy now lives in the capability layer of `process_action`, where the turn's emit callback both logs and broadcasts: before
+`fs.write` or `fs.edit` runs, it emits `session.checkpoint {label: "before a side effect"}`. Gate_tool approves the out.txt write,
+waits for that checkpoint before the result, and the suite is green at 52. The model-request half of the DSH policy is still open.

@@ -795,6 +795,12 @@ int main(void) {
   assert(called != NULL && strcmp(called, "fs.write") == 0);
   free(called);
   wd_free(event);
+  event = wait_event(&a, "session.checkpoint", NULL);
+  assert(event != NULL);
+  char *checkpoint_label = wd_text_copy(wd_get(event, "label"));
+  assert(checkpoint_label != NULL && strstr(checkpoint_label, "side effect") != NULL);
+  free(checkpoint_label);
+  wd_free(event);
   event = wait_event(&a, "tool.result", NULL);
   assert(event != NULL);
   char *result_path = wd_text_copy(wd_get(event, "path"));

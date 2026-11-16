@@ -2129,6 +2129,15 @@ static int process_action(wd_turn *turn, cbor_item_t *action, wd_turn_emit emit,
           (void)emit(ctx, "tool.call", notice, &notice_err);
           free(notice_err);
           wd_free(notice);
+          if (strcmp(capability, "fs.write") == 0 ||
+              strcmp(capability, "fs.edit") == 0) {
+            cbor_item_t *checkpoint = wd_map(1);
+            wd_put(checkpoint, "label", wd_text("before a side effect"));
+            char *checkpoint_err = NULL;
+            (void)emit(ctx, "session.checkpoint", checkpoint, &checkpoint_err);
+            free(checkpoint_err);
+            wd_free(checkpoint);
+          }
           int parked = perform_capability(turn, capability, args, &result, err);
           if (parked == 1) {
             *pending = true;
