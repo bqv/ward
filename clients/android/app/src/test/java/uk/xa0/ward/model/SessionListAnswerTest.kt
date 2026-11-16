@@ -53,6 +53,26 @@ class SessionListAnswerTest {
     }
 
     @Test
+    fun `a bare array is the upgraded host's roster`() {
+        val items = sessionListItems(
+            JSONArray("""[{"sessionId":"a"},{"sessionId":"b"}]"""),
+        )
+
+        assertEquals(2, items.length())
+        assertEquals("b", items.getJSONObject(1).getString("sessionId"))
+    }
+
+    @Test
+    fun `an answer that is neither an array nor an object is a failure`() {
+        try {
+            sessionListItems("[]")
+            fail("accepted a roster that is not an array")
+        } catch (expected: SessionListShapeException) {
+            assertTrue(expected.message.orEmpty().contains("array"))
+        }
+    }
+
+    @Test
     fun `the stale note carries the reason and says the list is old`() {
         val note = sessionListErrorNote("HTTP 504: the host did not answer")
 

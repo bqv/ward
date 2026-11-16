@@ -6683,12 +6683,13 @@ class DshViewModel(application: Application) : AndroidViewModel(application) {
         // roster read carries `running` and `subagentTiming` as of the host's own
         // moment, which the answer may predate. See [RunningBook].
         val pull = runningBook.beginPull()
-        val value = client.rpc("session/list", JSONObject().put("_request", JSONObject()))
         // An answer without an `items` array is a *failure*, not an empty roster:
         // treating it as empty replaced a good list with nothing and said nothing.
         // See [sessionListItems]. The throw reaches the caller's runCatching, which
         // keeps the previous rows and marks them stale.
-        val items = sessionListItems(value)
+        val items = sessionListItems(
+            client.rpcRaw("session/list", JSONObject().put("_request", JSONObject())),
+        )
         viewModelScope.launch(Dispatchers.IO) {
             runCatching {
                 rosterCacheFile().writeText(

@@ -15,6 +15,7 @@ import org.json.JSONObject
 import uk.xa0.ward.data.DshConfig
 import uk.xa0.ward.data.LocalWorkspaceStore
 import uk.xa0.ward.proto.Cbor
+import uk.xa0.ward.proto.WardCallTimeoutException
 import uk.xa0.ward.proto.WardConnection
 import uk.xa0.ward.proto.WardConnectionException
 import uk.xa0.ward.proto.WardRpcException
@@ -40,6 +41,8 @@ fun gatewayAnswerText(body: String): String {
 }
 
 class DshUnreachableException(message: String = "Could not reach the host") : Exception(message)
+
+class DshCallTimeoutException(message: String) : Exception(message)
 
 class DshCertificateException(
     message: String,
@@ -219,6 +222,8 @@ class DshClient(context: Context) {
                 active.call(method, args)
             } catch (error: WardRpcException) {
                 throw DshRpcException(error.name, error.message, JSONObject().put("wardCode", error.code))
+            } catch (error: WardCallTimeoutException) {
+                throw DshCallTimeoutException(error.message ?: "The host did not answer in time")
             } catch (error: WardConnectionException) {
                 throw DshUnreachableException(error.message ?: "Ward connection failed")
             }

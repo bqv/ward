@@ -4,6 +4,8 @@
 
 package uk.xa0.ward.proto
 
+const val SESSION_LIST_TIMEOUT_MS: Long = 5 * 60_000
+
 /**
  * Every method the frozen protocol declares, with ward's parameter names.
  *
@@ -33,7 +35,7 @@ class WardApi(private val connection: WardConnection) {
                 includeArchived?.let { add("include_archived" to it.cbor()) }
             }.toTypedArray(),
         )
-        return WardSessionParser.list(connection.call("session.list", params))
+        return WardSessionParser.list(connection.call("session.list", params, SESSION_LIST_TIMEOUT_MS))
     }
 
     suspend fun getSession(id: String): WardSession =

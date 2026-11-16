@@ -63,7 +63,7 @@ fun parseQueueItems(items: JSONArray?): List<QueuedMessage> {
     val result = ArrayList<QueuedMessage>(items.length())
     for (i in 0 until items.length()) {
         val item = items.optJSONObject(i) ?: continue
-        val content = item.obj("message").arr("content") ?: JSONArray()
+        val content = item.obj("message")?.arr("content") ?: item.arr("content") ?: JSONArray()
         val attachments = ArrayList<QueueAttachment>()
         val flat = StringBuilder()
         var allText = true

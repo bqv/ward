@@ -168,4 +168,27 @@ class QueueMirrorTest {
         assertEquals("older host", row.text)
         assertEquals("req-9", row.rpcId)
     }
+
+    @Test
+    fun `a queue item's content is read at the top level as well as under message`() {
+        val content = "[${text("newer host")}]"
+        val nested = JSONArray(
+            "[{\"id\":\"m-10\",\"placement\":\"queued\",\"rpcId\":\"req-10\"," +
+                "\"message\":{\"content\":$content}}]",
+        )
+        val topLevel = JSONArray(
+            "[{\"id\":\"m-10\",\"placement\":\"queued\",\"rpcId\":\"req-10\"," +
+                "\"content\":$content}]",
+        )
+
+        val fromNested = parseQueueItems(nested).single()
+        val fromTopLevel = parseQueueItems(topLevel).single()
+
+        assertEquals("newer host", fromTopLevel.preview)
+        assertEquals("newer host", fromTopLevel.text)
+        assertEquals(fromNested.preview, fromTopLevel.preview)
+        assertEquals(fromNested.text, fromTopLevel.text)
+        assertEquals("req-10", fromTopLevel.rpcId)
+        assertEquals(false, fromTopLevel.pending)
+    }
 }

@@ -131,10 +131,13 @@ class MembershipHold {
  */
 class SessionListShapeException(message: String) : Exception(message)
 
-fun sessionListItems(value: JSONObject): JSONArray =
-    value.optJSONArray("items") ?: throw SessionListShapeException(
+fun sessionListItems(value: Any?): JSONArray = when (value) {
+    is JSONArray -> value
+    is JSONObject -> value.optJSONArray("items") ?: throw SessionListShapeException(
         "the host's session list had no items array",
     )
+    else -> throw SessionListShapeException("the host's session list was not an array")
+}
 
 /**
  * What the drawer says when the last pull failed.

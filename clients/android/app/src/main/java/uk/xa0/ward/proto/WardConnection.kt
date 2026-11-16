@@ -27,7 +27,10 @@ import java.util.concurrent.atomic.AtomicLong
 
 enum class WardConnectionState { IDLE, CONNECTING, OPEN, CLOSED }
 
-class WardConnectionException(message: String, cause: Throwable? = null) : IOException(message, cause)
+open class WardConnectionException(message: String, cause: Throwable? = null) : IOException(message, cause)
+
+class WardCallTimeoutException(val method: String, val waitedMs: Long) :
+    WardConnectionException("$method timed out after ${waitedMs / 1000}s")
 
 /**
  * One ward protocol connection: the frame reader, the request/response ledger and
@@ -141,7 +144,7 @@ class WardConnection(
             throw when (error) {
                 is WardRpcException, is WardConnectionException -> error
                 is kotlinx.coroutines.TimeoutCancellationException ->
-                    WardConnectionException("$method timed out after ${timeoutMs / 1000}s")
+                    WardCallTimeoutException(method, timeoutMs)
                 else -> WardConnectionException("$method failed: ${error.message}", error)
             }
         } finally {
