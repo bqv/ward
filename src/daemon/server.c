@@ -2448,6 +2448,27 @@ static void handle_estate_status(wd_server *srv, wd_conn *conn, uint64_t id) {
   conn_arm(srv, conn);
 }
 
+static void handle_host_mkdir(wd_server *srv, wd_conn *conn, uint64_t id,
+                              cbor_item_t *params) {
+  char *path = wd_text_copy(wd_get(params, "path"));
+  const char *root = getenv("WARD_HOST_ROOT");
+  if (root == NULL || root[0] == '\0') root = getenv("HOME");
+  char *err = NULL;
+  if (path == NULL || root == NULL || wd_file_mkdir(root, path, &err) != 0) {
+    conn_send_error(conn, id, WD_ERR_INVALID_PARAMS,
+                    err != NULL ? err : "cannot create the directory");
+    free(err);
+    free(path);
+    conn_arm(srv, conn);
+    return;
+  }
+  cbor_item_t *result = wd_map(1);
+  wd_put(result, "path", wd_text(path));
+  free(path);
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
 static void handle_search_text(wd_server *srv, wd_conn *conn, uint64_t id,
                                cbor_item_t *params) {
   char *query = wd_text_copy(wd_get(params, "query"));
@@ -2655,7 +2676,8 @@ static void handle_session_file_read_blob(wd_server *srv, wd_conn *conn,
 static void handle_host_list(wd_server *srv, wd_conn *conn, uint64_t id,
                              cbor_item_t *params) {
   char *path = wd_text_copy(wd_get(params, "path"));
-  const char *home = getenv("HOME");
+  const char *home = getenv("WARD_HOST_ROOT");
+  if (home == NULL || home[0] == '\0') home = getenv("HOME");
   if (home == NULL || home[0] == '\0') home = "/home";
   wd_file_entry *entries = NULL;
   size_t len = 0;
@@ -4146,6 +4168,8 @@ static void handle_request(wd_server *srv, wd_conn *conn, uint64_t id,
     handle_host_list(srv, conn, id, params);
   } else if (strcmp(method, "estate.card") == 0) {
     handle_estate_card(srv, conn, id, params);
+  } else if (strcmp(method, "host.mkdir") == 0) {
+    handle_host_mkdir(srv, conn, id, params);
   } else if (strcmp(method, "estate.status") == 0) {
     handle_estate_status(srv, conn, id);
   } else if (strcmp(method, "session.search_text") == 0) {

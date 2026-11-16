@@ -187,6 +187,39 @@ void wd_file_entries_free(wd_file_entry *entries, size_t len) {
   free(entries);
 }
 
+int wd_file_mkdir(const char *root, const char *path, char **err) {
+  if (path == NULL || path[0] == '\0' || strstr(path, "..") != NULL) {
+    if (err != NULL) *err = strdup("host.mkdir: the path is not allowed");
+    return -1;
+  }
+  char full[PATH_MAX];
+  if (path[0] == '/')
+    snprintf(full, sizeof(full), "%s", path);
+  else
+    snprintf(full, sizeof(full), "%s/%s", root != NULL ? root : ".", path);
+  char parent[PATH_MAX];
+  snprintf(parent, sizeof(parent), "%s", full);
+  char *slash = strrchr(parent, '/');
+  if (slash == NULL || slash == parent) {
+    if (err != NULL) *err = strdup("host.mkdir: the path has no parent");
+    return -1;
+  }
+  *slash = '\0';
+  if (!inside_root(root != NULL ? root : ".", parent)) {
+    if (err != NULL) *err = strdup("host.mkdir: the path is outside the host root");
+    return -1;
+  }
+  if (mkdir(full, 0700) != 0) {
+    if (err != NULL) {
+      char buf[256];
+      snprintf(buf, sizeof(buf), "host.mkdir: %s", strerror(errno));
+      *err = strdup(buf);
+    }
+    return -1;
+  }
+  return 0;
+}
+
 int wd_file_list(const char *root, const char *path, size_t max,
                  wd_file_entry **out, size_t *len, bool *truncated, char **err) {
   if (out == NULL || len == NULL) return -1;

@@ -350,6 +350,7 @@ int main(void) {
   setenv("WARD_ESTATE_URL", estate_url, 1);
   char root[] = "/tmp/ward-tool-gate-XXXXXX";
   assert(mkdtemp(root) != NULL);
+  setenv("WARD_HOST_ROOT", root, 1);
   char rules_path[512];
   snprintf(rules_path, sizeof(rules_path), "%s/AGENTS.md", root);
   FILE *rules = fopen(rules_path, "wb");
@@ -449,6 +450,16 @@ int main(void) {
   char *session = wd_text_copy(wd_get(wd_get(created, "session"), "id"));
   assert(session != NULL);
   wd_free(created);
+
+  cbor_item_t *mkdir_res = NULL;
+  cbor_item_t *mkdir_params = wd_map(1);
+  wd_put(mkdir_params, "path", wd_text("made"));
+  assert(request(&a, a.next_id++, "host.mkdir", mkdir_params, &mkdir_res, NULL) == 0);
+  wd_free(mkdir_res);
+  char made_path[512];
+  snprintf(made_path, sizeof(made_path), "%s/made", root);
+  struct stat made_stat;
+  assert(stat(made_path, &made_stat) == 0 && S_ISDIR(made_stat.st_mode));
 
   cbor_item_t *estate_status = NULL;
   assert(request(&a, a.next_id++, "estate.status", wd_map(0), &estate_status,

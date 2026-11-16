@@ -17,6 +17,7 @@ typedef struct {
   uint64_t size;
 } wd_file_entry;
 
+int wd_file_mkdir(const char *root, const char *path, char **err);
 int wd_file_list(const char *root, const char *path, size_t max,
                  wd_file_entry **out, size_t *len, bool *truncated, char **err);
 void wd_file_entries_free(wd_file_entry *entries, size_t len);
