@@ -14,6 +14,7 @@
 #include "GoalRow.h"
 #include "HeadlessClient.h"
 #include "LinkDialog.h"
+#include "RenameWorkspaceDialog.h"
 #include "WorkspacePickerDialog.h"
 
 #include "HeadlessPage.h"
@@ -818,6 +819,8 @@ QWidget *Shell::buildChatPage()
                      &Shell::openRailOverflowMenu);
     QObject::connect(m_rail, &SessionRail::rowMenuRequested, this,
                      &Shell::openRailRowMenu);
+    QObject::connect(m_rail, &SessionRail::groupMenuRequested, this,
+                     &Shell::openRailGroupMenu);
     QObject::connect(m_rail, &SessionRail::rowMenuDismissRequested, this, [this]() {
         if (m_openRailMenu != nullptr)
             m_openRailMenu->hide();
@@ -1664,6 +1667,107 @@ void Shell::openRailRowMenu(const QRect &globalRow, const QString &sessionId,
     // over the transcript the rail exists to give width back to.
     Chrome::popupMenuAt(globalRow, menu, true);
     qInfo().nospace() << "session rail: row menu open for " << sessionId;
+}
+
+void Shell::openRailGroupMenu(const QRect &globalRect, const QString &workspaceId,
+                              const QString &workspaceTitle)
+{
+    if (m_rail == nullptr || !globalRect.isValid() || workspaceId.isEmpty())
+        return;
+    if (m_openRailMenu != nullptr)
+        m_openRailMenu->hide();
+
+    QMenu *menu = Chrome::shellMenu(this);
+    Chrome::deleteOnHide(menu);
+    m_openRailMenu = menu;
+    connect(menu, &QMenu::aboutToHide, this, [this, menu]() {
+        if (m_openRailMenu == menu)
+            m_openRailMenu = nullptr;
+        m_rail->noteRowMenuClosed();
+    });
+
+    Chrome::addCaption(menu, QStringLiteral("This workspace"));
+
+    QAction *rename = menu->addAction(Chrome::menuText(QStringLiteral("Rename…")));
+    connect(rename, &QAction::triggered, this, [this, workspaceId, workspaceTitle]() {
+        renameRailWorkspace(workspaceId, workspaceTitle);
+    });
+
+    QAction *remove = menu->addAction(Chrome::menuText(QStringLiteral("Delete…")));
+    connect(remove, &QAction::triggered, this, [this, workspaceId, workspaceTitle]() {
+        deleteRailWorkspace(workspaceId, workspaceTitle);
+    });
+
+    Chrome::popupMenuAt(globalRect, menu, true);
+    qInfo().nospace() << "session rail: group menu open for workspace " << workspaceId;
+}
+
+void Shell::renameRailWorkspace(const QString &workspaceId, const QString &workspaceTitle)
+{
+    if (workspaceId.isEmpty())
+        return;
+
+    QString storedTitle = workspaceTitle;
+    for (const QVariant &entry : m_facade->workspaces()) {
+        const QVariantMap workspace = entry.toMap();
+        if (workspace.value(QStringLiteral("workspaceId")).toString() != workspaceId)
+            continue;
+        storedTitle = workspace.value(QStringLiteral("title")).toString();
+        break;
+    }
+
+    auto *dialog = new RenameWorkspaceDialog(this);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->setWindowModality(Qt::WindowModal);
+    connect(dialog, &RenameWorkspaceDialog::saveRequested, this,
+            [this, workspaceId](const QString &title) {
+                qInfo().nospace() << "session rail: renameWorkspace(" << workspaceId
+                                  << ", \"" << title << "\")";
+                m_facade->renameWorkspace(workspaceId, title);
+            });
+    qInfo().nospace() << "session rail: renameWorkspaceRequested(" << workspaceId << ", \""
+                      << workspaceTitle << "\") -> the shell's rename dialog";
+    dialog->showDialog(storedTitle);
+}
+
+void Shell::deleteRailWorkspace(const QString &workspaceId, const QString &workspaceTitle)
+{
+    if (workspaceId.isEmpty())
+        return;
+
+    qInfo().nospace() << "session rail: deleteWorkspaceRequested(" << workspaceId << ", \""
+                      << workspaceTitle << "\") -> the shell's confirmation";
+
+    auto *dialog = new QMessageBox(this);
+    dialog->setObjectName(QStringLiteral("deleteWorkspaceDialog"));
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->setWindowModality(Qt::WindowModal);
+    dialog->setIcon(QMessageBox::Warning);
+    dialog->setWindowTitle(QStringLiteral("Delete this workspace?"));
+    dialog->setText(workspaceTitle.isEmpty() ? QStringLiteral("This workspace")
+                                             : workspaceTitle);
+    dialog->setInformativeText(QStringLiteral(
+        "The workspace is removed from the rail. Its sessions are not deleted: "
+        "they stay daemon-side and will reappear ungrouped."));
+    QAbstractButton *deleteButton =
+        dialog->addButton(QStringLiteral("Delete"), QMessageBox::DestructiveRole);
+    QAbstractButton *cancelButton =
+        dialog->addButton(QStringLiteral("Cancel"), QMessageBox::RejectRole);
+    dialog->setDefaultButton(qobject_cast<QPushButton *>(cancelButton));
+    dialog->setEscapeButton(cancelButton);
+
+    connect(dialog, &QMessageBox::finished, this,
+            [this, dialog, deleteButton, workspaceId]() {
+                if (dialog->clickedButton() != deleteButton) {
+                    qInfo().nospace() << "session rail: delete of workspace " << workspaceId
+                                      << " cancelled; nothing was sent";
+                    return;
+                }
+                qInfo().nospace() << "session rail: deleteWorkspace(" << workspaceId << ")";
+                m_facade->deleteWorkspace(workspaceId);
+            });
+
+    dialog->open();
 }
 
 void Shell::renameRailSession(const QString &sessionId, const QString &storedTitle)

@@ -62,6 +62,18 @@ void AcpCompat::addWorkspaceAt(const QString &)
                     true);
 }
 
+void AcpCompat::renameWorkspace(const QString &, const QString &)
+{
+    emit railNotice(QStringLiteral("The ACP transport cannot rename a workspace: it has no workspace surface."),
+                    true);
+}
+
+void AcpCompat::deleteWorkspace(const QString &)
+{
+    emit railNotice(QStringLiteral("The ACP transport cannot delete a workspace: it has no workspace surface."),
+                    true);
+}
+
 void AcpCompat::restartSelf()
 {
     (void)restartApplication();

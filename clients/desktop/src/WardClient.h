@@ -5,6 +5,7 @@
 #pragma once
 
 #include <QByteArray>
+#include <QDateTime>
 #include <QHash>
 #include <QObject>
 #include <QSet>
@@ -199,6 +200,8 @@ public:
     Q_INVOKABLE void browseDirectory(const QString &path = QString());
     Q_INVOKABLE void createDirectory(const QString &name);
     Q_INVOKABLE void addWorkspaceAt(const QString &path);
+    Q_INVOKABLE void renameWorkspace(const QString &workspaceId, const QString &title);
+    Q_INVOKABLE void deleteWorkspace(const QString &workspaceId);
     Q_INVOKABLE void followSession(const QString &sessionId);
     Q_INVOKABLE void sendPrompt(const QString &text);
     Q_INVOKABLE void sendPrompt(const QString &text, const QString &mode);
@@ -374,6 +377,7 @@ private:
     void addTrajectory(const QVariantMap &cell);
     void updateTrajectory(const QString &id, const QVariantMap &patch);
     void clearTranscript();
+    void showCachedRoster();
     void restorePendingPrompt();
 
     QString m_socketPath;
@@ -414,6 +418,8 @@ private:
     QString m_directoryPickNotice;
     QString m_directoryPickPath;
     bool m_workspacePickInFlight = false;
+    QVariantMap m_workspaceTitles;
+    QSet<QString> m_workspaceHidden;
     bool m_sessionsLoading = false;
     bool m_openingSession = false;
 
@@ -472,6 +478,10 @@ private:
 
     QString m_createCwd;
     QString m_pendingModel;
+    QVariantList m_cachedRoster;
+    QDateTime m_cachedRosterSavedAt;
+    bool m_cachedRosterPending = false;
+    bool m_cachedRosterOnScreen = false;
     QString m_blobPath;
     qint64 m_blobOffset = 0;
     qint64 m_blobLen = 0;

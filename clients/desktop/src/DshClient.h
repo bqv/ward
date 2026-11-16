@@ -802,6 +802,9 @@ public:
     /// Workspace the host never offered.
     void createWorkspaceAt(const QString &path);
 
+    Q_INVOKABLE void renameWorkspace(const QString &workspaceId, const QString &title);
+    Q_INVOKABLE void deleteWorkspace(const QString &workspaceId);
+
     /// Rename a session (session/rename). The host answers with the title it
     /// actually stored, which is what the rail should show. An empty
     /// `sessionId` names the followed session, so the title is the only

@@ -995,6 +995,7 @@ void SessionRailModel::rebuild()
         header.title = section.label;
         header.count = total;
         header.groupKey = section.key;
+        header.workspaceId = section.workspace ? section.key : QString();
         header.expanded = !collapsed;
         header.icon = section.icon;
         header.iconFile = section.iconFile;

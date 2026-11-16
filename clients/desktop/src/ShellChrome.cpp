@@ -184,6 +184,39 @@ void popupMenuAt(const QRect &globalAnchor, QMenu *menu, bool alignRightEdge)
     menu->popup(position);
 }
 
+MenuRoom popupMenuRoom(const QRect &globalAnchor, int wantedHeight)
+{
+    Theme *theme = Theme::instance();
+    MenuRoom result;
+    QScreen *screen = QGuiApplication::screenAt(globalAnchor.topLeft());
+    if (screen == nullptr)
+        screen = QGuiApplication::primaryScreen();
+    if (screen == nullptr)
+        return result;
+
+    const QRect available = screen->availableGeometry();
+    result.below = qMax(0, available.bottom() - (globalAnchor.bottom() + theme->space1()) + 1);
+    result.above = qMax(0, globalAnchor.top() - theme->space1() - available.top());
+
+    if (wantedHeight <= result.below) {
+        result.room = result.below;
+    } else if (wantedHeight <= result.above) {
+        result.room = result.above;
+        result.aboveAnchor = true;
+    } else if (result.above > result.below) {
+        result.room = result.above;
+        result.aboveAnchor = true;
+    } else {
+        result.room = result.below;
+    }
+    return result;
+}
+
+int popupMenuRoom(const QRect &globalAnchor)
+{
+    return popupMenuRoom(globalAnchor, QWIDGETSIZE_MAX).room;
+}
+
 QString compactCount(int value)
 {
     const qint64 n = value;

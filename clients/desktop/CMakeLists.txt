@@ -123,6 +123,8 @@ add_executable(ward-gui
     src/ClientFacade.cpp
     src/DshClient.cpp
     src/WardClient.cpp
+    src/RosterCache.h
+    src/RosterCache.cpp
     src/BrowserAuth.cpp
     src/TerminalEmulator.cpp
     src/TerminalPaint.cpp
@@ -183,6 +185,8 @@ add_executable(ward-gui
     src/LinkDialog.cpp
     src/WorkspacePickerDialog.h
     src/WorkspacePickerDialog.cpp
+    src/RenameWorkspaceDialog.h
+    src/RenameWorkspaceDialog.cpp
 )
 
 target_link_libraries(ward-gui PRIVATE
@@ -197,6 +201,7 @@ target_link_libraries(ward-gui PRIVATE
 add_executable(ward-acp
     tools/ward_acp.cpp
     src/WardClient.cpp
+    src/RosterCache.cpp
     src/AcpClient.cpp
     src/AcpCompat.cpp
 )
@@ -206,6 +211,7 @@ target_include_directories(ward-acp PRIVATE src)
 add_executable(ward-gui-probe
     tools/ward_probe.cpp
     src/WardClient.cpp
+    src/RosterCache.cpp
     src/AcpClient.cpp
     src/AcpCompat.cpp
 )

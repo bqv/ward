@@ -808,6 +808,17 @@ void ClientFacade::addWorkspaceAt(const QString &path)
     call("addWorkspaceAt(QString)", QGenericReturnArgument(), stringArg(path));
 }
 
+void ClientFacade::renameWorkspace(const QString &workspaceId, const QString &title)
+{
+    call("renameWorkspace(QString,QString)", QGenericReturnArgument(),
+         stringArg(workspaceId), stringArg(title));
+}
+
+void ClientFacade::deleteWorkspace(const QString &workspaceId)
+{
+    call("deleteWorkspace(QString)", QGenericReturnArgument(), stringArg(workspaceId));
+}
+
 bool ClientFacade::followParentSession()
 {
     const QString parent = parentSessionId();

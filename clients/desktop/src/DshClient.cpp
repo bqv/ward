@@ -1395,6 +1395,23 @@ void DshClient::call(const QString &method, const QJsonObject &args,
             return;
         }
 
+        if (method == QLatin1String("workspace/rename")) {
+            const QJsonObject renamed =
+                value.toObject().value(QStringLiteral("workspace")).toObject();
+            qInfo().nospace() << "workspace/rename stored \""
+                              << renamed.value(QStringLiteral("title")).toString()
+                              << "\" for "
+                              << renamed.value(QStringLiteral("workspaceId")).toString();
+            setStatus(QStringLiteral("workspace renamed"));
+            return;
+        }
+
+        if (method == QLatin1String("workspace/delete")) {
+            qInfo() << "workspace/delete removed the registration";
+            setStatus(QStringLiteral("workspace deleted"));
+            return;
+        }
+
         if (method == QLatin1String("settings/mutate")) {
             // Re-read rather than trusting the local edit: the host resolves the
             // schema, so what it stores is the only authority on what is now set.
@@ -4618,6 +4635,10 @@ void DshClient::reportRpcFailure(const QString &method, const QString &code,
     // silence this ends. Copy names what they tried, then the host's own words.
     if (method == QLatin1String("workspace/create"))
         emit railNotice(QStringLiteral("Could not add the workspace: %1").arg(message), true);
+    else if (method == QLatin1String("workspace/rename"))
+        emit railNotice(QStringLiteral("Could not rename the workspace: %1").arg(message), true);
+    else if (method == QLatin1String("workspace/delete"))
+        emit railNotice(QStringLiteral("Could not delete the workspace: %1").arg(message), true);
     else if (method == QLatin1String("directoryPicker/pick"))
         emit railNotice(QStringLiteral("Could not open the folder chooser: %1").arg(message), true);
     else if (method == QLatin1String("session/create")) {
@@ -6522,6 +6543,36 @@ void DshClient::createWorkspaceAt(const QString &path)
     call(QStringLiteral("workspace/create"),
          QJsonObject{{QStringLiteral("request"), QJsonObject{
              {QStringLiteral("path"), path},
+         }}});
+}
+
+void DshClient::renameWorkspace(const QString &workspaceId, const QString &title)
+{
+    const QString id = workspaceId.trimmed();
+    const QString trimmed = title.trimmed();
+    if (id.isEmpty())
+        return;
+    if (trimmed.isEmpty()) {
+        emit railNotice(QStringLiteral("Cannot rename the workspace: the name is blank."), true);
+        return;
+    }
+    qInfo().nospace() << "workspace/rename " << id << " -> \"" << trimmed << "\"";
+    call(QStringLiteral("workspace/rename"),
+         QJsonObject{{QStringLiteral("request"), QJsonObject{
+             {QStringLiteral("workspaceId"), id},
+             {QStringLiteral("title"), trimmed},
+         }}});
+}
+
+void DshClient::deleteWorkspace(const QString &workspaceId)
+{
+    const QString id = workspaceId.trimmed();
+    if (id.isEmpty())
+        return;
+    qInfo().nospace() << "workspace/delete " << id;
+    call(QStringLiteral("workspace/delete"),
+         QJsonObject{{QStringLiteral("request"), QJsonObject{
+             {QStringLiteral("workspaceId"), id},
          }}});
 }
 

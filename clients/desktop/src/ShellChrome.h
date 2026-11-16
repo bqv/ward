@@ -83,6 +83,18 @@ void addEmptyRow(QMenu *menu, const QString &text);
 /// global coordinates because a list row is not a widget.
 void popupMenuAt(const QRect &globalAnchor, QMenu *menu, bool alignRightEdge);
 
+struct MenuRoom
+{
+    int below = 0;
+    int above = 0;
+    int room = 0;
+    bool aboveAnchor = false;
+};
+
+MenuRoom popupMenuRoom(const QRect &globalAnchor, int wantedHeight);
+
+int popupMenuRoom(const QRect &globalAnchor);
+
 /// main.qml's `compactCount()`: 1 000 becomes "1k", 1 500 "1.5k", 1 000 000
 /// "1M", and anything under a thousand is itself. Numbers are grouped by hand
 /// because QML's own `toLocaleString` was unreliable and this shell has to print

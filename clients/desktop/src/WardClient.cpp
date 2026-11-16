@@ -6,6 +6,7 @@
 
 #include "AcpClient.h"
 #include "AppRestart.h"
+#include "RosterCache.h"
 
 #include <QDateTime>
 #include <QBuffer>
@@ -232,6 +233,33 @@ QString defaultPath()
 
 } // namespace
 
+static QString rosterSavedWord(const QDateTime &savedAt)
+{
+    if (!savedAt.isValid())
+        return QStringLiteral("an unknown time");
+    return savedAt.toLocalTime().toString(QStringLiteral("d MMM, HH:mm"));
+}
+
+static QString rosterAgeWord(const QDateTime &savedAt)
+{
+    if (!savedAt.isValid())
+        return QStringLiteral("unknown age");
+    const qint64 seconds = savedAt.secsTo(QDateTime::currentDateTimeUtc());
+    if (seconds < 60)
+        return QStringLiteral("just now");
+    if (seconds < 3600)
+        return QStringLiteral("%1 min old").arg(seconds / 60);
+    if (seconds < 86400)
+        return QStringLiteral("%1 h old").arg(seconds / 3600);
+    return QStringLiteral("%1 d old").arg(seconds / 86400);
+}
+
+static QString cachedRosterNotice(const QDateTime &savedAt)
+{
+    return QStringLiteral("cached list from %1 (%2) — reading the daemon's list")
+        .arg(rosterSavedWord(savedAt), rosterAgeWord(savedAt));
+}
+
 WardClient::WardClient(const QString &socketPath, QObject *parent)
     : QObject(parent)
     , m_socketPath(socketPath.isEmpty() ? defaultPath() : socketPath)
@@ -241,6 +269,26 @@ WardClient::WardClient(const QString &socketPath, QObject *parent)
     m_busyEnter = QStringLiteral("queue");
     m_railExpanded = QSettings().value(QStringLiteral("ward/railExpanded")).toStringList();
     m_railCollapsed = QSettings().value(QStringLiteral("ward/railCollapsed")).toStringList();
+    m_workspaceTitles = QSettings().value(QStringLiteral("ward/workspaceTitles")).toMap();
+    const QStringList hidden =
+        QSettings().value(QStringLiteral("ward/workspaceHidden")).toStringList();
+    for (const QString &id : hidden)
+        m_workspaceHidden.insert(id);
+
+    RosterCache::Snapshot cached;
+    QString cacheDetail;
+    const RosterCache::Result cacheResult = RosterCache::load(m_socketPath, &cached, &cacheDetail);
+    if (cacheResult == RosterCache::Result::Loaded) {
+        m_cachedRoster = cached.sessions;
+        m_cachedRosterSavedAt = cached.savedAt;
+        m_cachedRosterPending = true;
+        qInfo() << "roster cache: loaded" << m_cachedRoster.size() << "row(s) saved"
+                << rosterSavedWord(m_cachedRosterSavedAt);
+    } else if (cacheResult == RosterCache::Result::Absent) {
+        qInfo() << "roster cache: none at" << cacheDetail;
+    } else {
+        qWarning() << "roster cache: ignored" << cacheDetail << RosterCache::path();
+    }
     connect(this, &WardClient::blobRead, this,
             [this](const QString &path, qint64 offset, const QByteArray &data,
                    const QString &error) {
@@ -434,6 +482,7 @@ void WardClient::connectToDaemon()
     setState(Ready, QStringLiteral("ready"));
     m_sessionsLoading = true;
     emit sessionsLoadingChanged();
+    showCachedRoster();
     sendRequest(QStringLiteral("session.list"), {{QStringLiteral("limit"), 1000}});
     refreshConfigOptions();
     refreshApprovals();
@@ -582,6 +631,7 @@ void WardClient::connectQuic()
     setState(Ready, QStringLiteral("ready"));
     m_sessionsLoading = true;
     emit sessionsLoadingChanged();
+    showCachedRoster();
     sendRequest(QStringLiteral("session.list"), {{QStringLiteral("limit"), 1000}});
     refreshConfigOptions();
     refreshApprovals();
@@ -703,6 +753,14 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
         if (method == QLatin1String("session.list")) {
             m_sessionsLoading = false;
             emit sessionsLoadingChanged();
+            if (m_cachedRosterOnScreen) {
+                emit railNotice(
+                    QStringLiteral("the daemon's list could not be read; showing the "
+                                   "cached list from %1 (%2)")
+                        .arg(rosterSavedWord(m_cachedRosterSavedAt),
+                             rosterAgeWord(m_cachedRosterSavedAt)),
+                    false);
+            }
         }
         if (method == QLatin1String("session.resume"))
             m_openingSession = false, emit openingSessionChanged();
@@ -796,7 +854,18 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
     if (method == QLatin1String("session.list")) {
         m_sessionsLoading = false;
         emit sessionsLoadingChanged();
-        setSessions(result.value(QStringLiteral("sessions")).toList());
+        const QVariantList sessions = result.value(QStringLiteral("sessions")).toList();
+        setSessions(sessions);
+        m_cachedRosterOnScreen = false;
+        if (!sessions.isEmpty()) {
+            QString cacheDetail;
+            if (RosterCache::save(m_socketPath, sessions, &cacheDetail))
+                qInfo() << "roster cache: wrote" << sessions.size() << "row(s) to"
+                        << cacheDetail;
+            else
+                qWarning() << "roster cache: could not write" << RosterCache::path()
+                           << cacheDetail;
+        }
     } else if (method == QLatin1String("host.list")) {
         setDirectoryPickLoading(false);
         applyHostListing(result);
@@ -1011,8 +1080,22 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
             const QString id = model.value(QStringLiteral("id")).toString();
             if (id.isEmpty())
                 continue;
+            const QString provider = model.value(QStringLiteral("provider")).toString();
+            QString description;
+            const QString modelName = model.value(QStringLiteral("model")).toString();
+            if (!modelName.isEmpty() && modelName != id)
+                description = modelName;
+            const QString context = model.value(QStringLiteral("context")).toString();
+            if (!context.isEmpty()) {
+                description += description.isEmpty() ? QString()
+                                                     : QStringLiteral(" · ");
+                description += context + QStringLiteral(" context");
+            }
             choices.append(QVariantMap{{QStringLiteral("value"), id},
-                                       {QStringLiteral("label"), id}});
+                                       {QStringLiteral("label"), id},
+                                       {QStringLiteral("provider"), provider},
+                                       {QStringLiteral("group"), provider},
+                                       {QStringLiteral("description"), description}});
             if (first.isEmpty())
                 first = id;
             if (!previous.isEmpty() && id == previous)
@@ -1142,6 +1225,9 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
     }
 }
 
+static bool turnEndIsCancellation(const QString &reason);
+static QString turnEndWord(const QString &reason);
+
 void WardClient::handleEvent(uint64_t sub, uint64_t seq, const QString &kind,
                              const QVariantMap &payload)
 {
@@ -1268,7 +1354,17 @@ void WardClient::handleEvent(uint64_t sub, uint64_t seq, const QString &kind,
         emit busyChanged();
         m_openingSession = false;
         emit openingSessionChanged();
-        setState(Ready, QStringLiteral("ready"));
+        const bool aborted = payload.value(QStringLiteral("aborted")).toBool();
+        const QString reason = payload.value(QStringLiteral("reason")).toString();
+        if (aborted) {
+            const QString word = turnEndWord(reason);
+            appendRow(turnEndIsCancellation(reason) ? QStringLiteral("notice")
+                                                    : QStringLiteral("error"),
+                      word, {}, {}, {}, {}, m_turn, qint64(seq));
+            setState(Ready, word);
+        } else {
+            setState(Ready, QStringLiteral("ready"));
+        }
     } else if (kind == QLatin1String("tool.call")) {
         const QString tool = payload.value(QStringLiteral("tool")).toString();
         const QString call = QString::number(payload.value(QStringLiteral("call")).toULongLong());
@@ -1460,6 +1556,42 @@ static QString wardWorkspaceKey(const QVariant &cwd)
     return QStringLiteral("cwd:") + cwd.toString();
 }
 
+static bool turnEndIsCancellation(const QString &reason)
+{
+    const QString key = reason.trimmed().toLower();
+    return key.isEmpty() || key == QLatin1String("aborted")
+        || key == QLatin1String("cancelled") || key == QLatin1String("canceled")
+        || key == QLatin1String("killed") || key == QLatin1String("interrupted");
+}
+
+static QString turnEndWord(const QString &reason)
+{
+    const QString key = reason.trimmed().toLower();
+    if (key.isEmpty() || key == QLatin1String("aborted"))
+        return QStringLiteral("the turn was aborted");
+    if (key == QLatin1String("cancelled") || key == QLatin1String("canceled"))
+        return QStringLiteral("the turn was cancelled");
+    if (key == QLatin1String("killed"))
+        return QStringLiteral("the turn was killed");
+    if (key == QLatin1String("interrupted"))
+        return QStringLiteral("the turn was interrupted");
+    if (key == QLatin1String("provider_unavailable"))
+        return QStringLiteral("the turn failed: the provider was unavailable");
+    if (key == QLatin1String("provider_timeout"))
+        return QStringLiteral("the turn failed: the provider timed out");
+    if (key == QLatin1String("provider_rejected"))
+        return QStringLiteral("the turn failed: the provider rejected the request");
+    if (key == QLatin1String("model_limit"))
+        return QStringLiteral("the turn failed: the model limit was reached");
+    if (key == QLatin1String("endpoint_unsupported"))
+        return QStringLiteral("the turn failed: the endpoint does not support the request");
+    if (key == QLatin1String("context_exceeded"))
+        return QStringLiteral("the turn failed: the context was exceeded");
+    if (key == QLatin1String("tool_parse"))
+        return QStringLiteral("the turn failed: the tool call could not be parsed");
+    return QStringLiteral("the turn failed: %1").arg(reason.trimmed());
+}
+
 void WardClient::applySession(const QVariantMap &session)
 {
     if (session.isEmpty())
@@ -1533,6 +1665,17 @@ void WardClient::setSessions(const QVariantList &sessions)
     emit sessionsChanged();
 }
 
+void WardClient::showCachedRoster()
+{
+    if (!m_cachedRosterPending || m_state != Ready || m_cachedRoster.isEmpty())
+        return;
+    m_cachedRosterPending = false;
+    m_cachedRosterOnScreen = true;
+    setSessions(m_cachedRoster);
+    emit railNotice(cachedRosterNotice(m_cachedRosterSavedAt), false);
+    qInfo() << "roster cache: painted" << m_cachedRoster.size() << "row(s) before"
+            << "the live list was read";
+}
 
 void WardClient::rebuildWorkspaces()
 {
@@ -1545,18 +1688,57 @@ void WardClient::rebuildWorkspaces()
     QVariantList list;
     for (auto it = groups.constBegin(); it != groups.constEnd(); ++it) {
         const QString cwd = it.key();
-        const QString title = cwd.isEmpty() ? QStringLiteral("sessions")
-                                           : QFileInfo(cwd).fileName();
+        const QString id = wardWorkspaceKey(cwd);
+        if (m_workspaceHidden.contains(id))
+            continue;
+        QString title = m_workspaceTitles.value(id).toString().trimmed();
+        if (title.isEmpty())
+            title = cwd.isEmpty() ? QStringLiteral("sessions") : QFileInfo(cwd).fileName();
+        if (title.isEmpty())
+            title = cwd;
         list.append(QVariantMap{
-            {QStringLiteral("workspaceId"), wardWorkspaceKey(cwd)},
+            {QStringLiteral("workspaceId"), id},
             {QStringLiteral("path"), cwd},
-            {QStringLiteral("title"), title.isEmpty() ? cwd : title},
+            {QStringLiteral("title"), title},
             {QStringLiteral("sessionIds"), it.value()}});
     }
     if (list == m_workspaces)
         return;
     m_workspaces = list;
     emit workspacesChanged();
+}
+
+void WardClient::renameWorkspace(const QString &workspaceId, const QString &title)
+{
+    const QString id = workspaceId.trimmed();
+    if (id.isEmpty())
+        return;
+    const QString trimmed = title.trimmed();
+    if (trimmed.isEmpty())
+        m_workspaceTitles.remove(id);
+    else
+        m_workspaceTitles.insert(id, trimmed);
+    QSettings().setValue(QStringLiteral("ward/workspaceTitles"), m_workspaceTitles);
+    qInfo().nospace() << "workspace rename: " << id << " -> \"" << trimmed << "\"";
+    rebuildWorkspaces();
+}
+
+void WardClient::deleteWorkspace(const QString &workspaceId)
+{
+    const QString id = workspaceId.trimmed();
+    if (id.isEmpty())
+        return;
+    m_workspaceHidden.insert(id);
+    m_workspaceTitles.remove(id);
+    QSettings settings;
+    settings.setValue(QStringLiteral("ward/workspaceTitles"), m_workspaceTitles);
+    QStringList hidden;
+    for (const QString &hiddenId : m_workspaceHidden)
+        hidden.append(hiddenId);
+    settings.setValue(QStringLiteral("ward/workspaceHidden"), hidden);
+    qInfo().nospace() << "workspace delete: " << id
+                      << "; its sessions stay and fall into Ungrouped";
+    rebuildWorkspaces();
 }
 
 void WardClient::subscribe(const QString &sessionId, bool force)

@@ -537,6 +537,8 @@ public:
     void browseDirectory(const QString &path);
     void createDirectory(const QString &name);
     void addWorkspaceAt(const QString &path);
+    void renameWorkspace(const QString &workspaceId, const QString &title);
+    void deleteWorkspace(const QString &workspaceId);
 
     void refreshScheduleTasks();
     void saveScheduleTask(const QString &id, const QString &title, const QString &prompt);

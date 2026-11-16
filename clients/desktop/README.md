@@ -90,22 +90,22 @@ The client speaks ward's method names and event kinds, not an adapter vocabulary
 
 | surface | ward method or event |
 |---|---|
-| roster | `session.list`, `session.updated` |
+| roster | `session.list`, `session.updated`; the last roster is cached per endpoint and painted while the live list is read |
 | new session | `session.create` |
 | open and replay | `session.resume` with `from: 0`, ending at `replay.end` |
-| prompt | `session.prompt`; `session.prompted`, `text.delta`, `turn.start`, `turn.end` |
+| prompt | `session.prompt`; `session.prompted`, `text.delta`, `turn.start`, `turn.end`; an aborted turn adds its reason row |
 | approval | `approval.list` for global marks and tool/reason; `approval.requested` -> `approval.respond` -> `approval.resolved` for the card |
 | cancel | `session.cancel` |
 | rename, pin, archive | `session.rename`, `session.pin`, `session.archive` |
 | fork | `session.fork {id, from?}` from the rail, or from a message's Fork with `from` set to that row's event seq |
 | compact | `session.compact` |
 | goal | `goal.set`, `goal.clear` |
-| models | `model.list`, `session.set_model`; a model chosen on a new-session seat travels in `session.create {model}` |
+| models | `model.list`, `session.set_model`; `provider` groups the Local/Cloud model popup; a model chosen on a new-session seat travels in `session.create {model}` |
 | terminal | `terminal.open/write/resize/close`, `terminal.output`, eof |
 | files | `session.file_read` (text), `session.file_read_blob` (CBOR bytes), `session.file_list` |
 | schedules | `schedule.list`, `schedule.delete` |
 | trajectory | `turn.*`, `session.prompted`, `text.delta`, `tool.call/result` |
-| workspaces | `host.list` for the Add workspace folder chooser; synthetic groups by session cwd |
+| workspaces | `host.list` for the Add workspace folder chooser; synthetic cwd groups with locally persisted rename/delete (delete moves the sessions to Ungrouped) |
 | links | Markdown anchors in the transcript, ACP and headless prose open the link dialog: browser, this window, copy |
 | presets | `policy.list` / `policy.select`; chip normalises `id` to `value`; full-access requires the warning confirmation and marks the chip |
 | search | `session.search_text` paging; Search messages dialog, no replay |

@@ -84,6 +84,7 @@ public:
     // maps the rectangle itself — it is the only side that can.
     QWidget *overflowAnchor() const;
     QRect rowGlobalRect(const QString &sessionId) const;
+    QRect groupGlobalRect(const QString &workspaceId) const;
 
     /// For the shell's probe and for a later slice's scroll anchor; the view is
     /// an implementation detail otherwise.
@@ -151,6 +152,8 @@ signals:
     void overflowMenuRequested();
     void rowMenuRequested(const QRect &globalRect, const QString &sessionId,
                           const QString &storedTitle, bool pinned, bool archived);
+    void groupMenuRequested(const QRect &globalRect, const QString &workspaceId,
+                            const QString &workspaceTitle);
     /// The list moved under an open row menu, which would otherwise hang over
     /// whatever scrolled into its place.
     void rowMenuDismissRequested();
@@ -213,6 +216,7 @@ private:
     // ---- gestures ---------------------------------------------------------
     void openRow(int index);
     void requestRowMenu(int index);
+    QRect globalRectForKey(const QString &key) const;
     void revealFirstPinned();
     void revealLiveGroup(const QString &key);
     QString storedTitleFor(const QString &sessionId) const;

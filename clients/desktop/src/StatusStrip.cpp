@@ -22,9 +22,12 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QScreen>
+#include <QScrollArea>
+#include <QScrollBar>
 #include <QTimer>
 #include <QVariant>
 #include <QVBoxLayout>
+#include <QWheelEvent>
 #include <QWidgetAction>
 #include <QtMath>
 
@@ -83,8 +86,24 @@ int providerRank(const QString &provider)
 
 bool localProvider(const QString &provider)
 {
-    return provider.contains(QLatin1String("local"))
-        || provider == QLatin1String("dsh-compactor");
+    const QString name = provider.trimmed().toLower();
+    if (name.isEmpty())
+        return false;
+    if (name.contains(QLatin1String("local")) || name.contains(QLatin1String("llama"))
+        || name.contains(QLatin1String("llamb")) || name.contains(QLatin1String("demesne"))
+        || name.contains(QLatin1String("ollama")) || name.contains(QLatin1String("vllm"))
+        || name.contains(QLatin1String("lmstudio")) || name.contains(QLatin1String("lm-studio"))
+        || name.contains(QLatin1String("mlx")) || name.contains(QLatin1String("kobold"))
+        || name == QLatin1String("dsh-compactor"))
+        return true;
+    for (const char *cloud : {"deepseek", "openai", "anthropic", "google", "gemini",
+                              "mistral", "xai", "groq", "openrouter", "together",
+                              "moonshot", "zhipu", "fireworks", "cohere", "cerebras",
+                              "deepinfra", "perplexity", "azure", "bedrock", "vertex"}) {
+        if (name.contains(QLatin1String(cloud)))
+            return false;
+    }
+    return true;
 }
 
 int choiceRowHeight()
@@ -997,6 +1016,7 @@ void StatusStrip::openModelMenu()
 
     QMenu *menu = Chrome::shellMenu(this);
     Chrome::deleteOnHide(menu);
+    menu->installEventFilter(this);
     auto *group = new QActionGroup(menu);
     group->setExclusive(true);
 
@@ -1015,6 +1035,13 @@ void StatusStrip::openModelMenu()
     });
 
     Chrome::popupMenuAt(m_modelAnchor, menu, true);
+
+    QPointer<StatusStrip> self(this);
+    QTimer::singleShot(0, menu, [self, menu]() {
+        if (self.isNull() || !menu->isVisible() || self->m_modelMenu != menu)
+            return;
+        self->fitModelBodies();
+    });
 }
 
 int StatusStrip::fillModelMenu()
@@ -1025,6 +1052,10 @@ int StatusStrip::fillModelMenu()
         return 0;
 
     const bool live = menu->isVisible();
+    const int localScroll =
+        live && m_localColumn.body ? m_localColumn.body->verticalScrollBar()->value() : 0;
+    const int cloudScroll =
+        live && m_cloudColumn.body ? m_cloudColumn.body->verticalScrollBar()->value() : 0;
 
     const QList<QAction *> previous = group->actions();
     for (QAction *action : previous) {
@@ -1098,23 +1129,49 @@ int StatusStrip::fillModelMenu()
         columnLayout->setContentsMargins(0, theme->space1(), 0, theme->space1());
         columnLayout->setSpacing(theme->space3());
 
-        auto addColumn = [&](const QString &caption, const QList<Section> &columnSections) {
-            auto *column = new QWidget(columns);
-            column->setFocusPolicy(Qt::NoFocus);
-            auto *layout = new QVBoxLayout(column);
+        auto addColumn = [&](const QString &caption,
+                             const QList<Section> &columnSections) {
+            BodyColumn column;
+            column.widget = new QWidget(columns);
+            column.widget->setFocusPolicy(Qt::NoFocus);
+            auto *layout = new QVBoxLayout(column.widget);
             layout->setContentsMargins(0, 0, 0, 0);
             layout->setSpacing(0);
-            int width = 0;
-            const auto addHeading = [&](const QString &text, const QColor &colour,
-                                        QFont::Weight weight) {
-                auto *heading = menuHeading(column, text, colour, weight);
-                layout->addWidget(heading);
-                width = qMax(width, heading->sizeHint().width());
-            };
-            addHeading(caption, theme->dim(), QFont::Medium);
+
+            auto *heading = menuHeading(column.widget, caption, theme->dim(), QFont::Medium);
+            layout->addWidget(heading);
+            column.captionHeight = heading->sizeHint().height();
+            column.contentWidth = heading->sizeHint().width();
+
+            column.body = new QScrollArea(column.widget);
+            column.body->setFrameShape(QFrame::NoFrame);
+            column.body->setWidgetResizable(false);
+            column.body->setFocusPolicy(Qt::NoFocus);
+            column.body->viewport()->setFocusPolicy(Qt::NoFocus);
+            column.body->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+            column.body->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+            Chrome::styleScrollBar(column.body->verticalScrollBar());
+            QPalette palette = column.body->palette();
+            palette.setColor(QPalette::Base, theme->panel());
+            palette.setColor(QPalette::Window, theme->panel());
+            column.body->setPalette(palette);
+            column.body->setBackgroundRole(QPalette::Base);
+            column.body->viewport()->setAutoFillBackground(true);
+
+            auto *content = new QWidget;
+            content->setFocusPolicy(Qt::NoFocus);
+            column.content = content;
+            auto *contentLayout = new QVBoxLayout(content);
+            contentLayout->setContentsMargins(0, 0, 0, 0);
+            contentLayout->setSpacing(0);
+
             for (const Section &section : columnSections) {
-                if (columnSections.size() > 1 && !section.caption.isEmpty())
-                    addHeading(section.caption, theme->caption(), QFont::Normal);
+                if (columnSections.size() > 1 && !section.caption.isEmpty()) {
+                    auto *sub = menuHeading(content, section.caption, theme->caption(),
+                                            QFont::Normal);
+                    contentLayout->addWidget(sub);
+                    column.contentWidth = qMax(column.contentWidth, sub->sizeHint().width());
+                }
                 for (const QVariant &entry : section.choices) {
                     const QVariantMap choice = entry.toMap();
                     const QString value = choice.value(QStringLiteral("value")).toString();
@@ -1133,28 +1190,115 @@ int StatusStrip::fillModelMenu()
                         menu->close();
                         chooseModel(chosen);
                     });
-                    auto *row = new ChoiceRow(action, column);
-                    layout->addWidget(row);
-                    width = qMax(width, row->sizeHint().width());
+                    auto *row = new ChoiceRow(action, content);
+                    contentLayout->addWidget(row);
+                    column.contentWidth = qMax(column.contentWidth, row->sizeHint().width());
                     ++rows;
                 }
             }
-            layout->addStretch(1);
-            column->setFixedWidth(width);
-            columnLayout->addWidget(column);
+
+            column.body->setWidget(content);
+            column.contentHeight = contentLayout->sizeHint().height();
+            column.scrollBarWidth = column.body->verticalScrollBar()->sizeHint().width();
+            content->setFixedSize(column.contentWidth, column.contentHeight);
+            layout->addWidget(column.body);
+            return column;
         };
 
-        addColumn(QStringLiteral("Local"), local);
+        BodyColumn localColumn = addColumn(QStringLiteral("Local"), local);
+        columnLayout->addWidget(localColumn.widget, 0, Qt::AlignTop);
         columnLayout->addWidget(new HairlineDivider(columns));
-        addColumn(QStringLiteral("Cloud"), cloud);
-        columns->setFixedWidth(columnLayout->sizeHint().width());
+        BodyColumn cloudColumn = addColumn(QStringLiteral("Cloud"), cloud);
+        columnLayout->addWidget(cloudColumn.widget, 0, Qt::AlignTop);
 
         auto *widgetAction = new QWidgetAction(menu);
         widgetAction->setDefaultWidget(columns);
         menu->addAction(widgetAction);
 
-        if (menu->sizeHint().width() <= availablePopupWidth(m_modelAnchor)) {
+        auto menuHint = [&]() {
+            menu->removeAction(widgetAction);
+            menu->addAction(widgetAction);
+            return menu->sizeHint();
+        };
+
+        const QSize natural = menuHint();
+        const int chrome = qMax(0, natural.height() - columns->sizeHint().height());
+        const Chrome::MenuRoom room = Chrome::popupMenuRoom(m_modelAnchor, natural.height());
+        const int safeRoom = qMax(0, room.room - theme->space3());
+        const int columnCap = qMax(0, safeRoom - chrome - 2 * theme->space1());
+
+        auto fitColumn = [&](BodyColumn *column) {
+            column->bodyHeight = qMin(column->contentHeight,
+                                      qMax(0, columnCap - column->captionHeight));
+            column->scrolls = column->contentHeight > column->bodyHeight;
+            column->body->setVerticalScrollBarPolicy(
+                column->scrolls ? Qt::ScrollBarAlwaysOn : Qt::ScrollBarAlwaysOff);
+            column->body->setFixedHeight(column->bodyHeight);
+            column->content->setFixedSize(column->contentWidth, column->contentHeight);
+            column->widget->setFixedWidth(column->contentWidth
+                                          + (column->scrolls ? column->scrollBarWidth : 0));
+            QScrollBar *bar = column->body->verticalScrollBar();
+            bar->setSingleStep(qMax(1, choiceRowHeight()));
+            bar->setPageStep(qMax(1, column->bodyHeight));
+            bar->setRange(0, column->contentHeight - column->bodyHeight);
+        };
+
+        fitColumn(&localColumn);
+        fitColumn(&cloudColumn);
+        columns->setFixedWidth(columnLayout->sizeHint().width());
+
+        QSize finalHint = menuHint();
+        for (int pass = 0; pass < 3 && finalHint.height() > room.room; ++pass) {
+            BodyColumn *tallest = &localColumn;
+            const int localHeight = localColumn.captionHeight + localColumn.body->height();
+            const int cloudHeight = cloudColumn.captionHeight + cloudColumn.body->height();
+            if (cloudHeight > localHeight)
+                tallest = &cloudColumn;
+            const int excess = finalHint.height() - room.room;
+            const int body = qMax(0, tallest->body->height() - excess);
+            if (body == tallest->body->height())
+                break;
+            tallest->bodyHeight = body;
+            tallest->scrolls = tallest->contentHeight > body;
+            tallest->body->setVerticalScrollBarPolicy(
+                tallest->scrolls ? Qt::ScrollBarAlwaysOn : Qt::ScrollBarAlwaysOff);
+            tallest->body->setFixedHeight(body);
+            tallest->body->verticalScrollBar()->setRange(0, tallest->contentHeight - body);
+            tallest->widget->setFixedWidth(tallest->contentWidth
+                                           + (tallest->scrolls
+                                                  ? tallest->scrollBarWidth : 0));
+            columns->setFixedWidth(columnLayout->sizeHint().width());
+            finalHint = menuHint();
+        }
+
+        localColumn.body->verticalScrollBar()->setValue(
+            live && localColumn.scrolls ? localScroll : 0);
+        cloudColumn.body->verticalScrollBar()->setValue(
+            live && cloudColumn.scrolls ? cloudScroll : 0);
+
+        if (finalHint.width() <= availablePopupWidth(m_modelAnchor)) {
             built = true;
+            m_modelColumns = columns;
+            m_localColumn = localColumn;
+            m_cloudColumn = cloudColumn;
+            m_modelChrome = chrome;
+            columns->installEventFilter(this);
+            localColumn.widget->installEventFilter(this);
+            cloudColumn.widget->installEventFilter(this);
+            localColumn.body->viewport()->installEventFilter(this);
+            cloudColumn.body->viewport()->installEventFilter(this);
+            if (!live) {
+                qInfo().nospace()
+                    << "status menu: model room side="
+                    << (room.aboveAnchor ? "above" : "below")
+                    << " below=" << room.below << " above=" << room.above
+                    << " room=" << room.room << " natural=" << natural.height()
+                    << " menu=" << finalHint.width() << "x" << finalHint.height()
+                    << " body=" << localColumn.bodyHeight << "/" << cloudColumn.bodyHeight
+                    << " content=" << localColumn.contentHeight << "/"
+                    << cloudColumn.contentHeight
+                    << " scroll=" << localColumn.scrolls << "/" << cloudColumn.scrolls;
+            }
         } else {
             for (QAction *action : group->actions()) {
                 menu->removeAction(action);
@@ -1162,6 +1306,9 @@ int StatusStrip::fillModelMenu()
                 delete action;
             }
             menu->clear();
+            m_modelColumns = nullptr;
+            m_localColumn = BodyColumn();
+            m_cloudColumn = BodyColumn();
             rows = 0;
         }
     }
@@ -1185,14 +1332,173 @@ int StatusStrip::fillModelMenu()
         }
         if (rows == 0)
             Chrome::addEmptyRow(menu, QStringLiteral("No model catalog on this transport"));
+        m_modelColumns = nullptr;
+        m_localColumn = BodyColumn();
+        m_cloudColumn = BodyColumn();
     }
 
     if (live) {
-        menu->adjustSize();
+        QPointer<StatusStrip> self(this);
+        QTimer::singleShot(0, menu, [self, menu]() {
+            if (self.isNull() || !menu->isVisible() || self->m_modelMenu != menu)
+                return;
+            self->fitModelBodies();
+        });
         qInfo().nospace() << "status menu: model filled while open (" << rows
                           << " choices)";
     }
     return rows;
+}
+
+void StatusStrip::fitModelBodies()
+{
+    QMenu *menu = m_modelMenu.data();
+    QWidget *columns = m_modelColumns.data();
+    if (menu == nullptr || columns == nullptr || !menu->isVisible())
+        return;
+
+    Theme *theme = Theme::instance();
+    const int menuHeight = menu->height();
+    if (menuHeight <= 0)
+        return;
+
+    const int chrome = m_modelChrome;
+    const int inner = qMax(0, menuHeight - chrome);
+
+    const int previousColumnsWidth = columns->width();
+    BodyColumn *fitted[] = {&m_localColumn, &m_cloudColumn};
+    int tallest = 0;
+    for (BodyColumn *column : fitted) {
+        if (column->widget.isNull() || column->content.isNull() || column->body.isNull())
+            continue;
+        const int cap = qMax(0, inner - 2 * theme->space1() - column->captionHeight);
+        column->bodyHeight = qMin(column->contentHeight, cap);
+        column->scrolls = column->contentHeight > column->bodyHeight;
+        column->body->setVerticalScrollBarPolicy(column->scrolls ? Qt::ScrollBarAlwaysOn
+                                                                 : Qt::ScrollBarAlwaysOff);
+        column->body->setFixedHeight(column->bodyHeight);
+        column->content->setFixedSize(column->contentWidth, column->contentHeight);
+        column->widget->setFixedWidth(column->contentWidth
+                                      + (column->scrolls ? column->scrollBarWidth : 0));
+        QScrollBar *bar = column->body->verticalScrollBar();
+        bar->setSingleStep(qMax(1, choiceRowHeight()));
+        bar->setPageStep(qMax(1, column->bodyHeight));
+        bar->setRange(0, qMax(0, column->contentHeight - column->bodyHeight));
+        tallest = qMax(tallest, column->captionHeight + column->bodyHeight
+                                    + 2 * theme->space1());
+    }
+
+    if (columns->layout() != nullptr) {
+        columns->layout()->activate();
+        const int columnsWidth = columns->layout()->sizeHint().width();
+        if (columnsWidth > 0) {
+            columns->setFixedWidth(columnsWidth);
+            const int wantedWidth = menu->width() + columnsWidth - previousColumnsWidth;
+            QScreen *screen = QGuiApplication::screenAt(menu->mapToGlobal(QPoint(0, 0)));
+            if (screen == nullptr)
+                screen = QGuiApplication::primaryScreen();
+            const QRect available = screen != nullptr ? screen->availableGeometry() : QRect();
+            if (wantedWidth > menu->width() && !available.isNull()
+                && menu->x() + wantedWidth - 1 <= available.right()) {
+                menu->resize(wantedWidth, menu->height());
+            }
+        }
+    }
+
+    const int target = chrome + tallest;
+    if (tallest > 0 && target > 0 && target < menu->height())
+        menu->resize(menu->width(), target);
+
+    const int finalInner = qMax(0, menu->height() - chrome);
+    for (BodyColumn *column : fitted) {
+        if (column->body.isNull())
+            continue;
+        if (column->body->height() > finalInner) {
+            qWarning().nospace() << "status menu: model body exceeds menu body="
+                                 << column->body->height() << " menu=" << menu->height()
+                                 << " chrome=" << chrome;
+        }
+    }
+
+    QScreen *screen = QGuiApplication::screenAt(menu->mapToGlobal(QPoint(0, 0)));
+    if (screen == nullptr)
+        screen = QGuiApplication::primaryScreen();
+    auto describe = [](const BodyColumn &column) {
+        if (column.body.isNull())
+            return QStringLiteral("body=-");
+        const QScrollBar *bar = column.body->verticalScrollBar();
+        return QStringLiteral("body=%1x%2 viewport=%3 max=%4 vis=%5")
+            .arg(column.body->width())
+            .arg(column.body->height())
+            .arg(column.body->viewport()->height())
+            .arg(bar->maximum())
+            .arg(bar->isVisible() ? 1 : 0);
+    };
+    qInfo().nospace() << "status menu: model shown menu=" << menu->geometry()
+                      << " menuH=" << menu->height() << " chrome=" << chrome
+                      << " screen="
+                      << (screen != nullptr ? screen->availableGeometry() : QRect())
+                      << " local[" << describe(m_localColumn) << "] cloud["
+                      << describe(m_cloudColumn) << "]";
+}
+
+bool StatusStrip::eventFilter(QObject *watched, QEvent *event)
+{
+    if (event->type() != QEvent::Wheel || m_modelMenu == nullptr
+        || !m_modelMenu->isVisible())
+        return QWidget::eventFilter(watched, event);
+
+    auto *wheel = static_cast<QWheelEvent *>(event);
+    const QPoint global = wheel->globalPosition().toPoint();
+
+    QScrollArea *bodies[] = {m_localColumn.body.data(), m_cloudColumn.body.data()};
+    QScrollArea *target = nullptr;
+    for (QScrollArea *body : bodies) {
+        if (body == nullptr || !body->isVisible())
+            continue;
+        QWidget *column = body->parentWidget();
+        if (column != nullptr && column->isVisible()
+            && column->rect().contains(column->mapFromGlobal(global))) {
+            target = body;
+            break;
+        }
+    }
+    if (target == nullptr && m_modelMenu->rect().contains(
+                                 m_modelMenu->mapFromGlobal(global))) {
+        QWidget *local = m_localColumn.body != nullptr
+                             ? m_localColumn.body->parentWidget() : nullptr;
+        QWidget *cloud = m_cloudColumn.body != nullptr
+                             ? m_cloudColumn.body->parentWidget() : nullptr;
+        if (local != nullptr && cloud != nullptr) {
+            const QRect localRect(local->mapToGlobal(QPoint(0, 0)), local->size());
+            const QRect cloudRect(cloud->mapToGlobal(QPoint(0, 0)), cloud->size());
+            target = qAbs(global.x() - localRect.center().x())
+                             <= qAbs(global.x() - cloudRect.center().x())
+                         ? m_localColumn.body.data()
+                         : m_cloudColumn.body.data();
+        } else {
+            target = m_localColumn.body != nullptr ? m_localColumn.body.data()
+                                                   : m_cloudColumn.body.data();
+        }
+    }
+    if (target == nullptr)
+        return QWidget::eventFilter(watched, event);
+
+    QScrollBar *bar = target->verticalScrollBar();
+    if (bar == nullptr || bar->maximum() <= 0)
+        return QWidget::eventFilter(watched, event);
+
+    const int angle = wheel->angleDelta().y();
+    const int pixels = wheel->pixelDelta().y();
+    if (angle == 0 && pixels == 0)
+        return QWidget::eventFilter(watched, event);
+
+    const int step = qMax(1, bar->singleStep());
+    int delta = pixels != 0 ? pixels : qRound(angle / 120.0 * step);
+    if (delta == 0)
+        delta = angle > 0 ? step : -step;
+    bar->setValue(bar->value() - delta);
+    return true;
 }
 
 void StatusStrip::chooseModel(const QString &value)

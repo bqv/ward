@@ -2,6 +2,7 @@
 
 #include <QPointer>
 #include <QRect>
+#include <QScrollArea>
 #include <QString>
 #include <QVariantMap>
 #include <QWidget>
@@ -9,6 +10,7 @@
 class ClientFacade;
 class QActionGroup;
 class QMenu;
+class QScrollArea;
 
 /// The conversation's bar, 24 px: parent seat · status · access chip · session id,
 /// then model · effort · context · jobs.
@@ -44,6 +46,7 @@ public:
 
 protected:
     void paintEvent(QPaintEvent *event) override;
+    bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
     class PlainCell;
@@ -51,6 +54,19 @@ private:
     class ChipCell;
     class SessionIdCell;
     class ContextCell;
+
+    struct BodyColumn
+    {
+        QPointer<QWidget> widget;
+        QPointer<QWidget> content;
+        QPointer<QScrollArea> body;
+        int contentWidth = 0;
+        int contentHeight = 0;
+        int captionHeight = 0;
+        int scrollBarWidth = 0;
+        int bodyHeight = 0;
+        bool scrolls = false;
+    };
 
     /// Recompute every cell from the facade. Called on construction and from each
     /// transport fact the strip draws. Eight short strings on one 24 px row: a
@@ -76,6 +92,7 @@ private:
     void openEffortMenu();
     void openAccessMenu();
     int fillModelMenu();
+    void fitModelBodies();
     int fillAccessMenu();
     void chooseModel(const QString &value);
 
@@ -111,6 +128,10 @@ private:
     ChipCell *m_jobs;
     QPointer<QMenu> m_modelMenu;
     QPointer<QActionGroup> m_modelGroup;
+    QPointer<QWidget> m_modelColumns;
+    BodyColumn m_localColumn;
+    BodyColumn m_cloudColumn;
+    int m_modelChrome = 0;
     QRect m_modelAnchor;
     QString m_modelConfigId;
     QPointer<QMenu> m_accessMenu;

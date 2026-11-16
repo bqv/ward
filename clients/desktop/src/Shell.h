@@ -212,6 +212,10 @@ private:
     void openRailOverflowMenu();
     void openRailRowMenu(const QRect &globalRow, const QString &sessionId,
                          const QString &storedTitle, bool pinned, bool archived);
+    void openRailGroupMenu(const QRect &globalRect, const QString &workspaceId,
+                           const QString &workspaceTitle);
+    void renameRailWorkspace(const QString &workspaceId, const QString &workspaceTitle);
+    void deleteRailWorkspace(const QString &workspaceId, const QString &workspaceTitle);
     /// The rail's own actions, each forwarded to the transport by name because
     /// the facade deliberately carries only the chrome's subset (plan §3.3).
     void renameRailSession(const QString &sessionId, const QString &storedTitle);

@@ -120,6 +120,7 @@ public:
         /// A header's or cap row's section key, and a session's Workspace id —
         /// "" is a real section (Ungrouped) and a real answer (:982-984).
         QString groupKey;
+        QString workspaceId;
         /// A cap row's owner when it is a parent's: the parent's session id
         /// (:1584). Empty for a section's cap row.
         QString parentKey;

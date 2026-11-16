@@ -1000,7 +1000,7 @@ SessionRail::SessionRail(ClientFacade *facade, const QString &iconDir, QWidget *
             requestRowMenu(index.row());
     });
     connect(m_list->verticalScrollBar(), &QScrollBar::valueChanged, this, [this]() {
-        if (m_menuSessionId.isEmpty())
+        if (m_menuSessionId.isEmpty() && m_menuRow < 0)
             return;
         m_menuSessionId.clear();
         m_menuRow = -1;
@@ -1080,6 +1080,16 @@ QWidget *SessionRail::overflowAnchor() const
 
 QRect SessionRail::rowGlobalRect(const QString &sessionId) const
 {
+    return globalRectForKey(QStringLiteral("s:") + sessionId);
+}
+
+QRect SessionRail::groupGlobalRect(const QString &workspaceId) const
+{
+    return globalRectForKey(QStringLiteral("h:") + workspaceId);
+}
+
+QRect SessionRail::globalRectForKey(const QString &key) const
+{
     // A row exists as a RECTANGLE only while the 240 px tree is up. At 34 px no
     // row is drawn, so there is nothing to anchor a menu to — an invalid rect is
     // the honest answer and the shell refuses to open on it, rather than a menu
@@ -1088,7 +1098,7 @@ QRect SessionRail::rowGlobalRect(const QString &sessionId) const
         || m_list == nullptr || !m_list->isVisible()) {
         return QRect();
     }
-    const int index = indexForKey(QStringLiteral("s:") + sessionId);
+    const int index = indexForKey(key);
     if (index < 0)
         return QRect();
     const QRect local = m_list->visualRect(m_rowsModel->index(index, 0));
@@ -1717,7 +1727,24 @@ void SessionRail::requestRowMenu(int index)
         return;
     }
     const SessionRailModel::Row *row = rowAt(index);
-    if (row == nullptr || row->kind != SessionRailModel::RowKind::Session)
+    if (row == nullptr)
+        return;
+    if (row->kind == SessionRailModel::RowKind::GroupHeader) {
+        if (!row->workspace || row->workspaceId.isEmpty()) {
+            qInfo().nospace() << "session rail: no group menu for \"" << row->title
+                              << "\"; it is not a workspace";
+            return;
+        }
+        m_menuRow = index;
+        m_menuSessionId.clear();
+        m_list->viewport()->update();
+        emit groupMenuRequested(groupGlobalRect(row->workspaceId), row->workspaceId,
+                                row->title);
+        qInfo().nospace() << "session rail: group menu open for workspace "
+                          << row->workspaceId << " (\"" << row->title << "\")";
+        return;
+    }
+    if (row->kind != SessionRailModel::RowKind::Session)
         return;
     m_menuRow = index;
     m_menuSessionId = row->sessionId;

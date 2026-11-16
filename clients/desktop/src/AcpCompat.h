@@ -234,6 +234,8 @@ public:
     Q_INVOKABLE void browseDirectory(const QString &path = QString());
     Q_INVOKABLE void createDirectory(const QString &name);
     Q_INVOKABLE void addWorkspaceAt(const QString &path);
+    Q_INVOKABLE void renameWorkspace(const QString &workspaceId, const QString &title);
+    Q_INVOKABLE void deleteWorkspace(const QString &workspaceId);
     Q_INVOKABLE void refreshSessions() {}
     Q_INVOKABLE void followSession(const QString &) {}
     Q_INVOKABLE void followSubagent(const QString &, const QString &, const QString & = QString()) {}
