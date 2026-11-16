@@ -696,6 +696,28 @@ int main(void) {
   assert(big_event != NULL);
   wd_free(big_event);
 
+  cbor_item_t *grep_ack = NULL;
+  cbor_item_t *grep_prompt = wd_map(2);
+  wd_put(grep_prompt, "id", wd_text(session));
+  wd_put(grep_prompt, "text", wd_text("/grep 0123456789"));
+  assert(request(&a, a.next_id++, "session.prompt", grep_prompt, &grep_ack, NULL) == 0);
+  wd_free(grep_ack);
+  cbor_item_t *grep_event = wait_event(&a, "tool.result", NULL);
+  assert(grep_event != NULL);
+  bool grep_truncated = false;
+  assert(wd_bool_of(wd_get(grep_event, "truncated"), &grep_truncated));
+  assert(grep_truncated);
+  char *grep_spill = wd_text_copy(wd_get(grep_event, "spill"));
+  assert(grep_spill != NULL);
+  struct stat grep_stat;
+  assert(stat(grep_spill, &grep_stat) == 0);
+  assert(grep_stat.st_size > 256);
+  free(grep_spill);
+  wd_free(grep_event);
+  grep_event = wait_event(&a, "turn.end", NULL);
+  assert(grep_event != NULL);
+  wd_free(grep_event);
+
   cbor_item_t *stats_one = NULL;
   cbor_item_t *stats_params = wd_map(1);
   wd_put(stats_params, "id", wd_text(session));

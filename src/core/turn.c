@@ -450,10 +450,42 @@ static uint8_t *bounded_text(const uint8_t *data, size_t len,
   return (uint8_t *)text;
 }
 
+static int status_reply(wd_turn *turn, const char *label, int status,
+                        const uint8_t *data, size_t len, const char *empty,
+                        uint8_t **out, size_t *out_len) {
+  bool over = len > WD_TOOL_SHOWN;
+  char path[PATH_MAX];
+  bool spilled =
+      over && spill_output(turn, label, data, len, path, sizeof(path)) == 0;
+  cbor_item_t *reply = wd_map(over ? (spilled ? 6 : 5) : 3);
+  wd_put(reply, "ok", cbor_build_bool(status == 0));
+  wd_put(reply, "status", wd_uint((uint64_t)status));
+  if (over) {
+    size_t shown_len = 0;
+    uint8_t *shown = bounded_text(data, len, spilled ? path : NULL, &shown_len);
+    if (shown == NULL)
+      return tool_fail("the output is too large to keep", out, out_len);
+    wd_put(reply, "text", wd_text_len((const char *)shown, shown_len));
+    free(shown);
+    wd_put(reply, "truncated", cbor_build_bool(true));
+    if (spilled) {
+      wd_put(reply, "spill", wd_text(path));
+      wd_put(reply, "spill_size", wd_uint(len));
+    } else {
+      wd_put(reply, "omitted", wd_uint(len - WD_TOOL_SHOWN));
+    }
+  } else if (len > 0) {
+    wd_put(reply, "text", wd_text_len((const char *)data, len));
+  } else {
+    wd_put(reply, "text", wd_text(empty));
+  }
+  return tool_reply(reply, out, out_len);
+}
+
 static int tool_ok_bounded(wd_turn *turn, const char *label,
                            const uint8_t *data, size_t len, uint8_t **out,
                            size_t *out_len) {
-  if (len <= WD_TOOL_MAX) return tool_ok_text(data, len, out, out_len);
+  if (len <= WD_TOOL_SHOWN) return tool_ok_text(data, len, out, out_len);
   char path[PATH_MAX];
   bool spilled =
       spill_output(turn, label, data, len, path, sizeof(path)) == 0;
@@ -734,21 +766,16 @@ static int recall_search_run(wd_turn *turn, const uint8_t *in, size_t in_len,
   argv[argc] = NULL;
   wd_proc_result result;
   char *err = NULL;
-  int rc = wd_proc_run(argv, turn->root, 20000, WD_TOOL_MAX, &result, &err);
+  int rc = wd_proc_run(argv, turn->root, 20000, WD_SPILL_MAX, &result, &err);
   free(query);
   free(err);
   if (rc != 0)
     return tool_fail("recall.search: cannot run dsh-recall", out, out_len);
   int status = WIFEXITED(result.status) ? WEXITSTATUS(result.status) : 127;
-  cbor_item_t *reply = wd_map(3);
-  wd_put(reply, "ok", cbor_build_bool(status == 0));
-  wd_put(reply, "status", wd_uint((uint64_t)status));
-  if (result.len > 0)
-    wd_put(reply, "text", wd_text_len((const char *)result.out, result.len));
-  else
-    wd_put(reply, "text", wd_text(""));
+  int made = status_reply(turn, "recall", status, result.out, result.len,
+                          "", out, out_len);
   wd_proc_result_free(&result);
-  return tool_reply(reply, out, out_len);
+  return made;
 }
 
 static const char *mcp_binary(void) {
@@ -790,7 +817,7 @@ static int mcp_call_run(wd_turn *turn, const uint8_t *in, size_t in_len,
   const char *argv[] = {binary, NULL};
   wd_proc_result result;
   char *err = NULL;
-  int rc = wd_proc_run_input(argv, turn->root, input, len, 20000, WD_TOOL_MAX,
+  int rc = wd_proc_run_input(argv, turn->root, input, len, 20000, WD_SPILL_MAX,
                              &result, &err);
   free(input);
   free(line);
@@ -798,15 +825,10 @@ static int mcp_call_run(wd_turn *turn, const uint8_t *in, size_t in_len,
   if (rc != 0) return tool_fail("mcp.call: cannot start the server", out,
                                 out_len);
   int status = WIFEXITED(result.status) ? WEXITSTATUS(result.status) : 127;
-  cbor_item_t *reply = wd_map(3);
-  wd_put(reply, "ok", cbor_build_bool(status == 0));
-  wd_put(reply, "status", wd_uint((uint64_t)status));
-  if (result.len > 0)
-    wd_put(reply, "text", wd_text_len((const char *)result.out, result.len));
-  else
-    wd_put(reply, "text", wd_text(""));
+  int made = status_reply(turn, "mcp", status, result.out, result.len,
+                          "", out, out_len);
   wd_proc_result_free(&result);
-  return tool_reply(reply, out, out_len);
+  return made;
 }
 
 static const char *search_binary(void) {
@@ -848,20 +870,15 @@ static int web_search_run(wd_turn *turn, const uint8_t *in, size_t in_len,
   argv[argc] = NULL;
   wd_proc_result result;
   char *err = NULL;
-  int rc = wd_proc_run(argv, turn->root, 20000, WD_TOOL_MAX, &result, &err);
+  int rc = wd_proc_run(argv, turn->root, 20000, WD_SPILL_MAX, &result, &err);
   free(query);
   free(err);
   if (rc != 0) return tool_fail("web.search: cannot run srchdsh", out, out_len);
   int status = WIFEXITED(result.status) ? WEXITSTATUS(result.status) : 127;
-  cbor_item_t *reply = wd_map(3);
-  wd_put(reply, "ok", cbor_build_bool(status == 0));
-  wd_put(reply, "status", wd_uint((uint64_t)status));
-  if (result.len > 0)
-    wd_put(reply, "text", wd_text_len((const char *)result.out, result.len));
-  else
-    wd_put(reply, "text", wd_text(""));
+  int made = status_reply(turn, "web", status, result.out, result.len,
+                          "", out, out_len);
   wd_proc_result_free(&result);
-  return tool_reply(reply, out, out_len);
+  return made;
 }
 
 static int python_run_exec(wd_turn *turn, const uint8_t *in, size_t in_len,
@@ -885,20 +902,15 @@ static int python_run_exec(wd_turn *turn, const uint8_t *in, size_t in_len,
   argv[argc] = NULL;
   wd_proc_result result;
   char *err = NULL;
-  int rc = wd_proc_run(argv, turn->root, 15000, WD_TOOL_MAX, &result, &err);
+  int rc = wd_proc_run(argv, turn->root, 15000, WD_SPILL_MAX, &result, &err);
   free(program);
   free(err);
   if (rc != 0) return tool_fail("python.run: cannot start python", out, out_len);
   int status = WIFEXITED(result.status) ? WEXITSTATUS(result.status) : 127;
-  cbor_item_t *reply = wd_map(3);
-  wd_put(reply, "ok", cbor_build_bool(status == 0));
-  wd_put(reply, "status", wd_uint((uint64_t)status));
-  if (result.len > 0)
-    wd_put(reply, "text", wd_text_len((const char *)result.out, result.len));
-  else
-    wd_put(reply, "text", wd_text(""));
+  int made = status_reply(turn, "python", status, result.out, result.len, "",
+                          out, out_len);
   wd_proc_result_free(&result);
-  return tool_reply(reply, out, out_len);
+  return made;
 }
 
 static wd_instance *python_guest(wd_turn *turn, char **err) {
@@ -942,10 +954,16 @@ static int python_run(wd_turn *turn, const uint8_t *in, size_t in_len,
     return tool_fail("python.run: the python guest returned invalid cbor", out,
                      out_len);
   }
+  char *text = wd_text_copy(wd_get(answer, "text"));
+  uint64_t status = 0;
+  wd_uint_of(wd_get(answer, "status"), &status);
   wd_free(answer);
-  *out = raw;
-  *out_len = raw_len;
-  return 0;
+  free(raw);
+  int made = status_reply(turn, "python", (int)status,
+                          (const uint8_t *)(text != NULL ? text : ""),
+                          text != NULL ? strlen(text) : 0, "", out, out_len);
+  free(text);
+  return made;
 }
 
 static int grep_run(wd_turn *turn, const uint8_t *in, size_t in_len,
@@ -986,7 +1004,7 @@ static int grep_run(wd_turn *turn, const uint8_t *in, size_t in_len,
   argv[argc] = NULL;
   wd_proc_result result;
   char *err = NULL;
-  int rc = wd_proc_run(argv, turn->root, 10000, WD_TOOL_MAX, &result, &err);
+  int rc = wd_proc_run(argv, turn->root, 10000, WD_SPILL_MAX, &result, &err);
   free(pattern);
   free(path);
   if (rc != 0) {
@@ -997,15 +1015,10 @@ static int grep_run(wd_turn *turn, const uint8_t *in, size_t in_len,
     return tool_fail(message, out, out_len);
   }
   int status = WIFEXITED(result.status) ? WEXITSTATUS(result.status) : 127;
-  cbor_item_t *reply = wd_map(3);
-  wd_put(reply, "ok", cbor_build_bool(status == 0));
-  wd_put(reply, "status", wd_uint((uint64_t)status));
-  if (result.len > 0)
-    wd_put(reply, "text", wd_text_len((const char *)result.out, result.len));
-  else
-    wd_put(reply, "text", wd_text(status == 1 ? "no matches" : ""));
+  int made = status_reply(turn, "grep", status, result.out, result.len,
+                          "no matches", out, out_len);
   wd_proc_result_free(&result);
-  return tool_reply(reply, out, out_len);
+  return made;
 }
 
 static int write_atomic(const char *path, const void *data, size_t len);
@@ -1116,7 +1129,7 @@ static int edit_run(wd_turn *turn, const uint8_t *in, size_t in_len,
 
 static int exec_reply(wd_turn *turn, wd_proc_result *result, cbor_item_t **out) {
   int status = WIFEXITED(result->status) ? WEXITSTATUS(result->status) : 127;
-  const bool over = result->len > WD_TOOL_MAX;
+  const bool over = result->len > WD_TOOL_SHOWN;
   char path[PATH_MAX];
   bool spilled = over && spill_output(turn, "exec", result->out, result->len,
                                       path, sizeof(path)) == 0;
