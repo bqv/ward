@@ -3,9 +3,13 @@
 A coding agent harness with a small native core and a reloadable WebAssembly logic layer.
 Feature parity with DSH, minus the web UI, with a binary protocol instead of HTTP.
 
-Status: M0 implemented — daemon, `AF_UNIX` transport, handshake, `session.create/list/get/resume`,
-durable events and replay, and a test client. The wire contract is frozen in `docs/protocol.md`;
-M1 (the Wasmtime host) is next.
+Status: M0 to M5 are implemented and gated; M6 is in progress. The daemon serves sessions over
+UDS, TCP and QUIC; the desktop client (`clients/desktop`, `ward-gui`, the dsh-native Qt Widgets
+shell) and the Android client (`clients/android`) speak the protocol. The parity audit
+(`docs/parity.md`, `docs/audit-dsh.md`) and the reliability programme (`docs/reliability.md`) are
+open: atomic writes, tool-output spill, read-before-write and provider retry are closed, with
+per-tool timeout outcomes, the compaction pruner, checkpoint policy, the repeat-tool reminder and
+secret masking still to come.
 
 ## Thesis
 
@@ -453,6 +457,28 @@ and the worker does not fork until a resolution is recorded.
 | module reload and migration | core | M5 |
 | native client, then Android | clients | M6 |
 
+### Reliability beyond the parity rows
+
+The table maps features; `docs/reliability.md` tracks the behaviours that make DSH reliable rather
+than merely complete, with the DSH package that evidences each and an acceptance test. Closed so
+far: atomic writes (`fs.write`/`fs.edit` write a temp file, fsync, preserve the mode, rename and
+fsync the directory), spill of any tool result past the 256-byte visible window to
+`<session>/spill/` with the path in the model's text and on the `tool.result` event,
+read-before-write (a durable `session.observed` set refuses to overwrite an existing file the
+session never read), and provider retry for 429/5xx (300, 600 then 1,200 ms, with a `turn.retry`
+event). Open: per-tool timeout outcomes, the compaction tool-result pruner, checkpoint policy, the
+repeat-tool reminder and secret masking.
+
+## Clients
+
+- `clients/desktop` — `ward-gui`, the dsh-native Qt Widgets shell rewired to ward's protocol,
+  with `ward-pair` and `ward-acp` beside it.
+- `clients/android` — the Compose client copied from dsh-android and rewired, with QUIC device
+  pairing from About.
+- `clients/native` — the small C client the gates drive.
+
+Their READMEs record what each surface maps to and what is deliberately not adopted.
+
 ## Deliberately out of scope
 
 - web UI, nginx/cookie chain
@@ -575,7 +601,7 @@ ward/
 ├── src/daemon/      socket, auth, subscriptions
 ├── src/cli/         command line, headless
 ├── modules/         first-party wasm guests, one directory per module
-├── clients/         test client, then dsh-native transport
+├── clients/         desktop (Qt), android, native test client
 ├── tests/           unit, golden transcripts, fuzz corpus
 └── docs/protocol.md
 ```
