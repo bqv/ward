@@ -370,6 +370,7 @@ public:
 
     /// Re-read the session list now.
     Q_INVOKABLE void refreshSessions();
+    Q_INVOKABLE void setEstatePolling(bool) {}
 
     // --- terminal ----------------------------------------------------------
     //

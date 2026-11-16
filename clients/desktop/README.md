@@ -101,6 +101,7 @@ The client speaks ward's method names and event kinds, not an adapter vocabulary
 | compact | `session.compact` |
 | goal | `goal.set`, `goal.clear` |
 | models | `model.list`, `session.set_model`; `provider` groups the Local/Cloud model popup; a model chosen on a new-session seat travels in `session.create {model}` |
+| estate | `estate.status` polled every 2 s while a window is shown; the `tenants[]`/`loads[]` document drives the load chip (loading, prefilling, generating, idle, failed) and its detail card |
 | terminal | `terminal.open/write/resize/close`, `terminal.output`, eof |
 | files | `session.file_read` (text), `session.file_read_blob` (CBOR bytes), `session.file_list` |
 | schedules | `schedule.list`, `schedule.delete` |

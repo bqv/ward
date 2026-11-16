@@ -16,9 +16,15 @@
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QImage>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonParseError>
+#include <QJsonValue>
 #include <QSettings>
 #include <QSocketNotifier>
 #include <QTimer>
+#include <QWindow>
 
 #include <arpa/inet.h>
 #include <cerrno>
@@ -260,6 +266,44 @@ static QString cachedRosterNotice(const QDateTime &savedAt)
         .arg(rosterSavedWord(savedAt), rosterAgeWord(savedAt));
 }
 
+static QString estateModelKey(const QString &name)
+{
+    QString key;
+    key.reserve(name.size());
+    for (const QChar character : name) {
+        if (character.isLetterOrNumber())
+            key.append(character.toLower());
+    }
+    return key;
+}
+
+static bool estateModelMatches(const QString &left, const QString &right)
+{
+    const QString a = estateModelKey(left);
+    const QString b = estateModelKey(right);
+    if (a.isEmpty() || b.isEmpty())
+        return false;
+    if (a.size() < 5 || b.size() < 5)
+        return a == b;
+    return a.startsWith(b) || b.startsWith(a);
+}
+
+static bool anyWindowShown()
+{
+    if (QGuiApplication::instance() == nullptr)
+        return false;
+    const QWindowList windows = QGuiApplication::allWindows();
+    for (const QWindow *window : windows) {
+        if (window == nullptr || !window->isVisible())
+            continue;
+        const QWindow::Visibility visibility = window->visibility();
+        if (visibility == QWindow::Minimized || visibility == QWindow::Hidden)
+            continue;
+        return true;
+    }
+    return false;
+}
+
 WardClient::WardClient(const QString &socketPath, QObject *parent)
     : QObject(parent)
     , m_socketPath(socketPath.isEmpty() ? defaultPath() : socketPath)
@@ -289,6 +333,12 @@ WardClient::WardClient(const QString &socketPath, QObject *parent)
     } else {
         qWarning() << "roster cache: ignored" << cacheDetail << RosterCache::path();
     }
+
+    m_estateTimer = new QTimer(this);
+    m_estateTimer->setInterval(2000);
+    connect(m_estateTimer, &QTimer::timeout, this, &WardClient::pollEstate);
+    m_estateTimer->start();
+
     connect(this, &WardClient::blobRead, this,
             [this](const QString &path, qint64 offset, const QByteArray &data,
                    const QString &error) {
@@ -333,6 +383,8 @@ void WardClient::fail(const QString &message)
     m_lastError = message;
     m_workspacePickInFlight = false;
     setDirectoryPickLoading(false);
+    m_estateInFlight = false;
+    setModelLoads({});
     emit lastErrorChanged();
     setState(Failed, message);
     if (m_notifier != nullptr) {
@@ -712,8 +764,10 @@ void WardClient::handleFrame(uint16_t type, uint64_t sub, uint64_t seq,
         QVariantMap error;
         if (!ok) {
             error = decoded.toMap();
-            m_lastError = error.value(QStringLiteral("message")).toString();
-            emit lastErrorChanged();
+            if (pending.method != QLatin1String("estate.status")) {
+                m_lastError = error.value(QStringLiteral("message")).toString();
+                emit lastErrorChanged();
+            }
         }
         wd_free(root);
         handleResponse(pending.method, ok, decoded, error);
@@ -747,6 +801,11 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
         const QString name = error.value(QStringLiteral("name")).toString();
         const QString message = error.value(QStringLiteral("message")).toString();
         const QString text = name.isEmpty() ? message : QStringLiteral("%1: %2").arg(name, message);
+        if (method == QLatin1String("estate.status")) {
+            m_estateInFlight = false;
+            noteEstateFailure(text);
+            return;
+        }
         m_lastError = text;
         emit lastErrorChanged();
         setState(Ready, text);
@@ -873,6 +932,9 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
             m_workspacePickInFlight = false;
             emit workspacePickerRequested();
         }
+    } else if (method == QLatin1String("estate.status")) {
+        m_estateInFlight = false;
+        applyEstateStatus(result.value(QStringLiteral("json")).toString());
     } else if (method == QLatin1String("session.create")) {
         const QVariantMap session = result.value(QStringLiteral("session")).toMap();
         applySession(session);
@@ -1095,6 +1157,7 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
                                        {QStringLiteral("label"), id},
                                        {QStringLiteral("provider"), provider},
                                        {QStringLiteral("group"), provider},
+                                       {QStringLiteral("model"), modelName},
                                        {QStringLiteral("description"), description}});
             if (first.isEmpty())
                 first = id;
@@ -1675,6 +1738,232 @@ void WardClient::showCachedRoster()
     emit railNotice(cachedRosterNotice(m_cachedRosterSavedAt), false);
     qInfo() << "roster cache: painted" << m_cachedRoster.size() << "row(s) before"
             << "the live list was read";
+}
+
+void WardClient::refreshEstate()
+{
+    pollEstate();
+}
+
+void WardClient::setEstatePolling(bool enabled)
+{
+    if (m_estatePollingWanted == enabled)
+        return;
+    m_estatePollingWanted = enabled;
+    if (enabled)
+        pollEstate();
+}
+
+void WardClient::pollEstate()
+{
+    if (m_state != Ready || m_estateInFlight || m_fd < 0
+            || !m_estatePollingWanted || !anyWindowShown())
+        return;
+    m_estateInFlight = true;
+    const int generation = ++m_estateGeneration;
+    QTimer::singleShot(3000, this, [this, generation]() {
+        if (generation != m_estateGeneration || !m_estateInFlight)
+            return;
+        m_estateInFlight = false;
+        noteEstateFailure(QStringLiteral("no answer"));
+    });
+    sendRequest(QStringLiteral("estate.status"));
+}
+
+void WardClient::setModelLoads(const QVariantList &loads)
+{
+    if (loads == m_modelLoads)
+        return;
+    m_modelLoads = loads;
+    emit modelLoadsChanged();
+}
+
+void WardClient::noteEstateFailure(const QString &why)
+{
+    ++m_estateFailedPolls;
+    if (!m_estateWarned) {
+        m_estateWarned = true;
+        qWarning().noquote() << "estate: cannot read the local status -" << why;
+    }
+    if (m_estateFailedPolls >= 3 && !m_modelLoads.isEmpty())
+        setModelLoads({});
+}
+
+void WardClient::applyEstateStatus(const QString &json)
+{
+    QJsonParseError error;
+    const QJsonDocument document = QJsonDocument::fromJson(json.toUtf8(), &error);
+    if (error.error != QJsonParseError::NoError || !document.isObject()) {
+        noteEstateFailure(QStringLiteral("the status answer is not JSON"));
+        return;
+    }
+    m_estateFailedPolls = 0;
+    if (m_estateWarned) {
+        m_estateWarned = false;
+        qInfo() << "estate: the local status answered again";
+    }
+
+    const QJsonObject root = document.object();
+    QList<QVariantMap> tenants;
+    for (const QJsonValue &value : root.value(QStringLiteral("tenants")).toArray()) {
+        const QJsonObject tenant = value.toObject();
+        const QString name = tenant.value(QStringLiteral("name")).toString();
+        if (name.isEmpty())
+            continue;
+        QString model = tenant.value(QStringLiteral("model")).toString();
+        if (model.isEmpty())
+            model = tenant.value(QStringLiteral("alias")).toString();
+        if (model.isEmpty())
+            model = name;
+        const QJsonObject activity = tenant.value(QStringLiteral("activity")).toObject();
+        const bool processing = activity.value(QStringLiteral("is_processing")).toBool();
+        const int inFlight = tenant.value(QStringLiteral("in_flight")).toInt();
+        QVariantMap facts;
+        facts.insert(QStringLiteral("tenant"), name);
+        facts.insert(QStringLiteral("model"), model);
+        facts.insert(QStringLiteral("state"),
+                     tenant.value(QStringLiteral("state")).toString());
+        facts.insert(QStringLiteral("kind"),
+                     tenant.value(QStringLiteral("kind")).toString());
+        facts.insert(QStringLiteral("device"),
+                     tenant.value(QStringLiteral("device")).toString());
+        facts.insert(QStringLiteral("group"),
+                     tenant.value(QStringLiteral("group")).toString());
+        facts.insert(QStringLiteral("policy"),
+                     tenant.value(QStringLiteral("policy")).toString());
+        facts.insert(QStringLiteral("vramMb"),
+                     tenant.value(QStringLiteral("vram_mb")).toInt());
+        facts.insert(QStringLiteral("nCtx"),
+                     qint64(tenant.value(QStringLiteral("n_ctx")).toDouble()));
+        facts.insert(QStringLiteral("nParams"),
+                     qint64(tenant.value(QStringLiteral("n_params")).toDouble()));
+        facts.insert(QStringLiteral("sizeBytes"),
+                     qint64(tenant.value(QStringLiteral("size_bytes")).toDouble()));
+        facts.insert(QStringLiteral("quant"),
+                     tenant.value(QStringLiteral("quant")).toString());
+        facts.insert(QStringLiteral("reloadS"),
+                     tenant.value(QStringLiteral("reload_s")).toDouble());
+        facts.insert(QStringLiteral("idle"),
+                     tenant.value(QStringLiteral("idle")).toString());
+        facts.insert(QStringLiteral("up"),
+                     tenant.value(QStringLiteral("up")).toBool());
+        facts.insert(QStringLiteral("booting"),
+                     tenant.value(QStringLiteral("booting")).toBool());
+        facts.insert(QStringLiteral("inFlight"), inFlight);
+        facts.insert(QStringLiteral("isProcessing"), processing);
+        facts.insert(QStringLiteral("active"), processing || inFlight > 0);
+        if (activity.contains(QStringLiteral("prefill_pct")))
+            facts.insert(QStringLiteral("prefillPct"),
+                         activity.value(QStringLiteral("prefill_pct")).toDouble());
+        if (activity.contains(QStringLiteral("kv_pct")))
+            facts.insert(QStringLiteral("kvPct"),
+                         activity.value(QStringLiteral("kv_pct")).toDouble());
+        if (activity.contains(QStringLiteral("prompt_tokens")))
+            facts.insert(QStringLiteral("promptTokens"),
+                         qint64(activity.value(QStringLiteral("prompt_tokens")).toDouble()));
+        if (activity.contains(QStringLiteral("prompt_processed")))
+            facts.insert(QStringLiteral("promptProcessed"),
+                         qint64(activity.value(QStringLiteral("prompt_processed")).toDouble()));
+        if (activity.contains(QStringLiteral("since_ms")))
+            facts.insert(QStringLiteral("sinceMs"),
+                         qint64(activity.value(QStringLiteral("since_ms")).toDouble()));
+        const QString lastError = tenant.value(QStringLiteral("last_error")).toString();
+        if (!lastError.isEmpty())
+            facts.insert(QStringLiteral("error"), lastError);
+        tenants.append(facts);
+    }
+
+    QVariantList loads;
+    for (const QJsonValue &value : root.value(QStringLiteral("loads")).toArray()) {
+        const QJsonObject object = value.toObject();
+        const QString tenant = object.value(QStringLiteral("tenant")).toString();
+        const QString model = object.value(QStringLiteral("model")).toString();
+        if (tenant.isEmpty() && model.isEmpty())
+            continue;
+        QVariantMap load;
+        load.insert(QStringLiteral("tenant"), tenant);
+        load.insert(QStringLiteral("model"), model);
+        load.insert(QStringLiteral("phase"),
+                    object.value(QStringLiteral("phase")).toString());
+        if (object.value(QStringLiteral("progress")).isDouble())
+            load.insert(QStringLiteral("progress"),
+                        object.value(QStringLiteral("progress")).toDouble());
+        const QString source = object.value(QStringLiteral("progress_source")).toString();
+        if (!source.isEmpty())
+            load.insert(QStringLiteral("progressSource"), source);
+        if (object.value(QStringLiteral("started_ms")).isDouble())
+            load.insert(QStringLiteral("startedMs"),
+                        qint64(object.value(QStringLiteral("started_ms")).toDouble()));
+        if (object.value(QStringLiteral("finished_ms")).isDouble())
+            load.insert(QStringLiteral("finishedMs"),
+                        qint64(object.value(QStringLiteral("finished_ms")).toDouble()));
+        const QString loadError = object.value(QStringLiteral("error")).toString();
+        if (!loadError.isEmpty())
+            load.insert(QStringLiteral("error"), loadError);
+        const QString line = object.value(QStringLiteral("line")).toString();
+        if (!line.isEmpty())
+            load.insert(QStringLiteral("line"), line);
+
+        for (const QVariantMap &facts : tenants) {
+            const QString factTenant = facts.value(QStringLiteral("tenant")).toString();
+            const QString factModel = facts.value(QStringLiteral("model")).toString();
+            const bool serves =
+                (!tenant.isEmpty()
+                 && (tenant == factTenant || tenant == factModel))
+                || (!model.isEmpty()
+                    && (estateModelMatches(model, factModel)
+                        || estateModelMatches(model, factTenant)));
+            if (!serves)
+                continue;
+            load.insert(QStringLiteral("state"), facts.value(QStringLiteral("state")));
+            load.insert(QStringLiteral("active"), facts.value(QStringLiteral("active")));
+            load.insert(QStringLiteral("inFlight"), facts.value(QStringLiteral("inFlight")));
+            load.insert(QStringLiteral("isProcessing"),
+                        facts.value(QStringLiteral("isProcessing")));
+            const QStringList copied{
+                QStringLiteral("kind"), QStringLiteral("device"), QStringLiteral("group"),
+                QStringLiteral("policy"), QStringLiteral("vramMb"), QStringLiteral("nCtx"),
+                QStringLiteral("nParams"), QStringLiteral("sizeBytes"), QStringLiteral("quant"),
+                QStringLiteral("reloadS"), QStringLiteral("idle"), QStringLiteral("prefillPct"),
+                QStringLiteral("kvPct"), QStringLiteral("promptTokens"),
+                QStringLiteral("promptProcessed"), QStringLiteral("sinceMs"),
+                QStringLiteral("error")};
+            for (const QString &key : copied) {
+                if (!load.contains(key) && facts.contains(key))
+                    load.insert(key, facts.value(key));
+            }
+            if (load.value(QStringLiteral("tenant")).toString().isEmpty())
+                load.insert(QStringLiteral("tenant"), factTenant);
+            if (load.value(QStringLiteral("model")).toString().isEmpty())
+                load.insert(QStringLiteral("model"), factModel);
+            break;
+        }
+        loads.append(load);
+    }
+
+    for (const QVariantMap &facts : tenants) {
+        const QString factTenant = facts.value(QStringLiteral("tenant")).toString();
+        const QString factModel = facts.value(QStringLiteral("model")).toString();
+        bool present = false;
+        for (const QVariant &entry : loads) {
+            const QVariantMap load = entry.toMap();
+            if (load.value(QStringLiteral("tenant")).toString() == factTenant
+                || (!load.value(QStringLiteral("model")).toString().isEmpty()
+                    && estateModelMatches(load.value(QStringLiteral("model")).toString(),
+                                          factModel))) {
+                present = true;
+                break;
+            }
+        }
+        if (present)
+            continue;
+        QVariantMap entry = facts;
+        entry.insert(QStringLiteral("phase"),
+                     facts.value(QStringLiteral("state")).toString());
+        loads.append(entry);
+    }
+
+    setModelLoads(loads);
 }
 
 void WardClient::rebuildWorkspaces()
@@ -2778,6 +3067,7 @@ QStringList WardClient::protocolMethods() const
             QStringLiteral("session.file_read"), QStringLiteral("session.file_read_blob"),
             QStringLiteral("session.file_list"),
             QStringLiteral("host.list"),
+            QStringLiteral("estate.status"),
             QStringLiteral("session.fork"),
             QStringLiteral("session.rename"),
             QStringLiteral("session.archive"), QStringLiteral("session.pin"),

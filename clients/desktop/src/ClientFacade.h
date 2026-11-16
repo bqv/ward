@@ -348,6 +348,9 @@ public:
     Q_PROPERTY(QString modelNotice READ modelNotice NOTIFY modelNoticeChanged)
     QString modelNotice() const { return readString(QStringLiteral("modelNotice")); }
 
+    Q_PROPERTY(QVariantList modelLoads READ modelLoads NOTIFY modelLoadsChanged)
+    QVariantList modelLoads() const { return readList(QStringLiteral("modelLoads")); }
+
     Q_PROPERTY(int contextUsed READ contextUsed NOTIFY contextChanged)
     int contextUsed() const { return readInt(QStringLiteral("contextUsed")); }
 
@@ -539,6 +542,8 @@ public:
     void addWorkspaceAt(const QString &path);
     void renameWorkspace(const QString &workspaceId, const QString &title);
     void deleteWorkspace(const QString &workspaceId);
+    void refreshEstate();
+    void setEstatePolling(bool enabled);
 
     void refreshScheduleTasks();
     void saveScheduleTask(const QString &id, const QString &title, const QString &prompt);
@@ -597,6 +602,7 @@ signals:
     void accessNoticeChanged();
     void configOptionsChanged();
     void modelNoticeChanged();
+    void modelLoadsChanged();
     void contextChanged();
     void contextSizeChanged();
     void jobsChanged();

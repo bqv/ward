@@ -58,6 +58,7 @@ const Binding kBindings[] = {
     {"accessNotice", "accessNoticeChanged", nullptr},
     {"configOptions", "configOptionsChanged", nullptr},
     {"modelNotice", "modelNoticeChanged", nullptr},
+    {"modelLoads", "modelLoadsChanged", nullptr},
     {"contextUsed", "contextChanged", nullptr},
     {"contextSize", "contextSizeChanged", nullptr},
     {"jobs", nullptr, "onJobsNotify"},
@@ -817,6 +818,16 @@ void ClientFacade::renameWorkspace(const QString &workspaceId, const QString &ti
 void ClientFacade::deleteWorkspace(const QString &workspaceId)
 {
     call("deleteWorkspace(QString)", QGenericReturnArgument(), stringArg(workspaceId));
+}
+
+void ClientFacade::refreshEstate()
+{
+    call("refreshEstate()");
+}
+
+void ClientFacade::setEstatePolling(bool enabled)
+{
+    call("setEstatePolling(bool)", QGenericReturnArgument(), boolArg(enabled));
 }
 
 bool ClientFacade::followParentSession()

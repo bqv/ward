@@ -139,6 +139,7 @@ public:
     /// missing property is a TypeError per binding rather than a fallback.
     Q_PROPERTY(QString accessNotice MEMBER m_accessNotice NOTIFY accessNoticeChanged)
     Q_PROPERTY(QString modelNotice MEMBER m_modelNotice NOTIFY modelNoticeChanged)
+    Q_PROPERTY(QVariantList modelLoads MEMBER m_modelLoads NOTIFY modelLoadsChanged)
     Q_PROPERTY(QString searchQuery MEMBER m_searchQuery NOTIFY searchQueryChanged)
     Q_PROPERTY(QString filePath MEMBER m_filePath NOTIFY filePathChanged)
     Q_PROPERTY(QString fileText MEMBER m_fileText NOTIFY fileTextChanged)
@@ -236,6 +237,7 @@ public:
     Q_INVOKABLE void addWorkspaceAt(const QString &path);
     Q_INVOKABLE void renameWorkspace(const QString &workspaceId, const QString &title);
     Q_INVOKABLE void deleteWorkspace(const QString &workspaceId);
+    Q_INVOKABLE void setEstatePolling(bool) {}
     Q_INVOKABLE void refreshSessions() {}
     Q_INVOKABLE void followSession(const QString &) {}
     Q_INVOKABLE void followSubagent(const QString &, const QString &, const QString & = QString()) {}
@@ -309,6 +311,7 @@ signals:
     void permissionPresetChanged();
     void accessNoticeChanged();
     void modelNoticeChanged();
+    void modelLoadsChanged();
     void searchQueryChanged();
     void filePathChanged();
     void fileTextChanged();
@@ -385,6 +388,7 @@ private:
     QString m_permissionPreset;
     QString m_accessNotice;
     QString m_modelNotice;
+    QVariantList m_modelLoads;
     QString m_searchQuery;
     QString m_filePath;
     QString m_fileText;

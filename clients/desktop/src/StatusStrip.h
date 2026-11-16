@@ -9,8 +9,10 @@
 
 class ClientFacade;
 class QActionGroup;
+class QHideEvent;
 class QMenu;
 class QScrollArea;
+class QShowEvent;
 
 /// The conversation's bar, 24 px: parent seat · status · access chip · session id,
 /// then model · effort · context · jobs.
@@ -47,6 +49,8 @@ public:
 protected:
     void paintEvent(QPaintEvent *event) override;
     bool eventFilter(QObject *watched, QEvent *event) override;
+    void showEvent(QShowEvent *event) override;
+    void hideEvent(QHideEvent *event) override;
 
 private:
     class PlainCell;
@@ -91,6 +95,7 @@ private:
     void openModelMenu();
     void openEffortMenu();
     void openAccessMenu();
+    void openEstateMenu();
     int fillModelMenu();
     void fitModelBodies();
     int fillAccessMenu();
@@ -102,6 +107,13 @@ private:
     // the values come from the same host projection. What is NOT duplicated is
     // any colour or measurement — those are tokens.
     QVariantMap modelOption() const;
+    QVariantMap activeModelLoad() const;
+    QString selectedProvider() const;
+    QString selectedModelId() const;
+    QString selectedModelName() const;
+    QString modelPhase(const QVariantMap &load) const;
+    QString modelLoadCard(const QVariantMap &load) const;
+    void refreshModelLoad(const QVariantMap &load);
     QVariantMap effortOption() const;
     QString choiceLabel(const QVariantMap &option) const;
     QString choiceDescription(const QVariantMap &option) const;
@@ -122,6 +134,7 @@ private:
     PlainCell *m_status;
     ChipCell *m_access;
     SessionIdCell *m_session;
+    ChipCell *m_load;
     ChipCell *m_model;
     ChipCell *m_effort;
     ContextCell *m_context;

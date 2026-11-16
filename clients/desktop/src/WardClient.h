@@ -65,6 +65,7 @@ public:
     Q_PROPERTY(QString accessNotice READ accessNotice NOTIFY accessNoticeChanged)
     Q_PROPERTY(QVariantList configOptions READ configOptions NOTIFY configOptionsChanged)
     Q_PROPERTY(QString modelNotice READ modelNotice NOTIFY modelNoticeChanged)
+    Q_PROPERTY(QVariantList modelLoads READ modelLoads NOTIFY modelLoadsChanged)
     Q_PROPERTY(int contextUsed READ contextUsed NOTIFY contextChanged)
     Q_PROPERTY(int contextSize READ contextSize NOTIFY contextSizeChanged)
     Q_PROPERTY(QVariantList jobs READ jobs NOTIFY jobsChanged)
@@ -145,6 +146,7 @@ public:
     QString accessNotice() const { return m_accessNotice; }
     QVariantList configOptions() const { return m_configOptions; }
     QString modelNotice() const { return m_modelNotice; }
+    QVariantList modelLoads() const { return m_modelLoads; }
     int contextUsed() const { return m_contextUsed; }
     int contextSize() const { return m_contextSize; }
     QVariantList jobs() const { return m_jobs; }
@@ -261,6 +263,8 @@ public:
     Q_INVOKABLE void refreshQueue();
     Q_INVOKABLE void refreshSettings();
     Q_INVOKABLE void refreshJobs();
+    Q_INVOKABLE void refreshEstate();
+    Q_INVOKABLE void setEstatePolling(bool enabled);
     Q_INVOKABLE void refreshModules();
     Q_INVOKABLE void searchSessions(const QString &query);
     Q_INVOKABLE void searchMore();
@@ -294,6 +298,7 @@ signals:
     void accessNoticeChanged();
     void configOptionsChanged();
     void modelNoticeChanged();
+    void modelLoadsChanged();
     void contextChanged();
     void contextSizeChanged();
     void jobsChanged();
@@ -378,6 +383,10 @@ private:
     void updateTrajectory(const QString &id, const QVariantMap &patch);
     void clearTranscript();
     void showCachedRoster();
+    void pollEstate();
+    void applyEstateStatus(const QString &json);
+    void noteEstateFailure(const QString &why);
+    void setModelLoads(const QVariantList &loads);
     void restorePendingPrompt();
 
     QString m_socketPath;
@@ -389,6 +398,12 @@ private:
     QTimer *m_quicTimer = nullptr;
     bool m_quicWelcome = false;
 #endif
+    QTimer *m_estateTimer = nullptr;
+    bool m_estateInFlight = false;
+    bool m_estatePollingWanted = false;
+    int m_estateGeneration = 0;
+    int m_estateFailedPolls = 0;
+    bool m_estateWarned = false;
     QByteArray m_in;
     quint64 m_nextId = 1;
     QHash<quint64, Pending> m_pending;
@@ -428,6 +443,7 @@ private:
     QString m_accessNotice;
     QVariantList m_configOptions;
     QString m_modelNotice;
+    QVariantList m_modelLoads;
     int m_contextUsed = 0;
     int m_contextSize = 0;
     QVariantList m_jobs;

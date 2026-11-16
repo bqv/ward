@@ -12,6 +12,7 @@
 #include <QFontMetrics>
 #include <QGuiApplication>
 #include <QHBoxLayout>
+#include <QHideEvent>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonValue>
@@ -24,6 +25,8 @@
 #include <QScreen>
 #include <QScrollArea>
 #include <QScrollBar>
+#include <QShowEvent>
+#include <QStringList>
 #include <QTimer>
 #include <QVariant>
 #include <QVBoxLayout>
@@ -104,6 +107,48 @@ bool localProvider(const QString &provider)
             return false;
     }
     return true;
+}
+
+QString normalisedModelName(const QString &name)
+{
+    QString key;
+    key.reserve(name.size());
+    for (const QChar character : name) {
+        if (character.isLetterOrNumber())
+            key.append(character.toLower());
+    }
+    return key;
+}
+
+bool modelNamesMatch(const QString &left, const QString &right)
+{
+    const QString a = normalisedModelName(left);
+    const QString b = normalisedModelName(right);
+    if (a.isEmpty() || b.isEmpty())
+        return false;
+    if (a.size() < 5 || b.size() < 5)
+        return a == b;
+    return a.startsWith(b) || b.startsWith(a);
+}
+
+int modelLoadPercent(const QVariantMap &load)
+{
+    if (!load.contains(QStringLiteral("progress")))
+        return -1;
+    double value = load.value(QStringLiteral("progress")).toDouble();
+    const QString source = load.value(QStringLiteral("progressSource")).toString();
+    if (source == QLatin1String("io_read_bytes") || (source.isEmpty() && value <= 1.0))
+        value *= 100.0;
+    return qBound(0, qRound(value), 100);
+}
+
+QString modelLoadProgressSource(const QString &source)
+{
+    if (source == QLatin1String("log_percent"))
+        return QStringLiteral("engine log percentage");
+    if (source == QLatin1String("io_read_bytes"))
+        return QStringLiteral("model bytes read");
+    return source;
 }
 
 int choiceRowHeight()
@@ -857,6 +902,10 @@ StatusStrip::StatusStrip(ClientFacade *facade, QWidget *parent)
     m_session->setObjectName(QStringLiteral("sessionIdChip"));
     row->addCell(m_session, CellRow::Flexible);
 
+    m_load = new ChipCell(this);
+    m_load->setObjectName(QStringLiteral("modelLoadChip"));
+    row->addCell(m_load, CellRow::Fixed);
+
     m_model = new ChipCell(this);
     m_model->setObjectName(QStringLiteral("modelChip"));
     row->addCell(m_model, CellRow::Elastic);
@@ -888,6 +937,7 @@ StatusStrip::StatusStrip(ClientFacade *facade, QWidget *parent)
                     SLOT(onDangerousPresetRequested(QString,QString)));
     }
     m_model->setActivated([this]() { openModelMenu(); });
+    m_load->setActivated([this]() { openEstateMenu(); });
     m_effort->setActivated([this]() { openEffortMenu(); });
 
     // One recompute for every fact the strip draws. A derived label (the model's
@@ -902,6 +952,7 @@ StatusStrip::StatusStrip(ClientFacade *facade, QWidget *parent)
     QObject::connect(facade, &ClientFacade::accessNoticeChanged, this, relayout);
     QObject::connect(facade, &ClientFacade::configOptionsChanged, this, relayout);
     QObject::connect(facade, &ClientFacade::modelNoticeChanged, this, relayout);
+    QObject::connect(facade, &ClientFacade::modelLoadsChanged, this, relayout);
     QObject::connect(facade, &ClientFacade::contextChanged, this, relayout);
     QObject::connect(facade, &ClientFacade::contextSizeChanged, this, relayout);
     QObject::connect(facade, &ClientFacade::jobsChanged, this, relayout);
@@ -964,6 +1015,9 @@ void StatusStrip::refresh()
                             ? m_facade->modelNotice()
                             : QStringLiteral("Model for this session: ") + model);
 
+    const QVariantMap activeLoad = activeModelLoad();
+    refreshModelLoad(activeLoad);
+
     const QString effort = effortLabel();
     m_effort->setVisible(!effort.isEmpty());
     m_effort->setValue(QString(), effort, theme->dim(), 10 * theme->space6());
@@ -988,9 +1042,10 @@ void StatusStrip::refresh()
     // What the strip is showing, in the log. This is evidence, not decoration:
     // the chrome is one 24 px row and a run cannot be screenshotted from here, so
     // the values it resolved from the facade are written down when they change.
+    const QString loadWord = modelPhase(activeLoad);
     const QString shown =
         QStringLiteral("parent=%1 status=\"%2\" access=%3 session=%4 model=%5"
-                       " effort=%6 context=%7/%8 jobs=%9")
+                       " effort=%6 context=%7/%8 jobs=%9 load=%10")
             .arg(parentId.isEmpty() ? QStringLiteral("-") : parentId)
             .arg(m_facade->status())
             .arg(access.isEmpty() ? QStringLiteral("-") : access)
@@ -999,7 +1054,8 @@ void StatusStrip::refresh()
             .arg(effort.isEmpty() ? QStringLiteral("-") : effort)
             .arg(m_facade->contextUsed())
             .arg(m_facade->contextSize())
-            .arg(jobCount > 0 ? jobText() : QStringLiteral("-"));
+            .arg(jobCount > 0 ? jobText() : QStringLiteral("-"))
+            .arg(loadWord.isEmpty() ? QStringLiteral("-") : loadWord);
     if (shown != m_loggedLine) {
         m_loggedLine = shown;
         qInfo().nospace() << "status strip: " << shown;
@@ -1447,7 +1503,6 @@ bool StatusStrip::eventFilter(QObject *watched, QEvent *event)
     if (event->type() != QEvent::Wheel || m_modelMenu == nullptr
         || !m_modelMenu->isVisible())
         return QWidget::eventFilter(watched, event);
-
     auto *wheel = static_cast<QWheelEvent *>(event);
     const QPoint global = wheel->globalPosition().toPoint();
 
@@ -1708,6 +1763,311 @@ QString StatusStrip::modelName() const
     return raw;
 }
 
+QString StatusStrip::selectedProvider() const
+{
+    const QVariantMap option = modelOption();
+    const QString current = option.value(QStringLiteral("currentValue")).toString();
+    if (current.isEmpty())
+        return {};
+    if (current.startsWith(QLatin1Char('[')) || current.startsWith(QLatin1Char('{'))) {
+        const QJsonArray route = QJsonDocument::fromJson(current.toUtf8()).array();
+        if (route.size() == 2)
+            return route.at(0).toVariant().toString();
+        return {};
+    }
+    for (const QVariant &entry : option.value(QStringLiteral("choices")).toList()) {
+        const QVariantMap choice = entry.toMap();
+        if (choice.value(QStringLiteral("value")).toString() == current)
+            return choice.value(QStringLiteral("provider")).toString();
+    }
+    return {};
+}
+
+QString StatusStrip::selectedModelId() const
+{
+    const QVariantMap option = modelOption();
+    const QString current = option.value(QStringLiteral("currentValue")).toString();
+    if (current.isEmpty())
+        return {};
+    if (current.startsWith(QLatin1Char('[')) || current.startsWith(QLatin1Char('{'))) {
+        const QJsonArray route = QJsonDocument::fromJson(current.toUtf8()).array();
+        if (route.size() == 2)
+            return route.at(1).toVariant().toString();
+    }
+    return current;
+}
+
+QString StatusStrip::selectedModelName() const
+{
+    const QString id = selectedModelId();
+    const QVariantMap option = modelOption();
+    for (const QVariant &entry : option.value(QStringLiteral("choices")).toList()) {
+        const QVariantMap choice = entry.toMap();
+        if (choice.value(QStringLiteral("value")).toString() != id)
+            continue;
+        const QString model = choice.value(QStringLiteral("model")).toString();
+        if (!model.isEmpty())
+            return model;
+        const QString label = choice.value(QStringLiteral("label")).toString();
+        if (!label.isEmpty())
+            return label;
+        break;
+    }
+    return id;
+}
+
+QVariantMap StatusStrip::activeModelLoad() const
+{
+    const QVariantList loads = m_facade->modelLoads();
+    if (loads.isEmpty())
+        return {};
+    const QString provider = selectedProvider();
+    if (!provider.isEmpty() && !localProvider(provider))
+        return {};
+    const QString id = selectedModelId();
+    const QString name = selectedModelName();
+    const QString label = modelName();
+    if (id.isEmpty() && name.isEmpty())
+        return {};
+    for (const QVariant &entry : loads) {
+        const QVariantMap load = entry.toMap();
+        const QString tenant = load.value(QStringLiteral("tenant")).toString();
+        const QString model = load.value(QStringLiteral("model")).toString();
+        if (modelNamesMatch(model, name) || modelNamesMatch(model, id)
+                || modelNamesMatch(model, label))
+            return load;
+        if (!tenant.isEmpty()
+            && (tenant.compare(provider, Qt::CaseInsensitive) == 0
+                || modelNamesMatch(tenant, provider) || modelNamesMatch(tenant, name)))
+            return load;
+    }
+    QVariantMap onlyActive;
+    int activeCount = 0;
+    QVariantMap onlyFailed;
+    int failedCount = 0;
+    for (const QVariant &entry : loads) {
+        const QVariantMap load = entry.toMap();
+        const QString phase = modelPhase(load);
+        if (phase == QLatin1String("failed")) {
+            ++failedCount;
+            onlyFailed = load;
+        } else if (phase == QLatin1String("loading")
+                   || phase == QLatin1String("prefilling")
+                   || phase == QLatin1String("generating")) {
+            ++activeCount;
+            onlyActive = load;
+        }
+    }
+    if (activeCount == 1)
+        return onlyActive;
+    if (activeCount == 0 && failedCount == 1)
+        return onlyFailed;
+    if (loads.size() == 1)
+        return loads.first().toMap();
+    return {};
+}
+
+QString StatusStrip::modelPhase(const QVariantMap &load) const
+{
+    if (load.isEmpty())
+        return {};
+    const QString state = load.value(QStringLiteral("state")).toString();
+    const QString phase = load.value(QStringLiteral("phase")).toString();
+    if (!load.value(QStringLiteral("error")).toString().isEmpty()
+            || state == QLatin1String("failed")
+            || phase == QLatin1String("failed"))
+        return QStringLiteral("failed");
+    if (state == QLatin1String("loading") || phase == QLatin1String("loading")
+            || phase == QLatin1String("queued"))
+        return QStringLiteral("loading");
+    if (phase == QLatin1String("prefilling") || phase == QLatin1String("generating"))
+        return phase;
+    if (state == QLatin1String("running")) {
+        if (!load.value(QStringLiteral("active")).toBool())
+            return QStringLiteral("idle");
+        if (load.value(QStringLiteral("isProcessing")).toBool()) {
+            const qint64 tokens = load.value(QStringLiteral("promptTokens")).toLongLong();
+            const qint64 done = load.value(QStringLiteral("promptProcessed")).toLongLong();
+            if (tokens > 0 && done >= tokens)
+                return QStringLiteral("generating");
+            return QStringLiteral("prefilling");
+        }
+        return QStringLiteral("prefilling");
+    }
+    if (state == QLatin1String("idle") || phase == QLatin1String("ready"))
+        return QStringLiteral("idle");
+    if (state == QLatin1String("stopped"))
+        return QStringLiteral("stopped");
+    return {};
+}
+
+QString StatusStrip::modelLoadCard(const QVariantMap &load) const
+{
+    QStringList lines;
+    const QString model = load.value(QStringLiteral("model")).toString();
+    const QString tenant = load.value(QStringLiteral("tenant")).toString();
+    QString head = model.isEmpty() ? QStringLiteral("local model") : model;
+    if (!tenant.isEmpty())
+        head += QStringLiteral(" on %1").arg(tenant);
+    lines.append(head);
+
+    const QString state = load.value(QStringLiteral("state")).toString();
+    const QString phase = load.value(QStringLiteral("phase")).toString();
+    const QString word = modelPhase(load);
+    if (!word.isEmpty()) {
+        QString line = QStringLiteral("state: ") + word;
+        if (!state.isEmpty() && state != word)
+            line += QStringLiteral(" (") + state + QStringLiteral(")");
+        if (!phase.isEmpty() && phase != state && phase != word)
+            line += QStringLiteral(" · load ") + phase;
+        lines.append(line);
+    }
+
+    const int percent = modelLoadPercent(load);
+    if (percent >= 0) {
+        const QString source =
+            modelLoadProgressSource(load.value(QStringLiteral("progressSource")).toString());
+        QString line = QStringLiteral("progress: %1%").arg(percent);
+        if (!source.isEmpty())
+            line += QStringLiteral(" · ") + source;
+        lines.append(line);
+    }
+    if (load.contains(QStringLiteral("prefillPct"))) {
+        const int prefill = qBound(0, qRound(load.value(QStringLiteral("prefillPct")).toDouble()), 100);
+        if (prefill > 0 && prefill < 100)
+            lines.append(QStringLiteral("prefill: %1%").arg(prefill));
+    }
+    if (load.contains(QStringLiteral("kvPct"))) {
+        const int kv = qBound(0, qRound(load.value(QStringLiteral("kvPct")).toDouble()), 100);
+        lines.append(QStringLiteral("context: %1% full").arg(kv));
+    }
+    const int inFlight = load.value(QStringLiteral("inFlight")).toInt();
+    if (inFlight > 0)
+        lines.append(QStringLiteral("in flight: %1").arg(inFlight));
+    const QString device = load.value(QStringLiteral("device")).toString();
+    const QString group = load.value(QStringLiteral("group")).toString();
+    if (!device.isEmpty() || !group.isEmpty()) {
+        QString detail = device;
+        if (!group.isEmpty())
+            detail += detail.isEmpty() ? group : QStringLiteral(" · ") + group;
+        lines.append(QStringLiteral("device: ") + detail);
+    }
+    const QString kind = load.value(QStringLiteral("kind")).toString();
+    if (!kind.isEmpty())
+        lines.append(QStringLiteral("kind: ") + kind);
+    const QString policy = load.value(QStringLiteral("policy")).toString();
+    if (!policy.isEmpty())
+        lines.append(QStringLiteral("policy: ") + policy);
+    const int vram = load.value(QStringLiteral("vramMb")).toInt();
+    if (vram > 0)
+        lines.append(QStringLiteral("vram: %1 MiB").arg(vram));
+    const qint64 nctx = load.value(QStringLiteral("nCtx")).toLongLong();
+    if (nctx > 0)
+        lines.append(QStringLiteral("context: %1 tokens").arg(nctx));
+    const QString quant = load.value(QStringLiteral("quant")).toString();
+    if (!quant.isEmpty())
+        lines.append(QStringLiteral("quant: ") + quant);
+    const double reload = load.value(QStringLiteral("reloadS")).toDouble();
+    if (reload > 0)
+        lines.append(QStringLiteral("reload: %1 s").arg(reload, 0, 'f', 1));
+    const QString line = load.value(QStringLiteral("line")).toString();
+    if (!line.isEmpty())
+        lines.append(line);
+    const QString error = load.value(QStringLiteral("error")).toString();
+    if (!error.isEmpty())
+        lines.append(QStringLiteral("error: ") + error);
+    return lines.join(QStringLiteral("\n"));
+}
+
+void StatusStrip::refreshModelLoad(const QVariantMap &load)
+{
+    const QString phase = modelPhase(load);
+    const bool show = !phase.isEmpty();
+    m_load->setVisible(show);
+    if (!show)
+        return;
+
+    Theme *theme = Theme::instance();
+    const bool failed = phase == QLatin1String("failed");
+    const int maxWidth = 20 * theme->space6();
+    QString model = load.value(QStringLiteral("model")).toString();
+    if (model.isEmpty())
+        model = load.value(QStringLiteral("tenant")).toString();
+    if (model.isEmpty())
+        model = QStringLiteral("local model");
+
+    QString percent;
+    if (phase == QLatin1String("loading")) {
+        const int value = modelLoadPercent(load);
+        if (value >= 0)
+            percent = QStringLiteral(" \u00b7 %1%").arg(value);
+    } else if (phase == QLatin1String("prefilling")
+               && load.contains(QStringLiteral("prefillPct"))) {
+        const int value = qBound(0, qRound(load.value(QStringLiteral("prefillPct")).toDouble()), 100);
+        if (value > 0 && value < 100)
+            percent = QStringLiteral(" \u00b7 %1%").arg(value);
+    }
+
+    QString text;
+    if (failed) {
+        text = QStringLiteral("load failed");
+    } else if (phase == QLatin1String("loading")) {
+        const QString prefix = QStringLiteral("loading ");
+        const QFontMetrics metrics(Chrome::uiFont(theme->fontData()));
+        const int content = qMax(0, maxWidth - 2 * theme->space3());
+        const int tail = metrics.horizontalAdvance(prefix) + metrics.horizontalAdvance(percent);
+        const QString name = metrics.elidedText(model, Qt::ElideMiddle, qMax(0, content - tail));
+        text = prefix + name + percent;
+    } else if (phase == QLatin1String("prefilling")) {
+        text = QStringLiteral("prefilling") + percent;
+    } else if (phase == QLatin1String("generating")) {
+        text = QStringLiteral("generating");
+    } else {
+        text = phase;
+    }
+
+    QColor colour = failed ? theme->danger() : theme->fg();
+    if (!failed && phase != QLatin1String("loading")
+        && phase != QLatin1String("prefilling") && phase != QLatin1String("generating"))
+        colour = theme->dim();
+    m_load->setValue(QString(), text, colour, maxWidth);
+    m_load->setToolTip(modelLoadCard(load));
+}
+
+void StatusStrip::openEstateMenu()
+{
+    QMenu *menu = Chrome::shellMenu(this);
+    Chrome::deleteOnHide(menu);
+    Chrome::addCaption(menu, QStringLiteral("Local engine"));
+
+    const QVariantList loads = m_facade->modelLoads();
+    if (loads.isEmpty()) {
+        Chrome::addEmptyRow(menu, QStringLiteral("No local engine status"));
+    } else {
+        for (const QVariant &entry : loads) {
+            const QVariantMap load = entry.toMap();
+            const QString tenant = load.value(QStringLiteral("tenant")).toString();
+            const QString model = load.value(QStringLiteral("model")).toString();
+            const QString phase = modelPhase(load);
+            QString label = model.isEmpty() ? tenant : model;
+            if (label.isEmpty())
+                label = QStringLiteral("local model");
+            if (!tenant.isEmpty() && !model.isEmpty())
+                label = tenant + QStringLiteral(" · ") + model;
+            if (!phase.isEmpty())
+                label += QStringLiteral(": ") + phase;
+            QAction *action = menu->addAction(Chrome::menuText(label));
+            action->setEnabled(false);
+            action->setToolTip(modelLoadCard(load));
+        }
+    }
+    menu->addSeparator();
+    QAction *refresh = menu->addAction(Chrome::menuText(QStringLiteral("Refresh")));
+    connect(refresh, &QAction::triggered, this, [this]() { m_facade->refreshEstate(); });
+
+    Chrome::popupMenuAt(QRect(m_load->mapToGlobal(QPoint(0, 0)), m_load->size()), menu, true);
+}
+
 QString StatusStrip::effortLabel() const
 {
     const QVariantMap option = effortOption();
@@ -1821,6 +2181,18 @@ int StatusStrip::contextPercent() const
     if (size <= 0)
         return 0;
     return qMin(100, qRound(100.0 * m_facade->contextUsed() / size));
+}
+
+void StatusStrip::showEvent(QShowEvent *event)
+{
+    QWidget::showEvent(event);
+    m_facade->setEstatePolling(true);
+}
+
+void StatusStrip::hideEvent(QHideEvent *event)
+{
+    m_facade->setEstatePolling(false);
+    QWidget::hideEvent(event);
 }
 
 void StatusStrip::paintEvent(QPaintEvent *)
