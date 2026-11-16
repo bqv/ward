@@ -117,9 +117,13 @@ public:
         m_refresh = new Button(QStringLiteral("\u21bb"), this);
         m_refresh->setFixedSize(theme->controlHeight(), theme->controlHeight());
         m_refresh->setToolTip(QStringLiteral("Refresh"));
+        m_close = new Button(QStringLiteral("\u00d7"), this);
+        m_close->setFixedSize(theme->controlHeight(), theme->controlHeight());
+        m_close->setToolTip(QStringLiteral("Close the files panel"));
     }
 
     void setRefreshHandler(std::function<void()> handler) { m_refresh->setHandler(std::move(handler)); }
+    void setCloseHandler(std::function<void()> handler) { m_close->setHandler(std::move(handler)); }
     void setAvailable(bool available) { m_refresh->setEnabled(available); }
 
 protected:
@@ -128,7 +132,7 @@ protected:
         Theme *theme = Theme::instance();
         QPainter painter(this);
         painter.fillRect(rect(), theme->panel());
-        const int right = m_refresh ? m_refresh->x() - theme->space3() : width();
+        const int right = m_refresh ? m_close->x() - theme->space3() : width();
         const QRect title(theme->space4(), 0, qMax(0, right - theme->space4()), height());
         Chrome::paintLine(painter, title, Chrome::uiFont(theme->fontProse(), true), theme->fg(),
                           QStringLiteral("Files"));
@@ -138,15 +142,18 @@ protected:
 
     void resizeEvent(QResizeEvent *) override
     {
-        if (!m_refresh)
+        if (!m_refresh || !m_close)
             return;
         Theme *theme = Theme::instance();
         const int side = theme->controlHeight();
-        m_refresh->move(width() - theme->space4() - side, (height() - side) / 2);
+        const int gap = theme->space2();
+        m_close->move(width() - theme->space4() - side, (height() - side) / 2);
+        m_refresh->move(m_close->x() - gap - side, (height() - side) / 2);
     }
 
 private:
     Button *m_refresh = nullptr;
+    Button *m_close = nullptr;
 };
 
 class FilesDock::Line : public QWidget
@@ -452,6 +459,7 @@ FilesDock::FilesDock(ClientFacade *facade, QWidget *parent)
         if (available() && m_facade)
             m_facade->listDirectory(m_facade->filePath());
     });
+    m_header->setCloseHandler([this]() { setShown(false); });
     layout->addWidget(m_header);
 
     m_breadcrumb = new QWidget(this);
