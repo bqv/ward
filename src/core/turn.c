@@ -933,6 +933,8 @@ static int grep_run(wd_turn *turn, const uint8_t *in, size_t in_len,
   return tool_reply(reply, out, out_len);
 }
 
+static int write_atomic(const char *path, const void *data, size_t len);
+
 static int edit_run(wd_turn *turn, const uint8_t *in, size_t in_len,
                     uint8_t **out, size_t *out_len) {
   cbor_item_t *request = wd_decode(in, in_len);
@@ -1031,13 +1033,7 @@ static int edit_run(wd_turn *turn, const uint8_t *in, size_t in_len,
   free(content);
   free(find);
   free(replace);
-  int wfd = open(path, O_WRONLY | O_TRUNC | O_CLOEXEC);
-  if (wfd < 0) {
-    free(next);
-    return tool_fail("fs.edit: cannot rewrite the file", out, out_len);
-  }
-  int written = wd_write_all(wfd, next, total);
-  close(wfd);
+  int written = write_atomic(path, next, total);
   free(next);
   if (written != 0) return tool_fail("fs.edit: cannot rewrite the file", out, out_len);
   return tool_ok_count(total, out, out_len);
@@ -1132,6 +1128,44 @@ static int exec_run(wd_turn *turn, const uint8_t *in, size_t in_len,
   return tool_reply(reply, out, out_len);
 }
 
+static int write_atomic(const char *path, const void *data, size_t len) {
+  struct stat before;
+  const bool existed = lstat(path, &before) == 0;
+  if (existed && S_ISLNK(before.st_mode)) return -1;
+  char tmp[PATH_MAX];
+  int n = snprintf(tmp, sizeof(tmp), "%s.tmp-%d", path, (int)getpid());
+  if (n < 0 || (size_t)n >= sizeof(tmp)) return -1;
+  int fd = open(tmp, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
+  if (fd < 0) return -1;
+  int rc = wd_write_all(fd, data, len);
+  if (rc == 0 && fsync(fd) != 0) rc = -1;
+  close(fd);
+  if (rc != 0) {
+    unlink(tmp);
+    return -1;
+  }
+  if (existed && chmod(tmp, before.st_mode & 07777) != 0) {
+    unlink(tmp);
+    return -1;
+  }
+  if (rename(tmp, path) != 0) {
+    unlink(tmp);
+    return -1;
+  }
+  char dir[PATH_MAX];
+  snprintf(dir, sizeof(dir), "%s", path);
+  char *slash = strrchr(dir, '/');
+  if (slash != NULL) {
+    *slash = '\0';
+    int dfd = open(dir[0] != '\0' ? dir : "/", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (dfd >= 0) {
+      fsync(dfd);
+      close(dfd);
+    }
+  }
+  return 0;
+}
+
 static int fs_write(wd_turn *turn, const uint8_t *in, size_t in_len,
                     uint8_t **out, size_t *out_len) {
   cbor_item_t *request = wd_decode(in, in_len);
@@ -1157,14 +1191,7 @@ static int fs_write(wd_turn *turn, const uint8_t *in, size_t in_len,
     free(text);
     return tool_fail("fs.write: the text is missing or too long", out, out_len);
   }
-  int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC,
-                0600);
-  if (fd < 0) {
-    free(text);
-    return tool_fail("fs.write: cannot create the file", out, out_len);
-  }
-  int written = wd_write_all(fd, text, len);
-  close(fd);
+  int written = write_atomic(path, text, len);
   free(text);
   if (written != 0) return tool_fail("fs.write: cannot write the file", out, out_len);
   return tool_ok_count(len, out, out_len);

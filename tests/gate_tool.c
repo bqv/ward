@@ -5,6 +5,7 @@
 #include <assert.h>
 #include <dirent.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -584,6 +585,12 @@ int main(void) {
   cbor_item_t *prompt = wd_map(2);
   wd_put(prompt, "id", wd_text(session));
   wd_put(prompt, "text", wd_text("/write out.txt hello there"));
+  char atomic_path[512];
+  snprintf(atomic_path, sizeof(atomic_path), "%s/out.txt", root);
+  int seed = open(atomic_path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0640);
+  assert(seed >= 0);
+  assert(write(seed, "before\n", 7) == 7);
+  close(seed);
   assert(request(&a, a.next_id++, "session.prompt", prompt, &answered, NULL) ==
          0);
   cbor_item_t *approval = wd_get(answered, "approval");
@@ -640,6 +647,15 @@ int main(void) {
   assert(result_path != NULL && strstr(result_path, "out.txt") != NULL);
   free(result_path);
   wd_free(event);
+  struct stat atomic_st;
+  assert(stat(atomic_path, &atomic_st) == 0);
+  assert((atomic_st.st_mode & 07777) == 0640);
+  char atomic_text[64] = {0};
+  int atomic_fd = open(atomic_path, O_RDONLY | O_CLOEXEC);
+  assert(atomic_fd >= 0);
+  ssize_t atomic_len = read(atomic_fd, atomic_text, sizeof(atomic_text) - 1);
+  close(atomic_fd);
+  assert(atomic_len > 0 && strstr(atomic_text, "hello there") != NULL);
   event = wait_event(&a, "text.delta", NULL);
   assert(event != NULL);
   char *text = wd_text_copy(wd_get(event, "text"));
