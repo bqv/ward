@@ -2449,3 +2449,19 @@ The offscreen `--ui-gate` now opens the link dialog and the workspace picker, an
 not merely compiled. The suite is green at 52 tests. Two honest edges: Create folder in the picker refuses because ward has no
 mkdir method, and under `--transport dsh` the facade now logs the three picker properties as missing, which is the transport
 gap the README's "Not adopted yet" records.
+
+Hundred-and-eighty-third: the first reliability slice against DSH. `fs.read` and `exec` now capture up to 4 MiB and, past
+64 KiB, write the full bytes under `<session>/spill/`, hand the model a 256-byte head with a notice naming the path, and put
+`truncated`, `spill` and `spill_size` on the `tool.result` event; `fs.read`'s own limit rose from 64 KiB to 4 MiB because the
+spill path makes a large read safe. gate_tool seeds a 123,000-byte file, reads it through the tool and asserts the truncated
+flag, the spill path and its exact size; the suite is green at 52 tests.
+
+The slice turned up something worse than the silent cut it was meant to fix. The driver guest reads the model-visible text into
+a **512-byte** buffer (`TEXT_SIZE` in `modules/driver/driver.c`) and `wd_r_text` fails when the value does not fit, after which
+`ward_call` returns without writing its output descriptor and the host reports "ward_call returned an out-of-bounds span" and
+ends the turn. Any tool result of 512 bytes or more — a read of a modest file, a grep with a page of hits — therefore killed
+the turn, and no gate noticed because every gated result was a short line. Raising the driver's buffer to 128 KiB produced a
+wasm out-of-bounds trap instead, so the working answer is to keep the model-visible text inside the old window: the spilled
+reply is clamped at 480 bytes (head plus notice) and the full bytes live at the path. `grep` and `search` still return their
+full output and are the next thing to route through the same bounded reply; until then they remain a latent turn-breaker at
+that size.
