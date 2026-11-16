@@ -33,6 +33,17 @@ static void pair(uint32_t out, const uint8_t *data, uint32_t n) {
   wd_put32(o + 4, n);
 }
 
+static int read_text_clipped(wd_r *r, char *out, uint32_t cap, int *clipped) {
+  const uint8_t *p = 0;
+  uint32_t n = 0;
+  if (wd_r_text_ptr(r, &p, &n) != 0) return -1;
+  uint32_t used = n < cap ? n : cap - 1;
+  for (uint32_t i = 0; i < used; i++) out[i] = (char)p[i];
+  out[used] = '\0';
+  if (clipped != 0) *clipped = n > used;
+  return 0;
+}
+
 static int cap_call(const char *capability, const uint8_t *payload, uint32_t len,
                     uint8_t *out, uint32_t *out_len) {
   uint32_t name_len = wd_len(capability);
@@ -205,31 +216,130 @@ static int str_eq(const char *a, const char *b) {
   return a[i] == '\0' && b[i] == '\0';
 }
 
-static void json_field(const char *json, const char *key, char *out,
-                       uint32_t cap) {
+static int hex_digit(char c) {
+  if (c >= '0' && c <= '9') return c - '0';
+  if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+  if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+  return -1;
+}
+
+static void append_utf8(char *out, uint32_t cap, uint32_t *used, uint32_t cp,
+                        int *clipped) {
+  char tmp[4];
+  uint32_t n = 0;
+  if (cp < 0x80) {
+    tmp[n++] = (char)cp;
+  } else if (cp < 0x800) {
+    tmp[n++] = (char)(0xc0 | (cp >> 6));
+    tmp[n++] = (char)(0x80 | (cp & 0x3f));
+  } else if (cp < 0x10000) {
+    tmp[n++] = (char)(0xe0 | (cp >> 12));
+    tmp[n++] = (char)(0x80 | ((cp >> 6) & 0x3f));
+    tmp[n++] = (char)(0x80 | (cp & 0x3f));
+  } else {
+    tmp[n++] = (char)(0xf0 | (cp >> 18));
+    tmp[n++] = (char)(0x80 | ((cp >> 12) & 0x3f));
+    tmp[n++] = (char)(0x80 | ((cp >> 6) & 0x3f));
+    tmp[n++] = (char)(0x80 | (cp & 0x3f));
+  }
+  if (*used + n >= cap) {
+    *clipped = 1;
+    return;
+  }
+  for (uint32_t i = 0; i < n; i++) out[(*used)++] = tmp[i];
+}
+
+static int json_field(const char *json, uint32_t len, const char *key,
+                      char *out, uint32_t cap, int *clipped) {
   uint32_t klen = wd_len(key);
+  uint32_t used = 0;
   out[0] = '\0';
-  for (uint32_t i = 0; json[i] != '\0'; i++) {
+  if (clipped != 0) *clipped = 0;
+  for (uint32_t i = 0; i < len; i++) {
     if (json[i] != '"') continue;
+    uint32_t prev = i;
+    while (prev > 0 && (json[prev - 1] == ' ' || json[prev - 1] == '\t' ||
+                        json[prev - 1] == '\r' || json[prev - 1] == '\n'))
+      prev--;
+    if (prev == 0 || (json[prev - 1] != '{' && json[prev - 1] != ',')) continue;
+    if (i + 1 + klen + 1 > len) break;
     uint32_t k = 0;
     while (k < klen && json[i + 1 + k] == key[k]) k++;
     if (k != klen || json[i + 1 + k] != '"') continue;
     uint32_t j = i + 1 + k + 1;
-    while (json[j] == ':' || json[j] == ' ') j++;
-    if (json[j] != '"') continue;
+    while (j < len && (json[j] == ':' || json[j] == ' ' || json[j] == '\t' ||
+                       json[j] == '\r' || json[j] == '\n'))
+      j++;
+    if (j >= len || json[j] != '"') continue;
     j++;
-    uint32_t used = 0;
-    while (json[j] != '\0' && json[j] != '"' && used + 1 < cap) {
-      if (json[j] == '\\' && json[j + 1] != '\0') {
-        out[used++] = json[j + 1];
+    while (j < len && json[j] != '"') {
+      if (json[j] == '\\' && j + 1 < len) {
+        char e = json[j + 1];
+        if (e == 'u' && j + 5 < len) {
+          int h1 = hex_digit(json[j + 2]);
+          int h2 = hex_digit(json[j + 3]);
+          int h3 = hex_digit(json[j + 4]);
+          int h4 = hex_digit(json[j + 5]);
+          if (h1 >= 0 && h2 >= 0 && h3 >= 0 && h4 >= 0)
+            append_utf8(out, cap, &used,
+                        (uint32_t)((h1 << 12) | (h2 << 8) | (h3 << 4) | h4),
+                        clipped);
+          else if (clipped != 0)
+            *clipped = 1;
+          j += 6;
+          continue;
+        }
+        char decoded;
+        if (e == 'n')
+          decoded = '\n';
+        else if (e == 'r')
+          decoded = '\r';
+        else if (e == 't')
+          decoded = '\t';
+        else if (e == 'b')
+          decoded = '\b';
+        else if (e == 'f')
+          decoded = '\f';
+        else
+          decoded = e;
+        if (used + 1 >= cap) {
+          if (clipped != 0) *clipped = 1;
+        } else {
+          out[used++] = decoded;
+        }
         j += 2;
         continue;
       }
-      out[used++] = json[j++];
+      if (used + 1 >= cap) {
+        if (clipped != 0) *clipped = 1;
+      } else {
+        out[used++] = json[j];
+      }
+      j++;
     }
     out[used] = '\0';
-    return;
+    return used > 0 ? 1 : 0;
   }
+  return 0;
+}
+
+static void json_field_any(const char *json, uint32_t len, const char *first,
+                           const char *second, char *out, uint32_t cap,
+                           int *clipped) {
+  json_field(json, len, first, out, cap, clipped);
+  if (out[0] == '\0' && clipped != 0 && *clipped == 0 && second != 0)
+    json_field(json, len, second, out, cap, clipped);
+}
+
+static const char *approval_reason(const char *tool) {
+  if (str_eq(tool, "read")) return "read a file in the session directory";
+  if (str_eq(tool, "write")) return "write a file in the session directory";
+  if (str_eq(tool, "edit")) return "edit a file in the session directory";
+  if (str_eq(tool, "grep")) return "search files in the session directory";
+  if (str_eq(tool, "exec")) return "run a command in the session directory";
+  if (str_eq(tool, "python")) return "run python in the session directory";
+  if (str_eq(tool, "plan")) return "record a plan";
+  return "run a tool in the session directory";
 }
 
 static void invoke_tool(uint32_t out, const char *tool, const char *path,
@@ -252,7 +362,7 @@ static void invoke_tool(uint32_t out, const char *tool, const char *path,
     wd_w_textz(&w, "approve");
     wd_w_bool(&w, 1);
     wd_w_textz(&w, "reason");
-    wd_w_textz(&w, "write a file in the session directory");
+    wd_w_textz(&w, approval_reason(tool));
   }
   wd_w_textz(&w, "payload");
   wd_w_map(&w, 2);
@@ -269,6 +379,174 @@ static void invoke_tool(uint32_t out, const char *tool, const char *path,
   if (!w.failed) pair(out, reply, w.at);
 }
 
+static void dispatch_model_tool(uint32_t out, const char *name,
+                                const char *args, uint32_t args_len) {
+  const char *tool = str_eq(name, "run") ? "exec" : name;
+  char a[TEXT_SIZE];
+  char b[TEXT_SIZE];
+  char c[TEXT_SIZE];
+  int clipped = 0;
+  if (str_eq(tool, "read")) {
+    json_field_any(args, args_len, "path", "file", a, sizeof(a), &clipped);
+    if (clipped) {
+      emit_text_delta(out,
+                      "the model's tool call arguments are too long for this "
+                      "build");
+      return;
+    }
+    if (a[0] == '\0') {
+      emit_text_delta(out, "read needs a path");
+      return;
+    }
+    int verdict = policy_check("read", a);
+    if (verdict == 0) {
+      emit_text_delta(out, "the policy denied read");
+      return;
+    }
+    invoke_tool(out, "read", a, "", verdict == 2);
+    return;
+  }
+  if (str_eq(tool, "write")) {
+    json_field_any(args, args_len, "path", "file", a, sizeof(a), &clipped);
+    if (!clipped)
+      json_field_any(args, args_len, "text", "content", b, sizeof(b), &clipped);
+    if (clipped) {
+      emit_text_delta(out,
+                      "the model's tool call arguments are too long for this "
+                      "build");
+      return;
+    }
+    if (a[0] == '\0') {
+      emit_text_delta(out, "write needs a path");
+      return;
+    }
+    if (b[0] == '\0') {
+      emit_text_delta(out, "write needs text");
+      return;
+    }
+    int verdict = policy_check("write", a);
+    if (verdict == 0) {
+      emit_text_delta(out, "the policy denied write");
+      return;
+    }
+    invoke_tool(out, "write", a, b, verdict == 2);
+    return;
+  }
+  if (str_eq(tool, "edit")) {
+    json_field(args, args_len, "path", a, sizeof(a), &clipped);
+    if (!clipped)
+      json_field_any(args, args_len, "find", "old", b, sizeof(b), &clipped);
+    if (!clipped)
+      json_field_any(args, args_len, "replace", "new", c, sizeof(c), &clipped);
+    if (clipped) {
+      emit_text_delta(out,
+                      "the model's tool call arguments are too long for this "
+                      "build");
+      return;
+    }
+    if (a[0] == '\0' || b[0] == '\0' || c[0] == '\0') {
+      emit_text_delta(out, "edit needs a path, a find and a replace");
+      return;
+    }
+    int verdict = policy_check("edit", a);
+    if (verdict == 0) {
+      emit_text_delta(out, "the policy denied edit");
+      return;
+    }
+    invoke_edit(out, a, b, c, verdict == 2);
+    return;
+  }
+  if (str_eq(tool, "grep")) {
+    json_field_any(args, args_len, "pattern", "query", a, sizeof(a), &clipped);
+    if (!clipped && a[0] == '\0')
+      json_field(args, args_len, "text", a, sizeof(a), &clipped);
+    if (!clipped)
+      json_field(args, args_len, "path", b, sizeof(b), &clipped);
+    if (clipped) {
+      emit_text_delta(out,
+                      "the model's tool call arguments are too long for this "
+                      "build");
+      return;
+    }
+    if (a[0] == '\0') {
+      emit_text_delta(out, "grep needs a pattern");
+      return;
+    }
+    int verdict = policy_check("grep", a);
+    if (verdict == 0) {
+      emit_text_delta(out, "the policy denied grep");
+      return;
+    }
+    invoke_tool(out, "grep", b, a, verdict == 2);
+    return;
+  }
+  if (str_eq(tool, "exec")) {
+    json_field_any(args, args_len, "command", "cmd", a, sizeof(a), &clipped);
+    if (!clipped && a[0] == '\0')
+      json_field(args, args_len, "text", a, sizeof(a), &clipped);
+    if (clipped) {
+      emit_text_delta(out,
+                      "the model's tool call arguments are too long for this "
+                      "build");
+      return;
+    }
+    if (a[0] == '\0') {
+      emit_text_delta(out, "exec needs a command");
+      return;
+    }
+    int verdict = policy_check("exec", a);
+    if (verdict == 0) {
+      emit_text_delta(out, "the policy denied exec");
+      return;
+    }
+    invoke_tool(out, "exec", a, a, verdict == 2);
+    return;
+  }
+  if (str_eq(tool, "python")) {
+    json_field_any(args, args_len, "program", "code", a, sizeof(a), &clipped);
+    if (!clipped && a[0] == '\0')
+      json_field(args, args_len, "text", a, sizeof(a), &clipped);
+    if (clipped) {
+      emit_text_delta(out,
+                      "the model's tool call arguments are too long for this "
+                      "build");
+      return;
+    }
+    if (a[0] == '\0') {
+      emit_text_delta(out, "python needs a program");
+      return;
+    }
+    int verdict = policy_check("python", a);
+    if (verdict == 0) {
+      emit_text_delta(out, "the policy denied python");
+      return;
+    }
+    invoke_tool(out, "python", "", a, verdict == 2);
+    return;
+  }
+  if (str_eq(tool, "plan")) {
+    json_field_any(args, args_len, "plan", "text", a, sizeof(a), &clipped);
+    if (clipped) {
+      emit_text_delta(out,
+                      "the model's tool call arguments are too long for this "
+                      "build");
+      return;
+    }
+    if (a[0] == '\0') {
+      emit_text_delta(out, "plan needs a plan");
+      return;
+    }
+    int verdict = policy_check("plan", a);
+    if (verdict == 0) {
+      emit_text_delta(out, "the policy denied the plan");
+      return;
+    }
+    invoke_tool(out, "plan", a, a, verdict == 2);
+    return;
+  }
+  emit_text_delta(out, "the model asked for a tool this build does not run");
+}
+
 __attribute__((export_name("ward_call")))
 void ward_call(uint32_t at, uint32_t len, uint32_t out) {
   heap_at = 0;
@@ -282,13 +560,14 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
   char text[TEXT_SIZE];
   char payload[TEXT_SIZE];
   char tool_name[TEXT_SIZE];
-  char arguments[TEXT_SIZE];
+  const uint8_t *arguments_ptr = 0;
+  uint32_t arguments_len = 0;
+  int tool_clipped = 0;
   uint32_t plen = 0;
   kind[0] = '\0';
   text[0] = '\0';
   payload[0] = '\0';
   tool_name[0] = '\0';
-  arguments[0] = '\0';
   for (uint32_t i = 0; i < n; i++) {
     const uint8_t *kp = 0;
     uint32_t kn = 0;
@@ -312,9 +591,11 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
         if (wd_key_eq(pk, pl, "text")) {
           if (wd_r_text(&r, payload, sizeof(payload), &plen) != 0) return;
         } else if (wd_key_eq(pk, pl, "tool")) {
-          if (wd_r_text(&r, tool_name, sizeof(tool_name), &plen) != 0) return;
+          if (read_text_clipped(&r, tool_name, sizeof(tool_name),
+                                &tool_clipped) != 0)
+            return;
         } else if (wd_key_eq(pk, pl, "arguments")) {
-          if (wd_r_text(&r, arguments, sizeof(arguments), &plen) != 0) return;
+          if (wd_r_text_ptr(&r, &arguments_ptr, &arguments_len) != 0) return;
         } else if (wd_key_eq(pk, pl, "error")) {
           if (wd_r_text(&r, payload, sizeof(payload), &plen) != 0) return;
         } else if (wd_r_skip(&r) != 0) {
@@ -326,40 +607,17 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
     }
   }
   if (tool_call) {
-    char arg_path[TEXT_SIZE];
-    char arg_text[TEXT_SIZE];
-    arg_path[0] = '\0';
-    arg_text[0] = '\0';
-    json_field(arguments, "path", arg_path, sizeof(arg_path));
-    json_field(arguments, "text", arg_text, sizeof(arg_text));
+    if (tool_clipped) {
+      emit_text_delta(out, "the model asked for a tool name that is too long");
+      return;
+    }
     if (tool_name[0] == '\0') {
       emit_text_delta(out, "the model asked for a tool without a name");
       return;
     }
-    if (str_eq(tool_name, "read")) {
-      int verdict = policy_check("read", arg_path);
-      if (verdict == 0) {
-        emit_text_delta(out, "the policy denied read");
-        return;
-      }
-      invoke_tool(out, "read", arg_path, "", verdict == 2);
-      return;
-    }
-    if (str_eq(tool_name, "write")) {
-      int verdict = policy_check("write", arg_path);
-      if (verdict == 0) {
-        emit_text_delta(out, "the policy denied write");
-        return;
-      }
-      invoke_tool(out, "write", arg_path, arg_text, verdict == 2);
-      return;
-    }
-    if (str_eq(tool_name, "grep")) {
-      invoke_tool(out, "grep", "", arg_text[0] != '\0' ? arg_text : arg_path,
-                  policy_check("grep", arg_path) == 2);
-      return;
-    }
-    emit_text_delta(out, "the model asked for a tool this build does not run");
+    const char *args_text =
+        arguments_ptr != 0 ? (const char *)arguments_ptr : "";
+    dispatch_model_tool(out, tool_name, args_text, arguments_len);
     return;
   }
   if (step) {

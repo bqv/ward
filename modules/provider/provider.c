@@ -7,16 +7,67 @@
 #include "wd_abi.h"
 
 #define HEAP_SIZE (1024u * 1024u)
-#define REPLY_SIZE 24576u
 #define TEXT_SIZE 2048u
 #define JSON_SIZE 65536u
+#define REPLY_SIZE (JSON_SIZE + 8192u)
 #define CALL_SIZE 8192u
+#define TOOL_SIZE 128u
+#define ARG_SIZE 8192u
 
 static uint8_t heap[HEAP_SIZE];
 static uint32_t heap_at;
 static uint8_t reply[REPLY_SIZE];
 static uint8_t callbuf[CALL_SIZE];
 static char answer[TEXT_SIZE];
+static char parsed_tool[TOOL_SIZE];
+static char parsed_arguments[ARG_SIZE];
+
+static const char tools_json[] =
+    ",\"tools\":["
+    "{\"type\":\"function\",\"function\":{\"name\":\"read\","
+    "\"description\":\"Read a text file from the session directory.\","
+    "\"parameters\":{\"type\":\"object\",\"properties\":{\"path\":{\"type\":"
+    "\"string\",\"description\":\"Path relative to the session directory.\"}},"
+    "\"required\":[\"path\"]}}},"
+    "{\"type\":\"function\",\"function\":{\"name\":\"write\","
+    "\"description\":\"Write a whole text file in the session directory.\","
+    "\"parameters\":{\"type\":\"object\",\"properties\":{\"path\":{\"type\":"
+    "\"string\",\"description\":\"Path relative to the session directory.\"},"
+    "\"text\":{\"type\":\"string\",\"description\":\"The complete new file "
+    "contents.\"}},\"required\":[\"path\",\"text\"]}}},"
+    "{\"type\":\"function\",\"function\":{\"name\":\"edit\","
+    "\"description\":\"Replace the first occurrence of find with replace in a "
+    "file in the session directory.\","
+    "\"parameters\":{\"type\":\"object\",\"properties\":{\"path\":{\"type\":"
+    "\"string\",\"description\":\"Path relative to the session directory.\"},"
+    "\"find\":{\"type\":\"string\",\"description\":\"Exact text to replace.\"},"
+    "\"replace\":{\"type\":\"string\",\"description\":\"Replacement text.\"}},"
+    "\"required\":[\"path\",\"find\",\"replace\"]}}},"
+    "{\"type\":\"function\",\"function\":{\"name\":\"grep\","
+    "\"description\":\"Search files in the session directory with a regular "
+    "expression.\","
+    "\"parameters\":{\"type\":\"object\",\"properties\":{\"pattern\":{\"type\":"
+    "\"string\",\"description\":\"Regular expression to search for.\"},"
+    "\"path\":{\"type\":\"string\",\"description\":\"Optional file or "
+    "directory relative to the session directory.\"}},"
+    "\"required\":[\"pattern\"]}}},"
+    "{\"type\":\"function\",\"function\":{\"name\":\"exec\","
+    "\"description\":\"Run one command in the session directory with no "
+    "shell.\","
+    "\"parameters\":{\"type\":\"object\",\"properties\":{\"command\":{\"type\":"
+    "\"string\",\"description\":\"Command and arguments separated by spaces.\"}},"
+    "\"required\":[\"command\"]}}},"
+    "{\"type\":\"function\",\"function\":{\"name\":\"python\","
+    "\"description\":\"Run a Python program in the session directory.\","
+    "\"parameters\":{\"type\":\"object\",\"properties\":{\"program\":{\"type\":"
+    "\"string\",\"description\":\"The Python source to run.\"}},"
+    "\"required\":[\"program\"]}}},"
+    "{\"type\":\"function\",\"function\":{\"name\":\"plan\","
+    "\"description\":\"Record or update the session plan.\","
+    "\"parameters\":{\"type\":\"object\",\"properties\":{\"plan\":{\"type\":"
+    "\"string\",\"description\":\"The plan text.\"}},"
+    "\"required\":[\"plan\"]}}}"
+    "]";
 
 __attribute__((import_module("ward"), import_name("cap")))
 extern void ward_cap(uint32_t at, uint32_t len, uint32_t out);
@@ -31,47 +82,79 @@ uint32_t ward_alloc(uint32_t len) {
 
 static void pair(uint32_t out, const uint8_t *data, uint32_t n) {
   uint32_t at = (uint32_t)(uintptr_t)reply;
-  for (uint32_t i = 0; i < n && i < REPLY_SIZE; i++) reply[i] = data[i];
+  if (n > REPLY_SIZE) n = REPLY_SIZE;
+  for (uint32_t i = 0; i < n; i++) reply[i] = data[i];
   uint8_t *o = (uint8_t *)(uintptr_t)out;
   wd_put32(o, at);
   wd_put32(o + 4, n);
 }
 
-static uint32_t json_escape(char *out, uint32_t cap, const uint8_t *in,
-                            uint32_t len) {
-  static const char hex[] = "0123456789abcdef";
-  uint32_t at = 0;
-  for (uint32_t i = 0; i < len && at + 7 < cap; i++) {
-    uint8_t c = in[i];
-    if (c == '"' || c == '\\') {
-      out[at++] = '\\';
-      out[at++] = (char)c;
-    } else if (c == '\n') {
-      out[at++] = '\\';
-      out[at++] = 'n';
-    } else if (c == '\r') {
-      out[at++] = '\\';
-      out[at++] = 'r';
-    } else if (c == '\t') {
-      out[at++] = '\\';
-      out[at++] = 't';
-    } else if (c < 0x20) {
-      out[at++] = '\\';
-      out[at++] = 'u';
-      out[at++] = '0';
-      out[at++] = '0';
-      out[at++] = hex[(c >> 4) & 0xf];
-      out[at++] = hex[c & 0xf];
-    } else {
-      out[at++] = (char)c;
-    }
+typedef struct {
+  char *buf;
+  uint32_t cap;
+  uint32_t len;
+  int overflow;
+} json_builder;
+
+static void json_add(json_builder *b, const char *p, uint32_t n) {
+  if (b->overflow) return;
+  if (n > b->cap - b->len) {
+    b->overflow = 1;
+    return;
   }
-  return at;
+  for (uint32_t i = 0; i < n; i++) b->buf[b->len + i] = p[i];
+  b->len += n;
+}
+
+static void json_addz(json_builder *b, const char *p) {
+  json_add(b, p, wd_len(p));
+}
+
+static void json_add_escaped(json_builder *b, const uint8_t *in, uint32_t len) {
+  static const char hex[] = "0123456789abcdef";
+  for (uint32_t i = 0; i < len; i++) {
+    uint8_t c = in[i];
+    char tmp[8];
+    uint32_t n = 0;
+    if (c == '"' || c == '\\') {
+      tmp[n++] = '\\';
+      tmp[n++] = (char)c;
+    } else if (c == '\n') {
+      tmp[n++] = '\\';
+      tmp[n++] = 'n';
+    } else if (c == '\r') {
+      tmp[n++] = '\\';
+      tmp[n++] = 'r';
+    } else if (c == '\t') {
+      tmp[n++] = '\\';
+      tmp[n++] = 't';
+    } else if (c < 0x20) {
+      tmp[n++] = '\\';
+      tmp[n++] = 'u';
+      tmp[n++] = '0';
+      tmp[n++] = '0';
+      tmp[n++] = hex[(c >> 4) & 0xf];
+      tmp[n++] = hex[c & 0xf];
+    } else {
+      tmp[n++] = (char)c;
+    }
+    json_add(b, tmp, n);
+  }
 }
 
 static void append_text(uint32_t *at, const uint8_t *p, uint32_t n) {
   for (uint32_t i = 0; i < n && *at + 1 < TEXT_SIZE; i++) answer[(*at)++] = (char)p[i];
   answer[*at] = '\0';
+}
+
+static uint32_t set_answer(const char *text) {
+  uint32_t n = 0;
+  while (text[n] != '\0' && n + 1 < sizeof(answer)) {
+    answer[n] = text[n];
+    n++;
+  }
+  answer[n] = '\0';
+  return n;
 }
 
 static int hex_value(uint8_t c) {
@@ -102,18 +185,6 @@ static int num_field(const char *body, uint32_t len, const char *key,
     return 1;
   }
   return 0;
-}
-
-static uint32_t count_token(const char *body, uint32_t len,
-                            const char *token) {
-  uint32_t token_len = (uint32_t)wd_len(token);
-  uint32_t count = 0;
-  for (uint32_t i = 0; i + token_len <= len; i++) {
-    uint32_t k = 0;
-    while (k < token_len && body[i + k] == token[k]) k++;
-    if (k == token_len) count++;
-  }
-  return count;
 }
 
 static void strip_slashes(const char *in, char *out, uint32_t cap) {
@@ -154,28 +225,376 @@ static int has_token(const char *body, uint32_t len, const char *token) {
   return 0;
 }
 
-static int text_field(const char *body, uint32_t len, const char *key,
-                      char *out, uint32_t cap) {
-  uint32_t key_len = (uint32_t)wd_len(key);
-  for (uint32_t i = 0; i + key_len < len; i++) {
-    uint32_t k = 0;
-    while (k < key_len && body[i + k] == key[k]) k++;
-    if (k != key_len) continue;
-    uint32_t j = i + key_len;
-    uint32_t used = 0;
-    while (j < len && body[j] != '"' && used + 1 < cap) {
-      if (body[j] == '\\' && j + 1 < len) {
-        out[used++] = body[j + 1];
-        j += 2;
+static void skip_space(const char *b, uint32_t len, uint32_t *at) {
+  while (*at < len) {
+    char c = b[*at];
+    if (c == ' ' || c == '\t' || c == '\r' || c == '\n')
+      (*at)++;
+    else
+      break;
+  }
+}
+
+static int skip_string(const char *b, uint32_t len, uint32_t *at) {
+  if (*at >= len || b[*at] != '"') return -1;
+  (*at)++;
+  while (*at < len) {
+    char c = b[*at];
+    if (c == '\\') {
+      if (*at + 1 >= len) return -1;
+      *at += 2;
+      continue;
+    }
+    (*at)++;
+    if (c == '"') return 0;
+  }
+  return -1;
+}
+
+static int skip_value(const char *b, uint32_t len, uint32_t *at, int depth) {
+  if (depth > 24) return -1;
+  skip_space(b, len, at);
+  if (*at >= len) return -1;
+  char c = b[*at];
+  if (c == '"') return skip_string(b, len, at);
+  if (c == '{') {
+    (*at)++;
+    skip_space(b, len, at);
+    if (*at < len && b[*at] == '}') {
+      (*at)++;
+      return 0;
+    }
+    for (;;) {
+      skip_space(b, len, at);
+      if (skip_string(b, len, at) != 0) return -1;
+      skip_space(b, len, at);
+      if (*at >= len || b[*at] != ':') return -1;
+      (*at)++;
+      if (skip_value(b, len, at, depth + 1) != 0) return -1;
+      skip_space(b, len, at);
+      if (*at >= len) return -1;
+      if (b[*at] == ',') {
+        (*at)++;
         continue;
       }
-      out[used++] = body[j];
-      j++;
+      if (b[*at] == '}') {
+        (*at)++;
+        return 0;
+      }
+      return -1;
     }
-    out[used] = '\0';
-    return used > 0 ? 1 : 0;
   }
-  return 0;
+  if (c == '[') {
+    (*at)++;
+    skip_space(b, len, at);
+    if (*at < len && b[*at] == ']') {
+      (*at)++;
+      return 0;
+    }
+    for (;;) {
+      if (skip_value(b, len, at, depth + 1) != 0) return -1;
+      skip_space(b, len, at);
+      if (*at >= len) return -1;
+      if (b[*at] == ',') {
+        (*at)++;
+        continue;
+      }
+      if (b[*at] == ']') {
+        (*at)++;
+        return 0;
+      }
+      return -1;
+    }
+  }
+  uint32_t start = *at;
+  while (*at < len) {
+    char v = b[*at];
+    if (v == ',' || v == ']' || v == '}' || v == ' ' || v == '\t' ||
+        v == '\r' || v == '\n')
+      break;
+    (*at)++;
+  }
+  return *at == start ? -1 : 0;
+}
+
+static void append_bytes(char *out, uint32_t limit, uint32_t *used,
+                         const char *p, uint32_t n, int *truncated) {
+  if (*used + n > limit) {
+    *truncated = 1;
+    return;
+  }
+  for (uint32_t i = 0; i < n; i++) out[(*used)++] = p[i];
+}
+
+static void append_codepoint(char *out, uint32_t limit, uint32_t *used,
+                             uint32_t cp, int *truncated) {
+  char tmp[4];
+  uint32_t n = 0;
+  if (cp < 0x80) {
+    tmp[n++] = (char)cp;
+  } else if (cp < 0x800) {
+    tmp[n++] = (char)(0xc0 | (cp >> 6));
+    tmp[n++] = (char)(0x80 | (cp & 0x3f));
+  } else if (cp < 0x10000) {
+    tmp[n++] = (char)(0xe0 | (cp >> 12));
+    tmp[n++] = (char)(0x80 | ((cp >> 6) & 0x3f));
+    tmp[n++] = (char)(0x80 | (cp & 0x3f));
+  } else {
+    tmp[n++] = (char)(0xf0 | (cp >> 18));
+    tmp[n++] = (char)(0x80 | ((cp >> 12) & 0x3f));
+    tmp[n++] = (char)(0x80 | ((cp >> 6) & 0x3f));
+    tmp[n++] = (char)(0x80 | (cp & 0x3f));
+  }
+  append_bytes(out, limit, used, tmp, n, truncated);
+}
+
+static int read_json_string(const char *b, uint32_t len, uint32_t *at,
+                            char *out, uint32_t cap, uint32_t *used_io,
+                            int *truncated) {
+  if (*at >= len || b[*at] != '"') return -1;
+  (*at)++;
+  uint32_t used = *used_io;
+  uint32_t limit = cap > 0 ? cap - 1 : 0;
+  while (*at < len) {
+    uint8_t c = (uint8_t)b[*at];
+    if (c == '"') {
+      (*at)++;
+      if (out != 0 && cap > 0) out[used] = '\0';
+      *used_io = used;
+      return 0;
+    }
+    if (c == '\\') {
+      (*at)++;
+      if (*at >= len) return -1;
+      uint8_t e = (uint8_t)b[*at];
+      (*at)++;
+      if (e == 'u') {
+        uint32_t cp = 0;
+        if (*at + 4 > len) return -1;
+        for (int h = 0; h < 4; h++) {
+          int hv = hex_value((uint8_t)b[*at + (uint32_t)h]);
+          if (hv < 0) return -1;
+          cp = (cp << 4) | (uint32_t)hv;
+        }
+        *at += 4;
+        if (cp >= 0xd800 && cp <= 0xdbff && *at + 6 <= len &&
+            b[*at] == '\\' && b[*at + 1] == 'u') {
+          uint32_t low = 0;
+          int ok = 1;
+          for (int h = 0; h < 4; h++) {
+            int hv = hex_value((uint8_t)b[*at + 2 + (uint32_t)h]);
+            if (hv < 0) {
+              ok = 0;
+              break;
+            }
+            low = (low << 4) | (uint32_t)hv;
+          }
+          if (ok && low >= 0xdc00 && low <= 0xdfff) {
+            cp = 0x10000 + ((cp - 0xd800) << 10) + (low - 0xdc00);
+            *at += 6;
+          }
+        }
+        if (cp >= 0xd800 && cp <= 0xdfff) cp = 0xfffd;
+        append_codepoint(out, limit, &used, cp, truncated);
+      } else {
+        char d;
+        if (e == 'n')
+          d = '\n';
+        else if (e == 'r')
+          d = '\r';
+        else if (e == 't')
+          d = '\t';
+        else if (e == 'b')
+          d = '\b';
+        else if (e == 'f')
+          d = '\f';
+        else
+          d = (char)e;
+        append_bytes(out, limit, &used, &d, 1, truncated);
+      }
+      continue;
+    }
+    append_bytes(out, limit, &used, (const char *)&c, 1, truncated);
+    (*at)++;
+  }
+  return -1;
+}
+
+typedef struct {
+  int have_index;
+  uint32_t index;
+  char *name;
+  uint32_t name_cap;
+  uint32_t name_len;
+  int name_trunc;
+  char *args;
+  uint32_t args_cap;
+  uint32_t args_len;
+  int args_trunc;
+} call_fields;
+
+static void zero_fields(call_fields *f) {
+  f->have_index = 0;
+  f->index = 0;
+  f->name = 0;
+  f->name_cap = 0;
+  f->name_len = 0;
+  f->name_trunc = 0;
+  f->args = 0;
+  f->args_cap = 0;
+  f->args_len = 0;
+  f->args_trunc = 0;
+}
+
+static int scan_call_object(const char *b, uint32_t len, uint32_t *at,
+                            call_fields *f, int depth) {
+  if (depth > 24) return -1;
+  skip_space(b, len, at);
+  if (*at >= len || b[*at] != '{') return -1;
+  (*at)++;
+  for (;;) {
+    skip_space(b, len, at);
+    if (*at >= len) return -1;
+    if (b[*at] == '}') {
+      (*at)++;
+      return 0;
+    }
+    char key[32];
+    uint32_t key_len = 0;
+    int key_trunc = 0;
+    if (read_json_string(b, len, at, key, sizeof(key), &key_len, &key_trunc) != 0)
+      return -1;
+    skip_space(b, len, at);
+    if (*at >= len || b[*at] != ':') return -1;
+    (*at)++;
+    skip_space(b, len, at);
+    if (*at >= len) return -1;
+    int is_index = !key_trunc &&
+                   wd_key_eq((const uint8_t *)key, key_len, "index");
+    int is_name = !key_trunc && f->name != 0 &&
+                  wd_key_eq((const uint8_t *)key, key_len, "name");
+    int is_args = !key_trunc && f->args != 0 &&
+                  wd_key_eq((const uint8_t *)key, key_len, "arguments");
+    if (is_index && b[*at] >= '0' && b[*at] <= '9') {
+      uint32_t value = 0;
+      while (*at < len && b[*at] >= '0' && b[*at] <= '9') {
+        value = value * 10 + (uint32_t)(b[*at] - '0');
+        (*at)++;
+      }
+      f->have_index = 1;
+      f->index = value;
+    } else if (is_name && b[*at] == '"') {
+      if (f->name_len != 0) {
+        if (skip_string(b, len, at) != 0) return -1;
+      } else if (read_json_string(b, len, at, f->name, f->name_cap, &f->name_len,
+                                  &f->name_trunc) != 0) {
+        return -1;
+      }
+    } else if (is_args && b[*at] == '"') {
+      if (read_json_string(b, len, at, f->args, f->args_cap, &f->args_len,
+                           &f->args_trunc) != 0)
+        return -1;
+    } else if (b[*at] == '{') {
+      if (scan_call_object(b, len, at, f, depth + 1) != 0) return -1;
+    } else {
+      if (skip_value(b, len, at, depth + 1) != 0) return -1;
+    }
+    skip_space(b, len, at);
+    if (*at < len && b[*at] == ',') {
+      (*at)++;
+      continue;
+    }
+    if (*at < len && b[*at] == '}') {
+      (*at)++;
+      return 0;
+    }
+    return -1;
+  }
+}
+
+static int collect_tool_calls(const char *body, uint32_t len, char *tool,
+                              uint32_t tool_cap, char *args, uint32_t args_cap,
+                              int *truncated) {
+  call_fields f;
+  zero_fields(&f);
+  f.name = tool;
+  f.name_cap = tool_cap;
+  f.args = args;
+  f.args_cap = args_cap;
+  tool[0] = '\0';
+  args[0] = '\0';
+  int streaming = has_token(body, len, "\"delta\":");
+  int multiple = 0;
+  int have_first = 0;
+  uint32_t first_index = 0;
+  uint32_t ordinal = 0;
+  uint32_t at = 0;
+  while (at < len) {
+    if (body[at] != '"') {
+      at++;
+      continue;
+    }
+    char key[32];
+    uint32_t key_len = 0;
+    int key_trunc = 0;
+    if (read_json_string(body, len, &at, key, sizeof(key), &key_len,
+                         &key_trunc) != 0)
+      return -1;
+    skip_space(body, len, &at);
+    if (at >= len || body[at] != ':') continue;
+    if (key_trunc ||
+        !wd_key_eq((const uint8_t *)key, key_len, "tool_calls"))
+      continue;
+    at++;
+    skip_space(body, len, &at);
+    if (at >= len || body[at] != '[') continue;
+    at++;
+    for (;;) {
+      skip_space(body, len, &at);
+      if (at >= len) break;
+      if (body[at] == ']') {
+        at++;
+        break;
+      }
+      if (body[at] != '{') {
+        if (skip_value(body, len, &at, 0) != 0) break;
+        continue;
+      }
+      uint32_t start = at;
+      call_fields probe;
+      zero_fields(&probe);
+      uint32_t scan = start;
+      if (scan_call_object(body, len, &scan, &probe, 0) != 0) break;
+      uint32_t index =
+          probe.have_index ? probe.index : (streaming ? 0u : ordinal);
+      if (!have_first) {
+        have_first = 1;
+        first_index = index;
+      } else if (index != first_index) {
+        multiple = 1;
+      }
+      if (!multiple && index == first_index) {
+        scan = start;
+        if (scan_call_object(body, len, &scan, &f, 0) != 0) break;
+      }
+      at = scan;
+      ordinal++;
+      skip_space(body, len, &at);
+      if (at < len && body[at] == ',') {
+        at++;
+        continue;
+      }
+      if (at < len && body[at] == ']') {
+        at++;
+        break;
+      }
+      break;
+    }
+  }
+  if (truncated != 0) *truncated = f.name_trunc || f.args_trunc;
+  if (!have_first) return 0;
+  if (multiple) return 2;
+  return 1;
 }
 
 static uint32_t scan_content(const uint8_t *body, uint32_t len) {
@@ -219,6 +638,18 @@ static uint32_t scan_content(const uint8_t *body, uint32_t len) {
     i = j;
   }
   return at;
+}
+
+static void emit_buffer_error(uint32_t out) {
+  wd_w full;
+  wd_w_init(&full, reply, REPLY_SIZE);
+  wd_w_map(&full, 2);
+  wd_w_textz(&full, "text");
+  wd_w_textz(&full,
+             "the chat request did not fit the provider's buffers");
+  wd_w_textz(&full, "status");
+  wd_w_uint(&full, 0);
+  if (!full.failed) pair(out, reply, full.at);
 }
 
 __attribute__((export_name("ward_call")))
@@ -329,61 +760,60 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
     num_field((const char *)body, body_len, "\"predicted_n\"", &predicted_n);
     num_field((const char *)body, body_len, "\"predicted_ms\"", &predicted_ms);
     num_field((const char *)body, body_len, "\"cache_n\"", &cache_n);
-    char tool[128];
-    char arguments[1024];
-    tool[0] = '\0';
-    arguments[0] = '\0';
-    if (has_token((const char *)body, body_len, "tool_calls")) {
-      text_field((const char *)body, body_len, "\"name\":\"", tool,
-                 sizeof(tool));
-      text_field((const char *)body, body_len, "\"arguments\":\"", arguments,
-                 sizeof(arguments));
-      if (count_token((const char *)body, body_len, "\"function\"") > 1) {
-        tool[0] = '\0';
+    parsed_tool[0] = '\0';
+    parsed_arguments[0] = '\0';
+    if (status == 200 &&
+        has_token((const char *)body, body_len, "tool_calls")) {
+      int truncated = 0;
+      int calls = collect_tool_calls(
+          (const char *)body, body_len, parsed_tool, sizeof(parsed_tool),
+          parsed_arguments, sizeof(parsed_arguments), &truncated);
+      if (calls == 2) {
+        parsed_tool[0] = '\0';
+        parsed_arguments[0] = '\0';
         static const char multiple[] =
             "the model asked for more than one tool call; refusing rather than "
             "running only the first";
-        uint32_t m = 0;
-        while (multiple[m] != '\0' && m + 1 < sizeof(answer)) {
-          answer[m] = multiple[m];
-          m++;
-        }
-        answer[m] = '\0';
-        text_at = m;
+        text_at = set_answer(multiple);
+      } else if (calls == 1 && truncated) {
+        parsed_tool[0] = '\0';
+        parsed_arguments[0] = '\0';
+        static const char too_long[] =
+            "the model's tool call was too long for this build; refusing "
+            "rather than running a truncated call";
+        text_at = set_answer(too_long);
+      } else if (calls < 0) {
+        parsed_tool[0] = '\0';
+        parsed_arguments[0] = '\0';
       }
     }
-    if (tool[0] == '\0') {
+    if (parsed_tool[0] == '\0') {
       static char plain[TEXT_SIZE];
       strip_slashes(answer, plain, sizeof(plain));
       if (has_token(plain, (uint32_t)wd_len(plain), "\"tool\"")) {
-        quoted_after(plain, "\"tool\"", tool, sizeof(tool));
+        quoted_after(plain, "\"tool\"", parsed_tool, sizeof(parsed_tool));
         char path[512];
         quoted_after(plain, "\"path\"", path, sizeof(path));
-        if (tool[0] != '\0' && path[0] != '\0') {
+        if (parsed_tool[0] != '\0' && path[0] != '\0') {
           uint32_t used = 0;
           static const char open_key[] = "{\"path\":\"";
-          for (uint32_t k = 0; open_key[k] != '\0' && used + 1 < sizeof(arguments);
+          for (uint32_t k = 0;
+               open_key[k] != '\0' && used + 1 < sizeof(parsed_arguments);
                k++)
-            arguments[used++] = open_key[k];
-          for (uint32_t k = 0; path[k] != '\0' && used + 1 < sizeof(arguments);
-               k++)
-            arguments[used++] = path[k];
-          if (used + 3 < sizeof(arguments)) {
-            arguments[used++] = '"';
-            arguments[used++] = '}';
+            parsed_arguments[used++] = open_key[k];
+          for (uint32_t k = 0;
+               path[k] != '\0' && used + 1 < sizeof(parsed_arguments); k++)
+            parsed_arguments[used++] = path[k];
+          if (used + 3 < sizeof(parsed_arguments)) {
+            parsed_arguments[used++] = '"';
+            parsed_arguments[used++] = '}';
           }
-          arguments[used] = '\0';
-        } else if (tool[0] != '\0') {
+          parsed_arguments[used] = '\0';
+        } else if (parsed_tool[0] != '\0') {
           static const char incomplete[] =
               "the model asked for a tool without a path; refusing rather than "
               "guessing";
-          uint32_t m = 0;
-          while (incomplete[m] != '\0' && m + 1 < sizeof(answer)) {
-            answer[m] = incomplete[m];
-            m++;
-          }
-          answer[m] = '\0';
-          text_at = m;
+          text_at = set_answer(incomplete);
         }
       }
     }
@@ -404,9 +834,9 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
     wd_w_textz(&w, "cache_n");
     wd_w_uint(&w, cache_n);
     wd_w_textz(&w, "tool");
-    wd_w_textz(&w, tool);
+    wd_w_textz(&w, parsed_tool);
     wd_w_textz(&w, "arguments");
-    wd_w_textz(&w, arguments);
+    wd_w_textz(&w, parsed_arguments);
     if (!w.failed) pair(out, reply, w.at);
     return;
   }
@@ -422,49 +852,41 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
     return;
   }
 
-  static const char prefix[] =
-      "{\"model\":\"";
+  static const char prefix[] = "{\"model\":\"";
   static char json[JSON_SIZE];
-  uint32_t jl = 0;
-  for (uint32_t i = 0; prefix[i] != '\0' && jl < sizeof(json); i++)
-    json[jl++] = prefix[i];
+  json_builder jb;
+  jb.buf = json;
+  jb.cap = sizeof(json);
+  jb.len = 0;
+  jb.overflow = 0;
+  json_addz(&jb, prefix);
   {
     const char *chosen = model[0] != '\0' ? model : "local";
-    for (uint32_t i = 0; chosen[i] != '\0' && jl < sizeof(json); i++)
-      json[jl++] = chosen[i];
-    static const char rest[] = "\",\"stream\":true,\"max_tokens\":";
-    for (uint32_t i = 0; rest[i] != '\0' && jl < sizeof(json); i++)
-      json[jl++] = rest[i];
-    for (uint32_t i = 0; max_tokens[i] != '\0' && jl < sizeof(json); i++)
-      json[jl++] = max_tokens[i];
-    static const char messages[] = ",\"messages\":[";
-    for (uint32_t i = 0; messages[i] != '\0' && jl < sizeof(json); i++)
-      json[jl++] = messages[i];
+    json_addz(&jb, chosen);
   }
+  json_addz(&jb, "\",\"stream\":true,\"max_tokens\":");
+  json_addz(&jb, max_tokens);
+  json_addz(&jb, tools_json);
+  json_addz(&jb, ",\"messages\":[");
   for (uint32_t e = 0; e < hist_count; e++) {
     static const char role_open[] = "{\"role\":\"";
     static const char content_open[] = "\",\"content\":\"";
-    for (uint32_t i = 0; role_open[i] != '\0' && jl < sizeof(json); i++)
-      json[jl++] = role_open[i];
-    for (uint32_t i = 0; i < hist_role_len[e] && jl < sizeof(json); i++)
-      json[jl++] = (char)hist_role[e][i];
-    for (uint32_t i = 0; content_open[i] != '\0' && jl < sizeof(json); i++)
-      json[jl++] = content_open[i];
-    jl += json_escape(json + jl, sizeof(json) - jl, hist_text[e], hist_text_len[e]);
-    if (jl + 2 < sizeof(json)) {
-      json[jl++] = '"';
-      json[jl++] = '}';
-      json[jl++] = ',';
-    }
+    json_addz(&jb, role_open);
+    json_add(&jb, (const char *)hist_role[e], hist_role_len[e]);
+    json_addz(&jb, content_open);
+    json_add_escaped(&jb, hist_text[e], hist_text_len[e]);
+    json_addz(&jb, "\"},");
   }
   {
     static const char user_open[] = "{\"role\":\"user\",\"content\":\"";
     static const char suffix[] = "\"}]}";
-    for (uint32_t i = 0; user_open[i] != '\0' && jl < sizeof(json); i++)
-      json[jl++] = user_open[i];
-    jl += json_escape(json + jl, sizeof(json) - jl, prompt, prompt_len);
-    for (uint32_t i = 0; suffix[i] != '\0' && jl < sizeof(json); i++)
-      json[jl++] = suffix[i];
+    json_addz(&jb, user_open);
+    json_add_escaped(&jb, prompt, prompt_len);
+    json_addz(&jb, suffix);
+  }
+  if (jb.overflow || jb.len + 128 > REPLY_SIZE) {
+    emit_buffer_error(out);
+    return;
   }
 
   wd_w_init(&w, reply, REPLY_SIZE);
@@ -474,6 +896,10 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
   wd_w_textz(&w, "path");
   wd_w_textz(&w, "/v1/chat/completions");
   wd_w_textz(&w, "body");
-  wd_w_text(&w, json, jl);
-  if (!w.failed) pair(out, reply, w.at);
+  wd_w_text(&w, json, jb.len);
+  if (w.failed) {
+    emit_buffer_error(out);
+    return;
+  }
+  pair(out, reply, w.at);
 }
