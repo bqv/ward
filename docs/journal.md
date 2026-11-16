@@ -2477,3 +2477,16 @@ file, asserting the truncated flag, the spill path and a spill file larger than 
 The 256-byte window is a compromise, not a design goal: it is the driver's 512-byte buffer halved for the notice, and raising
 that buffer produced a wasm out-of-bounds trap rather than a working larger window. The next slice — observed file state and
 read-before-write — is the remaining policy item, then provider retry and per-tool timeouts.
+
+Hundred-and-eighty-fifth: read-before-write is enforced. A successful `fs.read` marks the resolved absolute path by emitting
+`session.observed {path}`; the session keeps the set in memory and rebuilds it from those events on load, so a restart does not
+forget what the session has seen. `fs.write` and `fs.edit` refuse an existing file that is not in the set with a named reason;
+a new file is still created, and a file read in this session is still written. The check is core's, because it is a durable
+invariant rather than a judgement, and the policy module keeps deciding allow/ask/deny for everything else. `grep` reads a
+file but does not mark it observed; only the read tool does, which is the conservative side of DSH's rule.
+
+gate_tool proves both directions: it seeds `guard.txt`, grants the write approval, and finds the content unchanged because the
+session never read it; then it reads `out.txt` and writes it through, and the earlier atomic assertions (new text, mode 0640
+kept) still hold. The suite is green at 52 tests. A version guard — refusing the write when the file changed between the read
+and the write — is the remaining half of the DSH policy and is not in this slice. Next in the programme: provider retry with
+backoff.
