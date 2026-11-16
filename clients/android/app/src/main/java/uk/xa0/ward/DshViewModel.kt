@@ -177,6 +177,7 @@ import uk.xa0.ward.net.MuxState
 import uk.xa0.ward.net.JobClient
 import uk.xa0.ward.net.StreamEvent
 import uk.xa0.ward.net.TerminalClient
+import java.io.File
 import java.security.cert.X509Certificate
 import uk.xa0.ward.term.HostShellIssue
 import uk.xa0.ward.term.HostShellProgress
@@ -3294,6 +3295,8 @@ class DshViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             transcriptTick.sample(60).collect { publishTranscript() }
         }
+
+        loadCachedRoster()
 
         if (config.isConfigured) {
             // The dial owns the route question: [attemptConnect] probes the doors in
@@ -6652,6 +6655,28 @@ class DshViewModel(application: Application) : AndroidViewModel(application) {
         return result
     }
 
+    private fun rosterCacheFile(): File =
+        File(getApplication<Application>().filesDir, "session-roster.json")
+
+    private fun loadCachedRoster() {
+        val file = rosterCacheFile()
+        if (!file.isFile) return
+        runCatching {
+            val cached = JSONObject(file.readText())
+            val items = if (cached.str("endpoint") == _ui.value.baseUrl) {
+                cached.optJSONArray("items")
+            } else {
+                null
+            }
+            val rows = (0 until (items?.length() ?: 0)).mapNotNull { index ->
+                items?.optJSONObject(index)?.let { sessionItemOf(it) }
+            }
+            if (rows.isNotEmpty()) {
+                _ui.value = _ui.value.copy(sessions = rows, sessionsLoading = true)
+            }
+        }.onFailure { Log.d(TAG, "session roster cache ignored: ${describe(it)}") }
+    }
+
     private suspend fun fetchSessions(): List<SessionItem> {
         // Taken *before* the request goes out, so a live frame that lands while this
         // read is in flight is stamped as possibly newer than the cut it answers — the
@@ -6664,6 +6689,16 @@ class DshViewModel(application: Application) : AndroidViewModel(application) {
         // See [sessionListItems]. The throw reaches the caller's runCatching, which
         // keeps the previous rows and marks them stale.
         val items = sessionListItems(value)
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                rosterCacheFile().writeText(
+                    JSONObject()
+                        .put("endpoint", _ui.value.baseUrl)
+                        .put("items", items)
+                        .toString(),
+                )
+            }
+        }
         // The scheduled-task marks, read beside the roster so the rows this pull builds
         // already carry them. One host-wide read, and a failure is not evidence that a
         // task ended — see [refreshScheduleCounts].
@@ -8695,6 +8730,7 @@ class DshViewModel(application: Application) : AndroidViewModel(application) {
         // preset it will run. Absent means "not carried by this payload", not "none".
         val agentPreset = if (values.has("agentPreset")) values.str("agentPreset") else _ui.value.currentAgentPreset
 
+        val hasPressure = values.has("contextPressure")
         val pressure = values.obj("contextPressure")
         val window = pressure.int("contextWindow")
         val projected = pressure.int("projectedTokens")
@@ -8740,10 +8776,10 @@ class DshViewModel(application: Application) : AndroidViewModel(application) {
             currentPermission = nextPermission,
             planActive = plan,
             currentAgentPreset = agentPreset,
-            contextPercent = percent,
-            contextTokens = used,
-            contextWindow = window,
-            contextBreakdown = breakdown ?: _ui.value.contextBreakdown,
+            contextPercent = if (hasPressure) percent else _ui.value.contextPercent,
+            contextTokens = if (hasPressure) used else _ui.value.contextTokens,
+            contextWindow = if (hasPressure) window else _ui.value.contextWindow,
+            contextBreakdown = if (values.has("contextBreakdown")) breakdown else _ui.value.contextBreakdown,
             goal = goal,
             // Held over when the payload omits both keys: a `session/list` refresh
             // without them is not evidence that the session has no statistics, and

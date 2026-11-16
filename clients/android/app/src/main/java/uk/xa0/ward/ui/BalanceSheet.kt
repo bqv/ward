@@ -23,7 +23,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.LocalContext
 import uk.xa0.ward.BalanceState
 import uk.xa0.ward.model.DEEPSEEK_TOP_UP_URL
 import uk.xa0.ward.ui.components.DshTextField
@@ -78,7 +78,7 @@ fun BalanceContent(
     onDismiss: () -> Unit,
 ) {
     val colors = DshTheme.colors
-    val uriHandler = LocalUriHandler.current
+    val context = LocalContext.current
     // The field starts empty even when a key is saved: showing a stored secret back
     // to the screen is a habit worth not forming, and "Replace key" says what it does.
     var draft by rememberSaveable { mutableStateOf("") }
@@ -162,9 +162,9 @@ fun BalanceContent(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             SectionAction("Top up on DeepSeek") {
-                // The platform page, in the browser: DeepSeek has no top-up API, and a
-                // payment form inside this app would be inventing one.
-                runCatching { uriHandler.openUri(DEEPSEEK_TOP_UP_URL) }
+                runCatching {
+                    context.startActivity(InternalBrowserActivity.intent(context, DEEPSEEK_TOP_UP_URL))
+                }
             }
             Spacer(Modifier.weight(1f))
             TextButton(onClick = onDismiss) {

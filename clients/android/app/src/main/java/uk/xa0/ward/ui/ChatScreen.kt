@@ -292,6 +292,7 @@ fun ChatScreen(vm: DshViewModel) {
     // "follow this again", and both of them count even when the reader has scrolled
     // away: opening a session, and sending a message.
     var followFrom by remember { mutableStateOf(0) }
+    var arrivalHandled by remember { mutableStateOf<String?>(null) }
     val following = TailFollow(
         state = listState,
         rearmKey = followFrom,
@@ -355,6 +356,7 @@ fun ChatScreen(vm: DshViewModel) {
     // means following it.
     LaunchedEffect(ui.currentSessionId) {
         frozenLive = null
+        arrivalHandled = null
         // A session switch replaces every row there is, which is indistinguishable
         // from the app moving a list on its own unless it says so.
         ScrollDiag.prog("chat", "session-switch")
@@ -1308,6 +1310,16 @@ fun ChatScreen(vm: DshViewModel) {
                         live = shownLive,
                         fold = foldTurns,
                     )
+                }
+                LaunchedEffect(ui.currentSessionId, awaitingTranscript, rows) {
+                    val id = ui.currentSessionId ?: return@LaunchedEffect
+                    if (awaitingTranscript || arrivalHandled == id) return@LaunchedEffect
+                    arrivalHandled = id
+                    val liveIndex = rows.indexOfLast { it is DisplayRow.Live }
+                    if (liveIndex >= 0) {
+                        ScrollDiag.prog("chat", "arrival-live")
+                        scope.launch { listState.scrollToItem(liveIndex) }
+                    }
                 }
 
                 // The tool-call forest, keyed by call id so a row can find its own
