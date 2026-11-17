@@ -508,7 +508,7 @@ private fun QueueRow(
                                 },
                                 enabled = busy == null && row.text != null,
                             ) { row.text?.let(onStartEdit) }
-                            QueueAction(Icons.Rounded.DeleteOutline, "Remove queued message", busy == null, onRemove)
+                            QueueAction(Icons.Rounded.DeleteOutline, "Remove queued message", busy == null && row.item != null, onRemove)
                             // A row that is already steering has nothing left to promote.
                             if (!steering) {
                                 QueueAction(
@@ -518,7 +518,7 @@ private fun QueueRow(
                                     } else {
                                         "Steering is available only while the agent is running"
                                     },
-                                    enabled = busy == null && running,
+                                    enabled = busy == null && running && row.item != null,
                                 ) { onSteer() }
                             }
                         }

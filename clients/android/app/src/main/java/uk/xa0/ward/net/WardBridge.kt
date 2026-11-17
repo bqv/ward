@@ -7,6 +7,9 @@ package uk.xa0.ward.net
 import org.json.JSONArray
 import org.json.JSONObject
 import uk.xa0.ward.data.LocalWorkspaceStore
+import uk.xa0.ward.model.QUEUE_ACTION_REMOVE
+import uk.xa0.ward.model.QUEUE_ACTION_STEER
+import uk.xa0.ward.model.queueActionConfirmed
 import uk.xa0.ward.proto.Cbor
 import uk.xa0.ward.proto.WardApi
 import uk.xa0.ward.proto.WardConnection
@@ -70,19 +73,53 @@ class WardBridge(
             val row = item as? Cbor.Map ?: return@forEachIndexed
             val text = row.text("text").orEmpty()
             val ahead = row.long("ahead") ?: index.toLong()
+            val itemId = row.long("item")
             val matched = pending.indexOfFirst { it.first == text }
             val rpcId = if (matched >= 0) pending.removeAt(matched).second else ""
+            val source = JSONObject().put("kind", "user")
+            if (rpcId.isNotEmpty()) source.put("rpcId", rpcId)
             val message = JSONObject()
-                .put("id", "ward-queue-$ahead")
-                .put("placement", "queued")
-                .put("message", JSONObject().put("content", JSONArray().put(JSONObject()
+                .put("id", itemId?.let { "ward-queue-$it" } ?: "ward-queue-$ahead")
+                .put("content", JSONArray().put(JSONObject()
                     .put("type", "text")
-                    .put("text", text))))
-            if (rpcId.isNotEmpty()) message.put("rpcId", rpcId)
+                    .put("text", text)))
+                .put("source", source)
+            if (itemId != null) message.put("item", itemId)
             items.put(message)
         }
         if (pending.isEmpty()) queuedRpcIds.remove(sessionId) else queuedRpcIds[sessionId] = pending
         return JSONObject().put("next-turn", items).put("next-step", JSONArray())
+    }
+
+    private suspend fun updateQueue(request: JSONObject): JSONObject {
+        val session = request.optString("sessionId")
+        val item = request.optLong("item", 0L).takeIf { it > 0L }
+            ?: request.optString("itemId").toLongOrNull()
+            ?: throw DshRpcException("invalid_params", "the queue item id is missing", null)
+        val kind = request.optJSONObject("action")?.optString("kind").orEmpty()
+        return when (kind) {
+            QUEUE_ACTION_REMOVE -> {
+                val answer = api.sessionQueueRemove(session, item)
+                if (!queueActionConfirmed(kind, answer.bool("removed"), null)) {
+                    throw DshRpcException("internal", "the daemon did not confirm the removal", null)
+                }
+                JSONObject().put("removed", true)
+            }
+
+            QUEUE_ACTION_STEER -> {
+                val answer = api.sessionQueueSteer(session, item)
+                if (!queueActionConfirmed(kind, null, answer.bool("steered"))) {
+                    throw DshRpcException("internal", "the daemon did not confirm the steer", null)
+                }
+                JSONObject().put("item", item).put("steered", true)
+            }
+
+            else -> throw DshRpcException(
+                "not_supported",
+                "ward cannot $kind a queued message",
+                null,
+            )
+        }
     }
 
     fun notePromptStarted(sessionId: String, text: String) {
@@ -345,7 +382,7 @@ class WardBridge(
                 request.optString("sessionId").ifEmpty { request.optString("session") },
             ).toJson()
             "goals/edit", "goals/pause", "goals/resume" -> JSONObject()
-            "session/updateQueue" -> JSONObject()
+            "session/updateQueue" -> updateQueue(request)
             "session/attachment" -> JSONObject()
             "estate.status" -> estateStatus()
             "llm/discoverModels", "localRouter/status" -> JSONObject()
@@ -448,7 +485,8 @@ class WardBridge(
                 }
             }
         }
-        val result = api.prompt(session, text, steer = request.optString("mode") == "steer")
+        val steer = request.optString("mode") == "steer"
+        val result = api.prompt(session, text, steer = steer, queue = !steer)
         val queued = result.bool("queued") ?: false
         if (queued) queuePrompt(session, request, text)
         return JSONObject()

@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -90,12 +91,34 @@ class WardLiveTest {
             // The first scripted write parks on approval; the second prompt is
             // therefore a daemon-owned queue row, not a client mirror.
             api.prompt(session.id, "/write ward-queue-test.txt hello")
-            val second = api.prompt(session.id, "queued text from the test")
+            val second = api.prompt(session.id, "queued text from the test", queue = true)
             assertEquals(true, second.bool("queued"))
             val queue = api.sessionQueue(session.id)
             assertEquals(session.id, queue.text("session"))
             val items = queue.array("items")?.items.orEmpty().mapNotNull { it as? Cbor.Map }
-            assertTrue(items.any { it.text("text") == "queued text from the test" && it.long("ahead") == 0L })
+            val queued = items.first { it.text("text") == "queued text from the test" }
+            assertTrue(queued.long("ahead") == 0L)
+            val item = queued.long("item")
+            assertNotNull(item)
+            assertEquals(true, api.sessionQueueRemove(session.id, item!!).bool("removed"))
+            assertTrue(
+                api.sessionQueue(session.id).array("items")?.items.orEmpty()
+                    .mapNotNull { it as? Cbor.Map }
+                    .none { it.long("item") == item },
+            )
+            val third = api.prompt(session.id, "steer this instead", queue = true)
+            assertEquals(true, third.bool("queued"))
+            val steerItem = api.sessionQueue(session.id).array("items")?.items.orEmpty()
+                .mapNotNull { it as? Cbor.Map }
+                .first { it.text("text") == "steer this instead" }
+                .long("item")
+            assertNotNull(steerItem)
+            assertEquals(true, api.sessionQueueSteer(session.id, steerItem!!).bool("steered"))
+            assertTrue(
+                api.sessionQueue(session.id).array("items")?.items.orEmpty()
+                    .mapNotNull { it as? Cbor.Map }
+                    .none { it.long("item") == steerItem },
+            )
         } finally {
             runCatching { api.cancel(session.id) }
             connection.close()

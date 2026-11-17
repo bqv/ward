@@ -3,6 +3,7 @@ package uk.xa0.ward.model
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -190,5 +191,49 @@ class QueueMirrorTest {
         assertEquals(fromNested.text, fromTopLevel.text)
         assertEquals("req-10", fromTopLevel.rpcId)
         assertEquals(false, fromTopLevel.pending)
+    }
+
+    @Test
+    fun `a daemon queue row carries its numeric item id`() {
+        val inbox = JSONObject(
+            "{\"next-turn\":[{\"id\":\"ward-queue-42\",\"item\":42,\"content\":[" +
+                text("steer me") + "],\"source\":{\"kind\":\"user\"}}],\"next-step\":[]}",
+        )
+
+        val row = parseQueueItems(inboxQueueItems(inbox)).single()
+        assertEquals("ward-queue-42", row.id)
+        assertEquals(42L, row.item)
+        assertEquals("steer me", row.text)
+        assertEquals("steer me", row.preview)
+    }
+
+    @Test
+    fun `a row without a numeric item id has no action target`() {
+        val row = parseQueueItems(
+            inboxQueueItems(inbox(textMessage("m-1", text("legacy")))),
+        ).single()
+
+        assertNull(row.item)
+    }
+
+    @Test
+    fun `the control-stream item shape reads the item id too`() {
+        val items = JSONArray(
+            "[{\"id\":\"ward-queue-7\",\"item\":7,\"placement\":\"queued\"," +
+                "\"message\":{\"content\":[${text("older host")} ]}}]",
+        )
+
+        assertEquals(7L, parseQueueItems(items).single().item)
+    }
+
+    @Test
+    fun `an action is confirmed only by the field the daemon answers with`() {
+        assertTrue(queueActionConfirmed("remove", removed = true, steered = null))
+        assertTrue(queueActionConfirmed("steer", removed = null, steered = true))
+        assertFalse(queueActionConfirmed("remove", removed = null, steered = null))
+        assertFalse(queueActionConfirmed("remove", removed = false, steered = null))
+        assertFalse(queueActionConfirmed("steer", removed = null, steered = false))
+        assertFalse(queueActionConfirmed("steer", removed = true, steered = null))
+        assertFalse(queueActionConfirmed("edit", removed = true, steered = true))
     }
 }

@@ -52,6 +52,8 @@ import uk.xa0.ward.model.ModelChoice
 import uk.xa0.ward.model.ModelRef
 import uk.xa0.ward.model.ModelSelectionState
 import uk.xa0.ward.model.PendingSessionTarget
+import uk.xa0.ward.model.QUEUE_ACTION_REMOVE
+import uk.xa0.ward.model.QUEUE_ACTION_STEER
 import uk.xa0.ward.model.QUEUE_PREVIEW_CHARS
 import uk.xa0.ward.model.inboxQueueItems
 import uk.xa0.ward.model.parseHostModelSelection
@@ -656,6 +658,7 @@ data class QueuedMessage(
      * one: the web's `admitted` set is built exactly this way.
      */
     val rpcId: String? = null,
+    val item: Long? = null,
     /**
      * A client-side submission echo, not yet a host row. It has no host item id
      * ([id] is the prompt request id), so its actions are disabled.
@@ -8430,18 +8433,10 @@ class DshViewModel(application: Application) : AndroidViewModel(application) {
 
     // ------------------------------------------------------------------ queue
 
-    /**
-     * One queue mutation (`session/updateQueue`).
-     *
-     * The dock's optimistic bookkeeping is deliberately thin: the host answers
-     * every mutation with a replacement `queue` frame on the control stream, so
-     * the local list is only touched to keep the row from flashing back before
-     * that frame lands.
-     */
-    private fun queueAction(itemId: String, action: JSONObject, failure: String, optimistic: () -> Unit) {
+    private fun queueAction(item: Long, kind: String, failure: String) {
         val sessionId = _ui.value.currentSessionId ?: return
         viewModelScope.launch {
-            _ui.value = _ui.value.copy(queueBusy = itemId)
+            _ui.value = _ui.value.copy(queueBusy = item.toString())
             runCatching {
                 client.rpc(
                     "session/updateQueue",
@@ -8449,60 +8444,55 @@ class DshViewModel(application: Application) : AndroidViewModel(application) {
                         "request",
                         JSONObject()
                             .put("sessionId", sessionId)
-                            .put("itemId", itemId)
-                            .put("action", action),
+                            .put("item", item)
+                            .put("action", JSONObject().put("kind", kind)),
                     ),
                 )
             }.onSuccess {
-                optimistic()
+                refreshQueue(sessionId)
                 _ui.value = _ui.value.copy(queueBusy = null)
             }.onFailure { error ->
                 _ui.value = _ui.value.copy(queueBusy = null)
                 showFailure(error, "session/updateQueue", "$failure ")
+                refreshQueue(sessionId)
             }
         }
     }
 
+    private suspend fun refreshQueue(sessionId: String) {
+        val inbox = runCatching { client.hostQueueInbox(sessionId) }.getOrNull() ?: return
+        applyInbox(sessionId, inbox)
+    }
+
+    private fun queueItem(rowId: String): Long? =
+        _ui.value.queue.firstOrNull { it.id == rowId }?.item
+
     fun editQueueItem(itemId: String, text: String) {
         if (text.isBlank()) return
-        val content = JSONArray().put(JSONObject().put("type", "text").put("text", text))
+        val item = queueItem(itemId) ?: return
         queueAction(
-            itemId = itemId,
-            action = JSONObject().put("kind", "edit").put("content", content),
+            item = item,
+            kind = "edit",
             failure = "Edit failed: this message may have already started sending.",
-        ) {
-            mutateQueueRow(itemId) { it.copy(text = text, preview = text) }
-        }
+        )
     }
 
     fun removeQueueItem(itemId: String) {
+        val item = queueItem(itemId) ?: return
         queueAction(
-            itemId = itemId,
-            action = JSONObject().put("kind", "remove"),
+            item = item,
+            kind = QUEUE_ACTION_REMOVE,
             failure = "Removal failed: this message may have already started sending.",
-        ) {
-            mutateQueueRow(itemId) { null }
-        }
+        )
     }
 
-    /**
-     * Promotes one queued row into the running turn.
-     *
-     * The row is not deleted: the host answers a steer by re-listing the very
-     * same item with `placement: "steering"` and holds it there until the turn
-     * claims it, so the dock's send glyph is the truthful state. Flipping it
-     * locally just makes that transition start on the tap instead of on the next
-     * control frame; the frame then agrees, or drops the row if the turn got
-     * there first and there is nothing left to settle.
-     */
     fun steerQueueItem(itemId: String) {
+        val item = queueItem(itemId) ?: return
         queueAction(
-            itemId = itemId,
-            action = JSONObject().put("kind", "steer"),
+            item = item,
+            kind = QUEUE_ACTION_STEER,
             failure = "Steering failed. Try again.",
-        ) {
-            mutateQueueRow(itemId) { it.copy(placement = "steering") }
-        }
+        )
     }
 
     // ------------------------------------------------------- submission echoes
@@ -8566,33 +8556,6 @@ class DshViewModel(application: Application) : AndroidViewModel(application) {
         }
         return true
     }
-
-    /**
-     * Rewrites the row with [itemId] wherever it lives — the host list or the
-     * local echo list — and republishes the dock.
-     *
-     * The two lists must stay apart: an echo is retired by matching `rpcId`, so a
-     * copy leaked into the host map would come back as a second, authoritative
-     * row. A null transform removes the row.
-     */
-    private fun mutateQueueRow(itemId: String, transform: (QueuedMessage) -> QueuedMessage?) {
-        val sessionId = sessionIdOrNull()
-        fun apply(rows: List<QueuedMessage>?): List<QueuedMessage>? =
-            rows?.mapNotNull { row -> if (row.id == itemId) transform(row) else row }
-
-        apply(queues[sessionId])?.let { queues[sessionId] = it }
-        val echoes = apply(pendingSubmissions[sessionId])
-        if (echoes != null) {
-            if (echoes.isEmpty()) {
-                pendingSubmissions.remove(sessionId)
-            } else {
-                pendingSubmissions[sessionId] = echoes
-            }
-        }
-        publishQueue()
-    }
-
-    private fun sessionIdOrNull(): String = _ui.value.currentSessionId.orEmpty()
 
     fun stop() {
         val sessionId = _ui.value.currentSessionId ?: return

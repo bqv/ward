@@ -43,11 +43,22 @@ fun inboxQueueItems(inbox: JSONObject?): JSONArray {
                 "message",
                 JSONObject().put("content", message.optJSONArray("content") ?: JSONArray()),
             )
+        val itemId = message.long("item", 0L)
+        if (itemId > 0L) item.put("item", itemId)
         val rpcId = message.obj("source")?.takeIf { it.str("kind") == "user" }?.str("rpcId")
         if (!rpcId.isNullOrEmpty()) item.put("rpcId", rpcId)
         items.put(item)
     }
     return items
+}
+
+const val QUEUE_ACTION_REMOVE = "remove"
+const val QUEUE_ACTION_STEER = "steer"
+
+fun queueActionConfirmed(kind: String, removed: Boolean?, steered: Boolean?): Boolean = when (kind) {
+    QUEUE_ACTION_REMOVE -> removed == true
+    QUEUE_ACTION_STEER -> steered == true
+    else -> false
 }
 
 /**
@@ -92,6 +103,7 @@ fun parseQueueItems(items: JSONArray?): List<QueuedMessage> {
                 }
             }
         }
+        val itemId = item.long("item", 0L).takeIf { it > 0L }
         val collapsed = flat.toString().replace(Regex("\\s+"), " ").trim()
         val preview = if (collapsed.length > QUEUE_PREVIEW_CHARS) {
             collapsed.take(QUEUE_PREVIEW_CHARS) + "…"
@@ -112,6 +124,7 @@ fun parseQueueItems(items: JSONArray?): List<QueuedMessage> {
             // The item's `rpcId` is the only identity shared with a local
             // submission echo; see [uk.xa0.ward.QueuedMessage.rpcId].
             rpcId = item.str("rpcId").takeIf { it.isNotEmpty() },
+            item = itemId,
         )
     }
     return result

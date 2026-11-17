@@ -47,13 +47,17 @@ class WardApi(private val connection: WardConnection) {
         id: String,
         text: String,
         steer: Boolean = false,
+        queue: Boolean = false,
         timeoutMs: Long = 20 * 60_000,
     ): Cbor = connection.call(
         "session.prompt",
         cborMap(
             "id" to id.cbor(),
             "text" to text.cbor(),
-            *buildList { if (steer) add("steer" to true.cbor()) }.toTypedArray(),
+            *buildList {
+                if (steer) add("steer" to true.cbor())
+                if (queue) add("queue" to true.cbor())
+            }.toTypedArray(),
         ),
         timeoutMs,
     )
@@ -178,6 +182,12 @@ class WardApi(private val connection: WardConnection) {
 
     suspend fun sessionQueue(id: String): Cbor.Map =
         connection.call("session.queue", cborMap("id" to id.cbor())).asMap()
+
+    suspend fun sessionQueueRemove(id: String, item: Long): Cbor =
+        connection.call("session.queue.remove", cborMap("id" to id.cbor(), "item" to item.cbor()))
+
+    suspend fun sessionQueueSteer(id: String, item: Long): Cbor =
+        connection.call("session.queue.steer", cborMap("id" to id.cbor(), "item" to item.cbor()))
 
     suspend fun listApprovals(): List<Cbor.Map> =
         connection.call("approval.list", Cbor.Map(emptyList())).array("approvals")?.items
