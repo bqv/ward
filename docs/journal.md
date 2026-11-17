@@ -2657,3 +2657,9 @@ including head invalidation and the model broadcast — and skips a model that i
 The gate saves two presets, checks the sorted list and fields, applies one and verifies the session's model and system prompt, refuses an
 unknown preset, deletes one and re-saves the other to prove replacement. The gate does not restart the daemon, so the load-on-start path
 is documented but not exercised; client surfaces (the desktop strip and Android drawer) are still open.
+
+Two-hundred-and-fifth: preset surfaces in both clients. The desktop status strip gains a presets chip whose menu is the daemon's
+`preset.list` (radio rows, model/custom-system tooltips, disabled without a session) and whose Apply goes through `preset.apply`,
+recording the daemon-returned name and showing a refusal without pretending. Android wires `agentPresets/list` and `agentPresets/select`
+to `preset.list`/`preset.apply`, parses the roster and the applied result, opens the existing preset sheet from the header chip and
+surfaces failures in the banner; a pending preset is applied after session creation. gate_desktop and the Android unit suite pass.
