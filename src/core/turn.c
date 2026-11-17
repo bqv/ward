@@ -731,7 +731,10 @@ static int fs_read(wd_turn *turn, const uint8_t *in, size_t in_len,
   }
   if (turn->session != NULL) {
     uint64_t observed_seq = 0;
-    (void)wd_session_mark_observed(turn->session, path, &observed_seq);
+    uint64_t mtime_ms = (uint64_t)st.st_mtim.tv_sec * 1000u +
+                        (uint64_t)(st.st_mtim.tv_nsec / 1000000);
+    (void)wd_session_mark_observed_version(turn->session, path, mtime_ms,
+                                           (uint64_t)st.st_size, &observed_seq);
   }
   rc = tool_ok_bounded(turn, "read", buf, got, out, out_len);
   free(buf);
@@ -1349,11 +1352,23 @@ static int fs_write(wd_turn *turn, const uint8_t *in, size_t in_len,
     free(text);
     return tool_fail("fs.write: the text is missing or too long", out, out_len);
   }
-  if (turn->session != NULL && access(path, F_OK) == 0 &&
-      !wd_session_observed(turn->session, path)) {
-    free(text);
-    return tool_fail("fs.write: read the file before overwriting it", out,
-                     out_len);
+  if (turn->session != NULL) {
+    struct stat before;
+    if (stat(path, &before) == 0) {
+      uint64_t mtime_ms = (uint64_t)before.st_mtim.tv_sec * 1000u +
+                          (uint64_t)(before.st_mtim.tv_nsec / 1000000);
+      if (!wd_session_observed(turn->session, path)) {
+        free(text);
+        return tool_fail("fs.write: read the file before overwriting it", out,
+                         out_len);
+      }
+      if (!wd_session_observed_version(turn->session, path, mtime_ms,
+                                       (uint64_t)before.st_size)) {
+        free(text);
+        return tool_fail("fs.write: the file changed since it was read", out,
+                         out_len);
+      }
+    }
   }
   int written = write_atomic(path, text, len);
   free(text);

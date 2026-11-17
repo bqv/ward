@@ -33,6 +33,8 @@ typedef struct {
   wd_pin pins[WD_PIN_MAX];
   size_t pins_len;
   char **observed;
+  uint64_t *observed_mtime;
+  uint64_t *observed_size;
   size_t observed_len;
   size_t observed_cap;
 } wd_session;
@@ -69,6 +71,11 @@ int wd_session_fork(wd_store *st, wd_session *parent, uint64_t upto, wd_session 
 int wd_session_checkpoint(wd_session *s, const char *label, uint64_t *seq_out);
 bool wd_session_observed(const wd_session *s, const char *path);
 int wd_session_mark_observed(wd_session *s, const char *path, uint64_t *seq_out);
+int wd_session_mark_observed_version(wd_session *s, const char *path,
+                                     uint64_t mtime_ms, uint64_t size,
+                                     uint64_t *seq_out);
+bool wd_session_observed_version(const wd_session *s, const char *path,
+                                 uint64_t mtime_ms, uint64_t size);
 int wd_session_last_checkpoint(wd_session *s, uint64_t *seq_out);
 
 typedef int (*wd_session_replay_cb)(void *ctx, uint64_t seq, cbor_item_t *event);

@@ -134,6 +134,9 @@ $(BUILDDIR)/%.o: %.c
 $(BUILDDIR)/abi_test: tests/abi_test.c $(CLIENT_OBJ) $(CORE_LIB)
 	$(CC) $(CFLAGS) -Wno-unused-function $< $(CLIENT_OBJ) $(CORE_LIB) $(LDFLAGS) $(PKG_LIBS) -o $@
 
+$(BUILDDIR)/gate_fs: tests/gate_fs.c $(CLIENT_OBJ) $(CORE_LIB)
+	$(CC) $(CFLAGS) -Wno-unused-function $< $(CLIENT_OBJ) $(CORE_LIB) $(LDFLAGS) $(PKG_LIBS) -o $@
+
 $(BUILDDIR)/%: tests/%.c $(CLIENT_OBJ) $(CORE_LIB)
 	$(CC) $(CFLAGS) $< $(CLIENT_OBJ) $(CORE_LIB) $(LDFLAGS) $(PKG_LIBS) -o $@
 

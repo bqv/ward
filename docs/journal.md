@@ -2568,3 +2568,15 @@ already ended, so a client sees the turn close and the transcript can record wha
 the same reason, then unlinks the copy. The bisect was the useful part: this daemon change alone passes the whole tool gate,
 including the timeout approval; the same code alongside the observed-version and repeat changes failed at `approval.respond`.
 The culprit in that batch is therefore in `session.c`/`turn.c`, not in the failure emission, which narrows the next attempt.
+
+Hundred-and-ninety-sixth: the toolchain and the first dedicated gate. The Android release build was failing at AAPT2 with `error=13,
+Permission denied` on exec of the transformed binary; the Gradle daemon cannot exec it from the workspace path even though a shell can,
+and the same binary runs from `/tmp`. `build.sh` now copies the extracted aapt2 to a private tmpfs directory and passes
+`-Pandroid.aapt2FromMavenOverride`, and `assembleRelease` produces uk.xa0.ward 0.6.8 (17).
+
+The first small gate is `tests/gate_fs`, built from gate_tool's harness with a single sequence: read a file, change it externally, prove
+the write is refused and the external text survives, re-read, write again and watch the checkpoint precede the result. Behind it,
+`session.observed` now carries `mtime_ms` and `size` and replays them, and `fs.write`/`fs.edit` refuse a file whose version no longer
+matches what was read; `wd_session_mark_observed_version` and `wd_session_observed_version` are the new core surface. `session_test`,
+`gate_tool` and the full suite are green at 53 with `gate_fs` in the list. The combined-change failures of the previous session did not
+reproduce: the daemon-side and session-side changes now stand on their own gates, which is the point of splitting them.

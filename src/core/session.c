@@ -67,6 +67,8 @@ static void session_free(wd_session *s) {
   free(s->head);
   for (size_t i = 0; i < s->observed_len; i++) free(s->observed[i]);
   free(s->observed);
+  free(s->observed_mtime);
+  free(s->observed_size);
   free(s);
 }
 
@@ -99,19 +101,33 @@ static int apply_model(void *ctx, uint64_t seq, cbor_item_t *event) {
   return 0;
 }
 
-static bool observed_add(wd_session *s, const char *path) {
-  for (size_t i = 0; i < s->observed_len; i++)
-    if (strcmp(s->observed[i], path) == 0) return true;
+static bool observed_add(wd_session *s, const char *path, uint64_t mtime_ms,
+                         uint64_t size) {
+  for (size_t i = 0; i < s->observed_len; i++) {
+    if (strcmp(s->observed[i], path) != 0) continue;
+    s->observed_mtime[i] = mtime_ms;
+    s->observed_size[i] = size;
+    return true;
+  }
   if (s->observed_len == s->observed_cap) {
     size_t grown = s->observed_cap == 0 ? 8 : s->observed_cap * 2;
     char **next = realloc(s->observed, grown * sizeof(*next));
     if (next == NULL) return false;
     s->observed = next;
+    uint64_t *mt = realloc(s->observed_mtime, grown * sizeof(*mt));
+    if (mt == NULL) return false;
+    s->observed_mtime = mt;
+    uint64_t *sz = realloc(s->observed_size, grown * sizeof(*sz));
+    if (sz == NULL) return false;
+    s->observed_size = sz;
     s->observed_cap = grown;
   }
   char *copy = strdup(path);
   if (copy == NULL) return false;
-  s->observed[s->observed_len++] = copy;
+  s->observed[s->observed_len] = copy;
+  s->observed_mtime[s->observed_len] = mtime_ms;
+  s->observed_size[s->observed_len] = size;
+  s->observed_len++;
   return true;
 }
 
@@ -120,9 +136,14 @@ static int apply_observed(void *ctx, uint64_t seq, cbor_item_t *event) {
   (void)seq;
   char *kind = wd_text_copy(wd_get(event, "kind"));
   if (kind != NULL && strcmp(kind, "session.observed") == 0) {
-    char *path = wd_text_copy(wd_get(wd_get(event, "payload"), "path"));
+    cbor_item_t *payload = wd_get(event, "payload");
+    char *path = wd_text_copy(wd_get(payload, "path"));
+    uint64_t mtime_ms = 0;
+    uint64_t size = 0;
+    (void)wd_uint_of(wd_get(payload, "mtime_ms"), &mtime_ms);
+    (void)wd_uint_of(wd_get(payload, "size"), &size);
     if (path != NULL) {
-      (void)observed_add(s, path);
+      (void)observed_add(s, path, mtime_ms, size);
       free(path);
     }
   }
@@ -138,13 +159,30 @@ bool wd_session_observed(const wd_session *s, const char *path) {
 }
 
 int wd_session_mark_observed(wd_session *s, const char *path, uint64_t *seq_out) {
+  return wd_session_mark_observed_version(s, path, 0, 0, seq_out);
+}
+
+bool wd_session_observed_version(const wd_session *s, const char *path,
+                                 uint64_t mtime_ms, uint64_t size) {
+  if (s == NULL || path == NULL) return false;
+  for (size_t i = 0; i < s->observed_len; i++)
+    if (strcmp(s->observed[i], path) == 0)
+      return s->observed_mtime[i] == mtime_ms && s->observed_size[i] == size;
+  return false;
+}
+
+int wd_session_mark_observed_version(wd_session *s, const char *path,
+                                     uint64_t mtime_ms, uint64_t size,
+                                     uint64_t *seq_out) {
   if (s == NULL || path == NULL || path[0] == '\0') return -1;
-  if (wd_session_observed(s, path)) return 0;
-  cbor_item_t *payload = wd_map(1);
+  if (wd_session_observed_version(s, path, mtime_ms, size)) return 0;
+  cbor_item_t *payload = wd_map(3);
   wd_put(payload, "path", wd_text(path));
+  wd_put(payload, "mtime_ms", wd_uint(mtime_ms));
+  wd_put(payload, "size", wd_uint(size));
   int rc = wd_session_emit(s, "session.observed", payload, seq_out);
   if (rc != 0) return -1;
-  return observed_add(s, path) ? 0 : -1;
+  return observed_add(s, path, mtime_ms, size) ? 0 : -1;
 }
 
 static int apply_upgrade(void *ctx, uint64_t seq, cbor_item_t *event) {
