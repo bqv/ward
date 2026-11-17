@@ -2683,3 +2683,10 @@ result falls through to the driver as before, so a provider that keeps asking fo
 makes exactly one provider request with no tool, and "use a tool now" produces one fs.read call, one result, a second provider request
 whose body contains "fs.read returned", and a final text delta. Known limits: a denied approval still ends the turn without feeding the
 denial back to the model, and the fourth tool still executes before the fall-through end.
+
+Two-hundred-and-eighth: the repeat-tool reminder. With the loop in place a model can call the same tool repeatedly inside one turn, so the turn
+now counts identical capability+args pairs (eight-entry table, canonical CBOR key) and on the third identical call emits
+`tool.repeated {tool, count: 3}` through the event callback before running it; later repeats are silent, the table clears per turn and at
+turn free, and a ninth distinct pair is ignored. The fixture gained `WARD_FAKE_ALWAYS_TOOL`, which answers every provider request with the
+same native `fs.read note.txt` call, so `gate_repeat` drives the five-round cap: it asserts exactly one reminder with tool fs.read and
+count 3, three to four tool calls and results, and that the turn still ends. Suite green.

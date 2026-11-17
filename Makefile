@@ -152,6 +152,9 @@ $(BUILDDIR)/gate_image: tests/gate_image.c $(CLIENT_OBJ) $(CORE_LIB)
 $(BUILDDIR)/gate_loop: tests/gate_loop.c $(CLIENT_OBJ) $(CORE_LIB)
 	$(CC) $(CFLAGS) -Wno-unused-function $< $(CLIENT_OBJ) $(CORE_LIB) $(LDFLAGS) $(PKG_LIBS) -o $@
 
+$(BUILDDIR)/gate_repeat: tests/gate_repeat.c $(CLIENT_OBJ) $(CORE_LIB)
+	$(CC) $(CFLAGS) -Wno-unused-function $< $(CLIENT_OBJ) $(CORE_LIB) $(LDFLAGS) $(PKG_LIBS) -o $@
+
 $(BUILDDIR)/gate_preset: tests/gate_preset.c $(CLIENT_OBJ) $(CORE_LIB)
 	$(CC) $(CFLAGS) -Wno-unused-function $< $(CLIENT_OBJ) $(CORE_LIB) $(LDFLAGS) $(PKG_LIBS) -o $@
 

@@ -122,8 +122,12 @@ static void serve(int fd) {
     size_t used = strlen(prompt);
     snprintf(prompt + used, sizeof(prompt) - used, " [attach]");
   }
-  if (strstr(request, "use a tool now") != NULL &&
-      marker_request_index() == 0) {
+  const char *always = getenv("WARD_FAKE_ALWAYS_TOOL");
+  int always_tool =
+      always != NULL && always[0] != '\0' && access(always, F_OK) == 0;
+  if (always_tool ||
+      (strstr(request, "use a tool now") != NULL &&
+       marker_request_index() == 0)) {
     static const char call[] =
         "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n"
         "Connection: close\r\n\r\n"

@@ -34,6 +34,14 @@ static int invoke(wd_instance *instance, cbor_item_t *payload,
 #define WD_TURN_FUEL 50000000ull
 #define WD_TURN_MEMORY (16 * 1024 * 1024)
 #define WD_TURN_ROUNDS 4
+#define WD_TURN_REPEATS 8
+
+typedef struct {
+  char *tool;
+  uint8_t *args;
+  size_t args_len;
+  int count;
+} wd_tool_repeat;
 
 struct wd_turn {
   wd_engine *engine;
@@ -93,6 +101,8 @@ struct wd_turn {
   char *steers[8];
   size_t steer_count;
   uint64_t epoch;
+  wd_tool_repeat repeats[WD_TURN_REPEATS];
+  size_t repeat_count;
 };
 
 static const wd_limits TURN_LIMITS = {.fuel = WD_TURN_FUEL,
@@ -1708,9 +1718,19 @@ void wd_turn_set_root(wd_turn *turn, const char *root) {
   turn->root = next;
 }
 
+static void repeats_clear(wd_turn *turn) {
+  for (size_t i = 0; i < turn->repeat_count; i++) {
+    free(turn->repeats[i].tool);
+    free(turn->repeats[i].args);
+  }
+  memset(turn->repeats, 0, sizeof(turn->repeats));
+  turn->repeat_count = 0;
+}
+
 void wd_turn_free(wd_turn *turn) {
   if (turn == NULL) return;
   if (turn->history != NULL) wd_free(turn->history);
+  repeats_clear(turn);
   free(turn->context);
   wd_http_job_free(turn->http_job);
   wd_worker_free(turn->worker);
@@ -1785,6 +1805,50 @@ static uint8_t *encode_keep(cbor_item_t *item, size_t *len) {
   }
   *len = written;
   return buf;
+}
+
+static void note_tool_call(wd_turn *turn, const char *tool, cbor_item_t *args,
+                           wd_turn_emit emit, void *ctx) {
+  if (turn == NULL || tool == NULL || args == NULL) return;
+  size_t len = 0;
+  uint8_t *bytes = encode_keep(args, &len);
+  if (bytes == NULL) return;
+  size_t slot = turn->repeat_count;
+  for (size_t i = 0; i < turn->repeat_count; i++) {
+    wd_tool_repeat *entry = &turn->repeats[i];
+    if (entry->args_len == len && strcmp(entry->tool, tool) == 0 &&
+        memcmp(entry->args, bytes, len) == 0) {
+      slot = i;
+      break;
+    }
+  }
+  if (slot == turn->repeat_count) {
+    if (turn->repeat_count >= WD_TURN_REPEATS) {
+      free(bytes);
+      return;
+    }
+    char *name = strdup(tool);
+    if (name == NULL) {
+      free(bytes);
+      return;
+    }
+    turn->repeats[slot].tool = name;
+    turn->repeats[slot].args = bytes;
+    turn->repeats[slot].args_len = len;
+    turn->repeat_count++;
+  } else {
+    free(bytes);
+  }
+  turn->repeats[slot].count++;
+  if (turn->repeats[slot].count != 3 || emit == NULL) return;
+  cbor_item_t *event = wd_map(2);
+  if (event == NULL) return;
+  wd_put(event, "tool", wd_text(tool));
+  wd_put(event, "count", wd_uint((uint64_t)turn->repeats[slot].count));
+  char *err = NULL;
+  (void)emit(ctx, "tool.repeated", event, &err);
+  free(err);
+  wd_free(event);
 }
 
 static int invoke(wd_instance *instance, cbor_item_t *payload,
@@ -2241,6 +2305,7 @@ static int process_action(wd_turn *turn, cbor_item_t *action, wd_turn_emit emit,
           (void)emit(ctx, "tool.call", notice, &notice_err);
           free(notice_err);
           wd_free(notice);
+          note_tool_call(turn, capability, args, emit, ctx);
           if (strcmp(capability, "fs.write") == 0 ||
               strcmp(capability, "fs.edit") == 0) {
             cbor_item_t *checkpoint = wd_map(1);
@@ -2436,6 +2501,7 @@ int wd_turn_prompt(wd_turn *turn, const char *text, wd_turn_emit emit, void *ctx
   turn->history = history_with_head(turn->history, turn->head);
   turn->model_tool = false;
   turn->provider_rounds = 0;
+  repeats_clear(turn);
   cbor_item_t *message = wd_map(2);
   if (message == NULL) {
     *err = strdup("out of memory");
