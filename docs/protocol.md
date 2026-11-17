@@ -475,6 +475,24 @@ loaded, so the choice survives a restart. An unknown model is `not_found`.
 
 `session.create` refuses a model the catalog does not hold when the catalog is not empty.
 
+### Agent presets
+
+`preset.save {name, system?, model?}` creates or replaces the named preset and answers
+`{name, system, model}`; an omitted field is stored as an empty string. A name is 1..64
+bytes and may not hold `/`. Presets are persisted in `<state>/presets.cbor` beside
+`models.toml`, written to a temporary file and renamed, so they survive a restart.
+
+`preset.list {}` answers `{presets: [{name, system, model}]}` sorted by name.
+`preset.get {name}` answers the preset in the same flat shape, and `preset.delete {name}`
+answers `{deleted: true}`; an unknown name is `not_found`.
+
+`preset.apply {id, name}` sets the session's system prompt from the preset (an empty
+system clears it) and, when the preset names a model the catalog holds, selects it through
+the same path as `session.set_model`, broadcasting `session.model`. It answers
+`{applied: true, name, system, model}`, where `model` is the session's model after
+applying; a preset model outside the catalog is left unselected. An unknown preset or
+session is `not_found`. `session.set_system` and `session.set_model` keep their shapes.
+
 ### Declared, not served in M0
 
 The frozen list, from `README.md`:

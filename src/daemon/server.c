@@ -75,6 +75,12 @@ typedef struct wd_out {
 
 typedef struct wd_run wd_run;
 
+typedef struct {
+  char *name;
+  char *system;
+  char *model;
+} wd_agent_preset;
+
 typedef struct wd_queue {
   bool announced;
   struct wd_queue *next;
@@ -207,6 +213,9 @@ typedef struct {
   char *module_dir;
   size_t max_runs;
   wd_settings settings;
+  wd_agent_preset *presets;
+  size_t presets_len;
+  size_t presets_cap;
   char *default_model;
   char *quic_endpoint;
   int quic_port;
@@ -224,6 +233,9 @@ static void conn_close(wd_server *srv, wd_conn *conn);
 static void conn_release(wd_server *srv, wd_conn *conn);
 static cbor_item_t *session_cbor(wd_server *srv, wd_session *session);
 static char *resolve_model_id(wd_server *srv, const char *wanted);
+static char *catalog_model_id(wd_server *srv, const char *wanted);
+static int install_session_system(wd_session *session, const char *text,
+                                  uint64_t *seq_out);
 static void handle_session_prompt(wd_server *srv, wd_conn *conn, uint64_t id,
                                   cbor_item_t *params);
 typedef struct {
@@ -549,6 +561,35 @@ static void handle_session_fork(wd_server *srv, wd_conn *conn, uint64_t id,
   conn_arm(srv, conn);
 }
 
+static int install_session_system(wd_session *session, const char *text,
+                                  uint64_t *seq_out) {
+  int rc = wd_session_set_system(session, text, seq_out);
+  if (rc == 0) wd_session_invalidate_head(session);
+  return rc;
+}
+
+static char *catalog_model_id(wd_server *srv, const char *wanted) {
+  if (wanted == NULL || wanted[0] == '\0') return NULL;
+  char *resolved = resolve_model_id(srv, wanted);
+  if (resolved == NULL) return NULL;
+  if (wd_models_find(srv->models, resolved) == NULL) {
+    free(resolved);
+    return NULL;
+  }
+  return resolved;
+}
+
+static int apply_session_model(wd_server *srv, wd_session *session,
+                               const char *name, uint64_t *seq_out) {
+  uint64_t seq = 0;
+  if (wd_session_set_model(session, name, &seq) != 0) return -1;
+  cbor_item_t *event = wd_map(1);
+  wd_put(event, "model", wd_text(name));
+  conn_broadcast(srv, session, "session.model", seq, event);
+  if (seq_out != NULL) *seq_out = seq;
+  return 0;
+}
+
 static void handle_session_set_system(wd_server *srv, wd_conn *conn,
                                       uint64_t id, cbor_item_t *params) {
   char *session_id = wd_text_copy(wd_get(params, "id"));
@@ -569,7 +610,7 @@ static void handle_session_set_system(wd_server *srv, wd_conn *conn,
     return;
   }
   uint64_t seq = 0;
-  int rc = wd_session_set_system(session, text, &seq);
+  int rc = install_session_system(session, text, &seq);
   free(session_id);
   free(text);
   if (rc != 0) {
@@ -577,7 +618,6 @@ static void handle_session_set_system(wd_server *srv, wd_conn *conn,
     conn_arm(srv, conn);
     return;
   }
-  wd_session_invalidate_head(session);
   cbor_item_t *result = wd_map(2);
   wd_put(result, "session", wd_session_to_cbor(session));
   wd_put(result, "seq", wd_uint(seq));
@@ -598,7 +638,7 @@ static void handle_session_set_model(wd_server *srv, wd_conn *conn, uint64_t id,
     conn_arm(srv, conn);
     return;
   }
-  char *resolved = name != NULL ? resolve_model_id(srv, name) : NULL;
+  char *resolved = catalog_model_id(srv, name);
   if (resolved != NULL) {
     free(name);
     name = resolved;
@@ -610,16 +650,12 @@ static void handle_session_set_model(wd_server *srv, wd_conn *conn, uint64_t id,
     conn_arm(srv, conn);
     return;
   }
-  uint64_t seq = 0;
-  if (wd_session_set_model(session, name, &seq) != 0) {
+  if (apply_session_model(srv, session, name, NULL) != 0) {
     free(session_id);
     free(name);
     respond_internal(srv, conn, id, "cannot record the model change");
     return;
   }
-  cbor_item_t *event = wd_map(1);
-  wd_put(event, "model", wd_text(name));
-  conn_broadcast(srv, session, "session.model", seq, event);
   cbor_item_t *result = wd_map(1);
   wd_put(result, "session", session_cbor(srv, session));
   conn_send_cached(conn, id, wd_response_ok(id, result));
@@ -2611,6 +2647,324 @@ static void handle_policy_select(wd_server *srv, wd_conn *conn, uint64_t id,
   cbor_item_t *result = wd_map(1);
   wd_put(result, "id", wd_text(choice));
   free(choice);
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
+static bool valid_preset_name(const char *name) {
+  if (name == NULL) return false;
+  size_t len = strlen(name);
+  return len > 0 && len <= 64 && strchr(name, '/') == NULL;
+}
+
+static int presets_path(const char *state_dir, char *out, size_t cap) {
+  int written = snprintf(out, cap, "%s/presets.cbor", state_dir);
+  return written > 0 && (size_t)written < cap ? 0 : -1;
+}
+
+static void agent_presets_clear(wd_server *srv) {
+  for (size_t i = 0; i < srv->presets_len; i++) {
+    free(srv->presets[i].name);
+    free(srv->presets[i].system);
+    free(srv->presets[i].model);
+  }
+  free(srv->presets);
+  srv->presets = NULL;
+  srv->presets_len = 0;
+  srv->presets_cap = 0;
+}
+
+static wd_agent_preset *agent_preset_find(wd_server *srv, const char *name) {
+  for (size_t i = 0; i < srv->presets_len; i++)
+    if (strcmp(srv->presets[i].name, name) == 0) return &srv->presets[i];
+  return NULL;
+}
+
+static int agent_preset_set(wd_server *srv, const char *name, const char *system,
+                            const char *model) {
+  char *name_copy = strdup(name);
+  char *system_copy = strdup(system);
+  char *model_copy = strdup(model);
+  if (name_copy == NULL || system_copy == NULL || model_copy == NULL) {
+    free(name_copy);
+    free(system_copy);
+    free(model_copy);
+    return -1;
+  }
+  wd_agent_preset *found = agent_preset_find(srv, name);
+  if (found != NULL) {
+    free(found->system);
+    free(found->model);
+    found->system = system_copy;
+    found->model = model_copy;
+    free(name_copy);
+    return 0;
+  }
+  if (srv->presets_len == srv->presets_cap) {
+    size_t cap = srv->presets_cap > 0 ? srv->presets_cap * 2 : 8;
+    wd_agent_preset *grown =
+        realloc(srv->presets, cap * sizeof(*srv->presets));
+    if (grown == NULL) {
+      free(name_copy);
+      free(system_copy);
+      free(model_copy);
+      return -1;
+    }
+    srv->presets = grown;
+    srv->presets_cap = cap;
+  }
+  wd_agent_preset *slot = &srv->presets[srv->presets_len++];
+  slot->name = name_copy;
+  slot->system = system_copy;
+  slot->model = model_copy;
+  return 0;
+}
+
+static cbor_item_t *agent_preset_to_cbor(const wd_agent_preset *preset) {
+  cbor_item_t *item = wd_map(3);
+  wd_put(item, "name", wd_text(preset->name));
+  wd_put(item, "system", wd_text(preset->system));
+  wd_put(item, "model", wd_text(preset->model));
+  return item;
+}
+
+static int presets_save(wd_server *srv) {
+  cbor_item_t *array = wd_array(srv->presets_len);
+  for (size_t i = 0; i < srv->presets_len; i++) {
+    cbor_item_t *item = agent_preset_to_cbor(&srv->presets[i]);
+    bool pushed = cbor_array_push(array, item);
+    cbor_decref(&item);
+    if (!pushed) {
+      wd_free(array);
+      return -1;
+    }
+  }
+  size_t len = 0;
+  uint8_t *bytes = wd_encode(array, &len);
+  if (bytes == NULL) return -1;
+  char path[512];
+  char temp[560];
+  if (presets_path(srv->state_dir, path, sizeof(path)) != 0) {
+    free(bytes);
+    return -1;
+  }
+  snprintf(temp, sizeof(temp), "%s.new", path);
+  int fd = open(temp, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+  if (fd < 0) {
+    free(bytes);
+    return -1;
+  }
+  size_t off = 0;
+  bool ok = true;
+  while (off < len) {
+    ssize_t n = write(fd, bytes + off, len - off);
+    if (n < 0) {
+      if (errno == EINTR) continue;
+      ok = false;
+      break;
+    }
+    off += (size_t)n;
+  }
+  if (close(fd) != 0) ok = false;
+  free(bytes);
+  if (!ok || rename(temp, path) != 0) {
+    unlink(temp);
+    return -1;
+  }
+  return 0;
+}
+
+static int presets_load(wd_server *srv) {
+  char path[512];
+  if (presets_path(srv->state_dir, path, sizeof(path)) != 0) return -1;
+  FILE *file = fopen(path, "rb");
+  if (file == NULL) return 0;
+  if (fseek(file, 0, SEEK_END) != 0) {
+    fclose(file);
+    return -1;
+  }
+  long size = ftell(file);
+  if (size < 0 || size > (1 << 20) || fseek(file, 0, SEEK_SET) != 0) {
+    fclose(file);
+    return -1;
+  }
+  uint8_t *buf = malloc(size > 0 ? (size_t)size : 1);
+  if (buf == NULL) {
+    fclose(file);
+    return -1;
+  }
+  size_t got = fread(buf, 1, (size_t)size, file);
+  fclose(file);
+  if (got != (size_t)size) {
+    free(buf);
+    return -1;
+  }
+  cbor_item_t *root = wd_decode(buf, (size_t)size);
+  free(buf);
+  if (root == NULL || !cbor_isa_array(root)) {
+    wd_free(root);
+    return -1;
+  }
+  size_t count = cbor_array_size(root);
+  for (size_t i = 0; i < count; i++) {
+    cbor_item_t *entry = cbor_array_get(root, i);
+    if (entry == NULL) continue;
+    char *name = wd_text_copy(wd_get(entry, "name"));
+    if (valid_preset_name(name)) {
+      char *system = wd_text_copy(wd_get(entry, "system"));
+      char *model = wd_text_copy(wd_get(entry, "model"));
+      (void)agent_preset_set(srv, name, system != NULL ? system : "",
+                             model != NULL ? model : "");
+      free(system);
+      free(model);
+    }
+    free(name);
+    cbor_decref(&entry);
+  }
+  wd_free(root);
+  return 0;
+}
+
+static int preset_name_order(const void *left, const void *right) {
+  const wd_agent_preset *a = *(const wd_agent_preset *const *)left;
+  const wd_agent_preset *b = *(const wd_agent_preset *const *)right;
+  return strcmp(a->name, b->name);
+}
+
+static void handle_preset_save(wd_server *srv, wd_conn *conn, uint64_t id,
+                               cbor_item_t *params) {
+  char *name = wd_text_copy(wd_get(params, "name"));
+  char *system = wd_text_copy(wd_get(params, "system"));
+  char *model = wd_text_copy(wd_get(params, "model"));
+  if (!valid_preset_name(name)) {
+    free(name);
+    free(system);
+    free(model);
+    conn_send_error(conn, id, WD_ERR_INVALID_PARAMS,
+                    "name must be 1..64 bytes without a slash");
+    conn_arm(srv, conn);
+    return;
+  }
+  int rc = agent_preset_set(srv, name, system != NULL ? system : "",
+                            model != NULL ? model : "");
+  free(system);
+  free(model);
+  if (rc != 0) {
+    free(name);
+    respond_internal(srv, conn, id, "cannot record the preset");
+    return;
+  }
+  (void)presets_save(srv);
+  wd_agent_preset *saved = agent_preset_find(srv, name);
+  free(name);
+  conn_send_cached(conn, id, wd_response_ok(id, agent_preset_to_cbor(saved)));
+  conn_arm(srv, conn);
+}
+
+static void handle_preset_list(wd_server *srv, wd_conn *conn, uint64_t id) {
+  size_t count = srv->presets_len;
+  wd_agent_preset **order = malloc((count > 0 ? count : 1) * sizeof(*order));
+  if (order == NULL) {
+    respond_internal(srv, conn, id, "cannot list the presets");
+    return;
+  }
+  for (size_t i = 0; i < count; i++) order[i] = &srv->presets[i];
+  qsort(order, count, sizeof(*order), preset_name_order);
+  cbor_item_t *list = wd_array(count);
+  for (size_t i = 0; i < count; i++) {
+    cbor_item_t *item = agent_preset_to_cbor(order[i]);
+    bool pushed = cbor_array_push(list, item);
+    cbor_decref(&item);
+    if (!pushed) break;
+  }
+  free(order);
+  cbor_item_t *result = wd_map(1);
+  wd_put(result, "presets", list);
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
+static void handle_preset_get(wd_server *srv, wd_conn *conn, uint64_t id,
+                              cbor_item_t *params) {
+  char *name = wd_text_copy(wd_get(params, "name"));
+  wd_agent_preset *preset = name != NULL ? agent_preset_find(srv, name) : NULL;
+  free(name);
+  if (preset == NULL) {
+    conn_send_error(conn, id, WD_ERR_NOT_FOUND, "no such preset");
+    conn_arm(srv, conn);
+    return;
+  }
+  cbor_item_t *result = agent_preset_to_cbor(preset);
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
+static void handle_preset_delete(wd_server *srv, wd_conn *conn, uint64_t id,
+                                 cbor_item_t *params) {
+  char *name = wd_text_copy(wd_get(params, "name"));
+  wd_agent_preset *preset = name != NULL ? agent_preset_find(srv, name) : NULL;
+  if (preset == NULL) {
+    free(name);
+    conn_send_error(conn, id, WD_ERR_NOT_FOUND, "no such preset");
+    conn_arm(srv, conn);
+    return;
+  }
+  size_t index = (size_t)(preset - srv->presets);
+  free(preset->name);
+  free(preset->system);
+  free(preset->model);
+  for (size_t i = index + 1; i < srv->presets_len; i++)
+    srv->presets[i - 1] = srv->presets[i];
+  srv->presets_len--;
+  free(name);
+  (void)presets_save(srv);
+  cbor_item_t *result = wd_map(1);
+  wd_put(result, "deleted", cbor_build_bool(true));
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
+static void handle_preset_apply(wd_server *srv, wd_conn *conn, uint64_t id,
+                                cbor_item_t *params) {
+  char *session_id = wd_text_copy(wd_get(params, "id"));
+  char *name = wd_text_copy(wd_get(params, "name"));
+  wd_session *session =
+      session_id != NULL ? wd_session_find(&srv->store, session_id) : NULL;
+  wd_agent_preset *preset = name != NULL ? agent_preset_find(srv, name) : NULL;
+  if (session == NULL || preset == NULL) {
+    free(session_id);
+    free(name);
+    conn_send_error(conn, id, WD_ERR_NOT_FOUND,
+                    session == NULL ? "no such session" : "no such preset");
+    conn_arm(srv, conn);
+    return;
+  }
+  if (preset->model[0] != '\0') {
+    char *chosen = catalog_model_id(srv, preset->model);
+    if (chosen != NULL) {
+      if (apply_session_model(srv, session, chosen, NULL) != 0) {
+        free(chosen);
+        free(session_id);
+        free(name);
+        respond_internal(srv, conn, id, "cannot record the model change");
+        return;
+      }
+      free(chosen);
+    }
+  }
+  if (install_session_system(session, preset->system, NULL) != 0) {
+    free(session_id);
+    free(name);
+    respond_internal(srv, conn, id, "cannot set the system prompt");
+    return;
+  }
+  cbor_item_t *result = wd_map(4);
+  wd_put(result, "applied", cbor_build_bool(true));
+  wd_put(result, "name", wd_text(preset->name));
+  wd_put(result, "system", wd_text(preset->system));
+  wd_put(result, "model", wd_text(session->model));
+  free(session_id);
+  free(name);
   conn_send_cached(conn, id, wd_response_ok(id, result));
   conn_arm(srv, conn);
 }
@@ -4689,6 +5043,16 @@ static void handle_request(wd_server *srv, wd_conn *conn, uint64_t id,
     handle_policy_list(srv, conn, id);
   } else if (strcmp(method, "policy.select") == 0) {
     handle_policy_select(srv, conn, id, params);
+  } else if (strcmp(method, "preset.save") == 0) {
+    handle_preset_save(srv, conn, id, params);
+  } else if (strcmp(method, "preset.list") == 0) {
+    handle_preset_list(srv, conn, id);
+  } else if (strcmp(method, "preset.get") == 0) {
+    handle_preset_get(srv, conn, id, params);
+  } else if (strcmp(method, "preset.delete") == 0) {
+    handle_preset_delete(srv, conn, id, params);
+  } else if (strcmp(method, "preset.apply") == 0) {
+    handle_preset_apply(srv, conn, id, params);
   } else if (strcmp(method, "module.enable") == 0) {
     handle_module_enable(srv, conn, id, params);
   } else if (strcmp(method, "host.list") == 0) {
@@ -5337,6 +5701,7 @@ int wd_up_run(const wd_up_config *cfg) {
     }
   }
   wd_settings_load(srv.state_dir, &srv.settings);
+  (void)presets_load(&srv);
   const char *max_runs = getenv("WARD_MAX_RUNS");
   srv.max_runs = (size_t)srv.settings.max_runs;
   if (max_runs != NULL) {
@@ -5540,6 +5905,7 @@ cleanup:
   free(srv.default_model);
   free(srv.quic_endpoint);
   free(srv.module_dir);
+  agent_presets_clear(&srv);
   wd_store_close(&srv.store);
   free(srv.socket_path);
   free(srv.state_dir);

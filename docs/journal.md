@@ -2649,3 +2649,11 @@ function but needs a marker for "this capability came from the model", which the
 multi-step conversation by itself: history has role+text only, with no assistant tool_calls message and no role:tool/tool_call_id, so the
 model sees the result as plain text. That is the shape the next attempt should design first, because the compaction pruner and the
 repeat-tool reminder both assume a conversation in which tool rounds exist.
+
+Two-hundred-and-fourth: agent presets on the daemon side. A preset is a name, an optional system prompt and an optional model, stored as a
+CBOR array in `<state>/presets.cbor` (atomic `.new` then rename, 0600, loaded at start). `preset.save/list/get/delete` manage them and
+`preset.apply {id, name}` applies one to a session through the same factored paths as `session.set_system` and `session.set_model` —
+including head invalidation and the model broadcast — and skips a model that is not in the catalog rather than failing the whole apply.
+The gate saves two presets, checks the sorted list and fields, applies one and verifies the session's model and system prompt, refuses an
+unknown preset, deletes one and re-saves the other to prove replacement. The gate does not restart the daemon, so the load-on-start path
+is documented but not exercised; client surfaces (the desktop strip and Android drawer) are still open.
