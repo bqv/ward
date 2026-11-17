@@ -2717,3 +2717,12 @@ transport retry on top still broke `gate_tool`, and this time the failure was vi
 waiting for a turn that never ended, with the timeout test gone. That points away from the timeout section and at the fixture: its accept
 loop serves only eight connections in total, and the retry (plus the daemon's estate polling) can exhaust that before the provider request
 is ever accepted. The next attempt should lift the fixture's accept limit first, then re-apply the retry and `gate_net`.
+
+Two-hundred-and-twelfth: the fixture's connection cap was the real reason the gates kept hanging. `start_server` accepted exactly eight
+connections and then stopped for good; the daemon's estate polling plus a retry burst could exhaust that before the turn's provider request
+was ever accepted, which is why every daemon-side change seemed to produce a different post-turn hang and why gate_tool could take 314 s.
+The accept loop is now unbounded (the fixture is killed with SIGKILL at teardown), and with it the picture is transformed: the job-level
+pre-header retry that was reverted three times now lands, `gate_net` passes, and **gate_tool passes in about 15 seconds** instead of
+brushing a five-minute watchdog. The retry itself is the http.c child loop: three attempts with a `poll` backoff on GOT_NOTHING, connect,
+send, receive or timeout while no header has been sent, with the zero marker only when every attempt fails; no `turn.retry` event exists for
+this class because the daemon cannot see it, and the reliability row says so.

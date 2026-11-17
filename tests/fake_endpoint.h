@@ -89,6 +89,12 @@ static void serve(int fd) {
       close(fd);
     }
   }
+  const char *drop = getenv("WARD_FAKE_DROP_PROVIDER");
+  if (drop != NULL && access(drop, F_OK) == 0 &&
+      strstr(request, "\"messages\"") != NULL) {
+    unlink(drop);
+    return;
+  }
   const char *slow = getenv("WARD_FAKE_429_FILE");
   if (slow != NULL && access(slow, F_OK) == 0) {
     unlink(slow);
@@ -202,7 +208,7 @@ static pid_t start_server(int *port_out) {
   assert(pid >= 0);
   if (pid == 0) {
     prctl(PR_SET_PDEATHSIG, SIGKILL);
-    for (int i = 0; i < 8; i++) {
+    for (;;) {
       int conn = accept(fd, NULL, NULL);
       if (conn < 0) break;
       pid_t worker = fork();

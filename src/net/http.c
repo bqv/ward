@@ -264,8 +264,19 @@ wd_http_job *wd_http_start(const char *url, const char *method, const char *body
       } else {
         curl_easy_setopt(handle, CURLOPT_HTTPGET, 1L);
       }
-      CURLcode rc = curl_easy_perform(handle);
-      curl_easy_getinfo(handle, CURLINFO_RESPONSE_CODE, &status);
+      CURLcode rc = CURLE_OK;
+      for (int attempt = 0; attempt < 3; attempt++) {
+        rc = curl_easy_perform(handle);
+        curl_easy_getinfo(handle, CURLINFO_RESPONSE_CODE, &status);
+        if (rc == CURLE_OK || ctx.status_sent) break;
+        if (rc != CURLE_GOT_NOTHING && rc != CURLE_COULDNT_CONNECT &&
+            rc != CURLE_SEND_ERROR && rc != CURLE_RECV_ERROR &&
+            rc != CURLE_OPERATION_TIMEDOUT)
+          break;
+        if (attempt == 2) break;
+        struct pollfd wait = {.fd = -1, .events = 0, .revents = 0};
+        (void)poll(&wait, 1, 300 << attempt);
+      }
       curl_slist_free_all(headers);
       curl_easy_cleanup(handle);
       if (rc != CURLE_OK && !ctx.status_sent) {
