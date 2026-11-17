@@ -251,13 +251,26 @@ judge fails or answers nonsense the rule stands. An escalated call parks exactly
 turn appends a durable `judge.decision {tool, verdict, escalated}` event, so a replay can
 explain why a call was allowed or paused.
 
-**Terminals.** `terminal.open {id, command?, rows?, cols?}` starts a command under a
-pseudo-terminal in the session's cwd (default `sh -i`) and answers `{terminal, pid}`.
+**Terminals.** `terminal.open {id, command?, rows?, cols?, title?}` starts a command under a
+pseudo-terminal in the session's cwd (default `sh -i`) and answers `{terminal, pid, title}`.
+The title is the `title` param when given, else the command, else `terminal`.
 `terminal.write {terminal, data}`, `terminal.resize {terminal, rows, cols}` and
 `terminal.close {terminal}` drive it, answering `{written}`, `{resized}` and `{closed}`.
-Output arrives as `terminal.output {terminal, data}` — a **non-durable** broadcast, not a logged
-event: a terminal can produce unbounded text and the session log is not its place. The stream
-ends with `terminal.output {terminal, eof: true}`; the handle is then invalid.
+
+Each terminal keeps a bounded 64 KiB output ring, dropping the oldest bytes once full.
+`terminal.attach {id, terminal}` answers
+`{terminal, title, snapshot, rows, cols, running}` — `snapshot` is the ring as a text string,
+the same type as `terminal.output`'s `data`, and it is sent before the live
+`terminal.output {terminal, data}` broadcasts continue. `id` names the session and is
+checked against the terminal's owner. `terminal.list {id}` answers
+`{terminals: [{terminal, title, running, rows, cols}]}` for that session, and
+`terminal.title {terminal, title}` updates the title and answers `{title}`.
+
+`terminal.write`, `terminal.resize` and `terminal.attach` answer `not_found` for an unknown
+or finished terminal, while `terminal.close` still answers `{closed}`. Output arrives as
+`terminal.output {terminal, data}` — a **non-durable** broadcast, not a logged event: a
+terminal can produce unbounded text and the session log is not its place. The stream ends
+with `terminal.output {terminal, eof: true}`; the handle is then invalid.
 
 **MCP.** `/mcp <json request>` sends one JSON-RPC line to the configured MCP server: core's
 `mcp.call` capability runs the server binary (`WARD_MCP_BIN`, else `~/bin/mcp`) as a child,

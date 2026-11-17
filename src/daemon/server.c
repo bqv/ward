@@ -120,12 +120,18 @@ typedef struct {
 } wd_run_token;
 
 #define WD_MAX_TERMS 8
+#define WD_TERM_RING (64u * 1024u)
 
 typedef struct {
   char id[17];
   wd_session *session;
   wd_pty *pty;
   bool used;
+  char *title;
+  uint16_t rows;
+  uint16_t cols;
+  char out[WD_TERM_RING];
+  size_t out_len;
 } wd_term;
 
 typedef struct {
@@ -1674,7 +1680,34 @@ static void term_drop(wd_server *srv, wd_term *term) {
   memset(&ev, 0, sizeof(ev));
   (void)epoll_ctl(srv->epoll_fd, EPOLL_CTL_DEL, wd_pty_fd(term->pty), &ev);
   wd_pty_close(term->pty);
+  free(term->title);
   memset(term, 0, sizeof(*term));
+}
+
+static const char *term_title(const wd_term *term) {
+  return term->title != NULL ? term->title : "terminal";
+}
+
+static void term_set_title(wd_term *term, const char *title) {
+  char *copy = strdup(title);
+  free(term->title);
+  term->title = copy;
+}
+
+static void term_record(wd_term *term, const char *data, size_t n) {
+  if (n >= WD_TERM_RING) {
+    memcpy(term->out, data + n - WD_TERM_RING, WD_TERM_RING);
+    term->out_len = WD_TERM_RING;
+    return;
+  }
+  size_t keep = term->out_len;
+  if (keep + n > WD_TERM_RING) {
+    size_t drop = keep + n - WD_TERM_RING;
+    memmove(term->out, term->out + drop, keep - drop);
+    keep -= drop;
+  }
+  memcpy(term->out + keep, data, n);
+  term->out_len = keep + n;
 }
 
 static void term_announce(wd_server *srv, wd_term *term, const char *field) {
@@ -1688,6 +1721,7 @@ static void term_pump(wd_server *srv, wd_term *term) {
   char buf[4096];
   ssize_t n = wd_pty_read(term->pty, buf, sizeof(buf));
   if (n > 0) {
+    term_record(term, buf, (size_t)n);
     cbor_item_t *payload = wd_map(2);
     wd_put(payload, "terminal", wd_text(term->id));
     wd_put(payload, "data", wd_text_len(buf, (size_t)n));
@@ -1709,15 +1743,19 @@ static void handle_terminal_open(wd_server *srv, wd_conn *conn, uint64_t id,
                                  cbor_item_t *params) {
   char *session_id = wd_text_copy(wd_get(params, "id"));
   char *command = wd_text_copy(wd_get(params, "command"));
+  char *title = wd_text_copy(wd_get(params, "title"));
   uint64_t rows = 24;
   uint64_t cols = 80;
   wd_uint_of(wd_get(params, "rows"), &rows);
   wd_uint_of(wd_get(params, "cols"), &cols);
+  uint16_t term_rows = (uint16_t)(rows == 0 ? 24 : rows);
+  uint16_t term_cols = (uint16_t)(cols == 0 ? 80 : cols);
   wd_session *session =
       session_id != NULL ? wd_session_find(&srv->store, session_id) : NULL;
   if (session == NULL) {
     free(session_id);
     free(command);
+    free(title);
     conn_send_error(conn, id, WD_ERR_NOT_FOUND, "no such session");
     conn_arm(srv, conn);
     return;
@@ -1732,6 +1770,7 @@ static void handle_terminal_open(wd_server *srv, wd_conn *conn, uint64_t id,
   if (slot == WD_MAX_TERMS) {
     free(session_id);
     free(command);
+    free(title);
     conn_send_error(conn, id, WD_ERR_BUSY, "too many terminals");
     conn_arm(srv, conn);
     return;
@@ -1743,11 +1782,16 @@ static void handle_terminal_open(wd_server *srv, wd_conn *conn, uint64_t id,
   argv[argc++] = "-i";
   argv[argc] = NULL;
   char *err = NULL;
-  wd_pty *pty = wd_pty_open(argv, session->cwd, (uint16_t)(rows == 0 ? 24 : rows),
-                            (uint16_t)(cols == 0 ? 80 : cols), &err);
+  wd_pty *pty = wd_pty_open(argv, session->cwd, term_rows, term_cols, &err);
+  char *wanted = title != NULL
+                     ? strdup(title)
+                     : strdup(command != NULL && command[0] != '\0' ? command
+                                                                    : "terminal");
+  free(title);
   free(command);
   free(session_id);
   if (pty == NULL) {
+    free(wanted);
     char message[160];
     snprintf(message, sizeof(message), "%s",
              err != NULL ? err : "cannot open a terminal");
@@ -1762,6 +1806,9 @@ static void handle_terminal_open(wd_server *srv, wd_conn *conn, uint64_t id,
   term->session = session;
   term->pty = pty;
   term->used = true;
+  term->title = wanted;
+  term->rows = term_rows;
+  term->cols = term_cols;
   term_tokens[slot].term = term;
   struct epoll_event ev;
   memset(&ev, 0, sizeof(ev));
@@ -1773,9 +1820,10 @@ static void handle_terminal_open(wd_server *srv, wd_conn *conn, uint64_t id,
     conn_arm(srv, conn);
     return;
   }
-  cbor_item_t *result = wd_map(2);
+  cbor_item_t *result = wd_map(3);
   wd_put(result, "terminal", wd_text(term->id));
   wd_put(result, "pid", wd_uint((uint64_t)wd_pty_pid(pty)));
+  wd_put(result, "title", wd_text(term_title(term)));
   conn_send_cached(conn, id, wd_response_ok(id, result));
   conn_arm(srv, conn);
 }
@@ -1785,8 +1833,15 @@ static void handle_terminal_write(wd_server *srv, wd_conn *conn, uint64_t id,
   char *handle = wd_text_copy(wd_get(params, "terminal"));
   char *data = wd_text_copy(wd_get(params, "data"));
   wd_term *term = term_find(handle);
+  if (term == NULL) {
+    free(handle);
+    free(data);
+    conn_send_error(conn, id, WD_ERR_NOT_FOUND, "no such terminal");
+    conn_arm(srv, conn);
+    return;
+  }
   bool written = false;
-  if (term != NULL && data != NULL) {
+  if (data != NULL) {
     ssize_t n = wd_pty_write(term->pty, data, strlen(data));
     written = n == (ssize_t)strlen(data);
   }
@@ -1806,10 +1861,19 @@ static void handle_terminal_resize(wd_server *srv, wd_conn *conn, uint64_t id,
   wd_uint_of(wd_get(params, "rows"), &rows);
   wd_uint_of(wd_get(params, "cols"), &cols);
   wd_term *term = term_find(handle);
-  bool resized =
-      term != NULL &&
-      wd_pty_resize(term->pty, (uint16_t)(rows == 0 ? 24 : rows),
-                    (uint16_t)(cols == 0 ? 80 : cols)) == 0;
+  if (term == NULL) {
+    free(handle);
+    conn_send_error(conn, id, WD_ERR_NOT_FOUND, "no such terminal");
+    conn_arm(srv, conn);
+    return;
+  }
+  uint16_t term_rows = (uint16_t)(rows == 0 ? 24 : rows);
+  uint16_t term_cols = (uint16_t)(cols == 0 ? 80 : cols);
+  bool resized = wd_pty_resize(term->pty, term_rows, term_cols) == 0;
+  if (resized) {
+    term->rows = term_rows;
+    term->cols = term_cols;
+  }
   free(handle);
   cbor_item_t *result = wd_map(1);
   wd_put(result, "resized", cbor_build_bool(resized));
@@ -1826,6 +1890,91 @@ static void handle_terminal_close(wd_server *srv, wd_conn *conn, uint64_t id,
   free(handle);
   cbor_item_t *result = wd_map(1);
   wd_put(result, "closed", cbor_build_bool(closed));
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
+static void handle_terminal_attach(wd_server *srv, wd_conn *conn, uint64_t id,
+                                   cbor_item_t *params) {
+  char *handle = wd_text_copy(wd_get(params, "terminal"));
+  char *session_id = wd_text_copy(wd_get(params, "id"));
+  wd_term *term = term_find(handle);
+  bool allowed = term != NULL;
+  if (allowed && session_id != NULL) {
+    wd_session *session = wd_session_find(&srv->store, session_id);
+    allowed = session != NULL && strcmp(term->session->id, session->id) == 0;
+  }
+  free(handle);
+  free(session_id);
+  if (!allowed) {
+    conn_send_error(conn, id, WD_ERR_NOT_FOUND, "no such terminal");
+    conn_arm(srv, conn);
+    return;
+  }
+  cbor_item_t *result = wd_map(6);
+  wd_put(result, "terminal", wd_text(term->id));
+  wd_put(result, "title", wd_text(term_title(term)));
+  wd_put(result, "snapshot", wd_text_len(term->out, term->out_len));
+  wd_put(result, "rows", wd_uint(term->rows));
+  wd_put(result, "cols", wd_uint(term->cols));
+  wd_put(result, "running", cbor_build_bool(wd_pty_alive(term->pty)));
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
+static void handle_terminal_list(wd_server *srv, wd_conn *conn, uint64_t id,
+                                 cbor_item_t *params) {
+  char *session_id = wd_text_copy(wd_get(params, "id"));
+  wd_session *session =
+      session_id != NULL ? wd_session_find(&srv->store, session_id) : NULL;
+  free(session_id);
+  if (session == NULL) {
+    conn_send_error(conn, id, WD_ERR_NOT_FOUND, "no such session");
+    conn_arm(srv, conn);
+    return;
+  }
+  size_t count = 0;
+  for (size_t i = 0; i < WD_MAX_TERMS; i++) {
+    if (terminals[i].used &&
+        strcmp(terminals[i].session->id, session->id) == 0)
+      count++;
+  }
+  cbor_item_t *list = wd_array(count);
+  for (size_t i = 0; i < WD_MAX_TERMS; i++) {
+    wd_term *term = &terminals[i];
+    if (!term->used || strcmp(term->session->id, session->id) != 0) continue;
+    cbor_item_t *entry = wd_map(5);
+    wd_put(entry, "terminal", wd_text(term->id));
+    wd_put(entry, "title", wd_text(term_title(term)));
+    wd_put(entry, "running", cbor_build_bool(wd_pty_alive(term->pty)));
+    wd_put(entry, "rows", wd_uint(term->rows));
+    wd_put(entry, "cols", wd_uint(term->cols));
+    bool pushed = cbor_array_push(list, entry);
+    cbor_decref(&entry);
+    if (!pushed) break;
+  }
+  cbor_item_t *result = wd_map(1);
+  wd_put(result, "terminals", list);
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
+static void handle_terminal_title(wd_server *srv, wd_conn *conn, uint64_t id,
+                                  cbor_item_t *params) {
+  char *handle = wd_text_copy(wd_get(params, "terminal"));
+  char *title = wd_text_copy(wd_get(params, "title"));
+  wd_term *term = term_find(handle);
+  free(handle);
+  if (term == NULL) {
+    free(title);
+    conn_send_error(conn, id, WD_ERR_NOT_FOUND, "no such terminal");
+    conn_arm(srv, conn);
+    return;
+  }
+  if (title != NULL) term_set_title(term, title);
+  free(title);
+  cbor_item_t *result = wd_map(1);
+  wd_put(result, "title", wd_text(term_title(term)));
   conn_send_cached(conn, id, wd_response_ok(id, result));
   conn_arm(srv, conn);
 }
@@ -4421,6 +4570,12 @@ static void handle_request(wd_server *srv, wd_conn *conn, uint64_t id,
     handle_terminal_resize(srv, conn, id, params);
   } else if (strcmp(method, "terminal.close") == 0) {
     handle_terminal_close(srv, conn, id, params);
+  } else if (strcmp(method, "terminal.attach") == 0) {
+    handle_terminal_attach(srv, conn, id, params);
+  } else if (strcmp(method, "terminal.list") == 0) {
+    handle_terminal_list(srv, conn, id, params);
+  } else if (strcmp(method, "terminal.title") == 0) {
+    handle_terminal_title(srv, conn, id, params);
   } else if (strcmp(method, "session.fork") == 0) {
     handle_session_fork(srv, conn, id, params);
   } else if (strcmp(method, "session.set_model") == 0) {

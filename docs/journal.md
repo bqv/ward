@@ -2622,3 +2622,11 @@ never fired (the 4-byte marker was never observed), and a `run_after` retry on a
 reported. `gate_net` was written to isolate it (warm the estate, drop the next connection, expect `turn.retry {status: 0}`) and it hangs
 waiting for the retry, which is the evidence. The next attempt starts at the job completion path: why an EOF on the job fd after the child
 writes the marker produces no epoll event or no second `http_done` when the connection is dropped before headers, unlike the 429 path.
+
+Two-hundred-and-first: the terminal attach stream. Terminals were already open/write/resize/close with a non-durable broadcast, so a
+client that attached late saw nothing that had already scrolled by and there was no title. The daemon now keeps a bounded 64 KiB ring
+per terminal and a title, `terminal.list` reports `{terminal, title, running, rows, cols}`, `terminal.attach` answers the snapshot plus
+rows/cols/running and is followed by live output as before, `terminal.title` updates the title, and a write/attach/resize on a finished
+or unknown terminal answers not_found instead of pretending. The gate opens `sh` at 30x100, writes `exec cat` and a marker, sees the
+marker in the output, attaches and finds it in the snapshot with the right geometry, writes a live line, sets a title and sees it in
+`terminal.list`, then closes and proves a later write is an honest not_found. Suite green.
