@@ -11,12 +11,14 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <openssl/evp.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/epoll.h>
 #include <sys/signalfd.h>
 #include <sys/socket.h>
@@ -2169,6 +2171,57 @@ static void handle_module_reload(wd_server *srv, wd_conn *conn, uint64_t id) {
   conn_arm(srv, conn);
 }
 
+static void sha256_hex(const uint8_t *data, size_t len, char out[65]) {
+  unsigned char digest[EVP_MAX_MD_SIZE];
+  unsigned int digest_len = 0;
+  out[0] = '\0';
+  EVP_MD_CTX *ctx = EVP_MD_CTX_new();
+  if (ctx == NULL) return;
+  if (EVP_DigestInit_ex(ctx, EVP_sha256(), NULL) != 1 ||
+      EVP_DigestUpdate(ctx, data, len) != 1 ||
+      EVP_DigestFinal_ex(ctx, digest, &digest_len) != 1 || digest_len != 32) {
+    EVP_MD_CTX_free(ctx);
+    return;
+  }
+  EVP_MD_CTX_free(ctx);
+  for (unsigned i = 0; i < digest_len; i++)
+    snprintf(out + i * 2, 3, "%02x", (unsigned)digest[i]);
+  out[64] = '\0';
+}
+
+static const char *extension_media_type(const char *name) {
+  const char *dot = strrchr(name, '.');
+  if (dot == NULL) return "application/octet-stream";
+  if (strcasecmp(dot, ".png") == 0) return "image/png";
+  if (strcasecmp(dot, ".jpg") == 0 || strcasecmp(dot, ".jpeg") == 0)
+    return "image/jpeg";
+  if (strcasecmp(dot, ".gif") == 0) return "image/gif";
+  if (strcasecmp(dot, ".webp") == 0) return "image/webp";
+  if (strcasecmp(dot, ".pdf") == 0) return "application/pdf";
+  if (strcasecmp(dot, ".md") == 0 || strcasecmp(dot, ".txt") == 0 ||
+      strcasecmp(dot, ".log") == 0)
+    return "text/plain";
+  if (strcasecmp(dot, ".json") == 0) return "application/json";
+  if (strcasecmp(dot, ".csv") == 0) return "text/csv";
+  return "application/octet-stream";
+}
+
+static const char *attachment_media_type(const char *name, const uint8_t *data,
+                                         size_t len) {
+  if (len >= 8 && memcmp(data, "\x89PNG\r\n\x1a\n", 8) == 0)
+    return "image/png";
+  if (len >= 3 && data[0] == 0xff && data[1] == 0xd8 && data[2] == 0xff)
+    return "image/jpeg";
+  if (len >= 6 && (memcmp(data, "GIF87a", 6) == 0 ||
+                   memcmp(data, "GIF89a", 6) == 0))
+    return "image/gif";
+  if (len >= 12 && memcmp(data, "RIFF", 4) == 0 &&
+      memcmp(data + 8, "WEBP", 4) == 0)
+    return "image/webp";
+  if (len >= 4 && memcmp(data, "%PDF", 4) == 0) return "application/pdf";
+  return extension_media_type(name);
+}
+
 static void handle_attachment_add(wd_server *srv, wd_conn *conn, uint64_t id,
                                  cbor_item_t *params) {
   char *session_id = wd_text_copy(wd_get(params, "id"));
@@ -2212,25 +2265,62 @@ static void handle_attachment_add(wd_server *srv, wd_conn *conn, uint64_t id,
     conn_arm(srv, conn);
     return;
   }
-  char *path = NULL;
-  char *err = NULL;
-  int rc = wd_session_attach(session, name, bytes, len, &path, &err);
-  free(session_id);
-  free(name);
-  free(text);
-  if (rc != 0) {
-    char message[160];
-    snprintf(message, sizeof(message), "%s",
-             err != NULL ? err : "cannot store the attachment");
-    free(err);
-    conn_send_error(conn, id, WD_ERR_INTERNAL, message);
+  if (name[0] == '\0' || strlen(name) > 128 || strchr(name, '/') != NULL ||
+      strstr(name, "..") != NULL) {
+    free(session_id);
+    free(name);
+    free(text);
+    conn_send_error(conn, id, WD_ERR_INVALID_PARAMS,
+                    "the attachment name is refused");
+    conn_arm(srv, conn);
+    return;
+  }
+  char hash[65];
+  sha256_hex(bytes, len, hash);
+  const char *media_type = attachment_media_type(name, bytes, len);
+  char *dir = wd_path_join(session->dir, "attachments");
+  char *path = dir != NULL ? wd_path_join(dir, name) : NULL;
+  if (dir != NULL) (void)mkdir(dir, 0700);
+  free(dir);
+  FILE *file = path != NULL ? fopen(path, "wb") : NULL;
+  bool written =
+      file != NULL && (len == 0 || fwrite(bytes, 1, len, file) == len);
+  if (file != NULL && fclose(file) != 0) written = false;
+  if (!written) {
+    if (path != NULL) (void)unlink(path);
+    free(path);
+    free(session_id);
+    free(name);
+    free(text);
+    conn_send_error(conn, id, WD_ERR_INTERNAL, "cannot store the attachment");
+    conn_arm(srv, conn);
+    return;
+  }
+  cbor_item_t *payload = wd_map(5);
+  wd_put(payload, "name", wd_text(name));
+  wd_put(payload, "size", wd_uint((uint64_t)len));
+  wd_put(payload, "path", wd_text(path));
+  wd_put(payload, "hash", wd_text(hash));
+  wd_put(payload, "media_type", wd_text(media_type));
+  if (wd_session_emit(session, "session.attachment", payload, NULL) != 0) {
+    (void)unlink(path);
+    free(path);
+    free(session_id);
+    free(name);
+    free(text);
+    conn_send_error(conn, id, WD_ERR_INTERNAL, "cannot record the attachment");
     conn_arm(srv, conn);
     return;
   }
   wd_session_invalidate_head(session);
-  cbor_item_t *result = wd_map(2);
+  free(session_id);
+  free(name);
+  free(text);
+  cbor_item_t *result = wd_map(4);
   wd_put(result, "path", wd_text(path));
   wd_put(result, "size", wd_uint((uint64_t)len));
+  wd_put(result, "hash", wd_text(hash));
+  wd_put(result, "media_type", wd_text(media_type));
   free(path);
   conn_send_cached(conn, id, wd_response_ok(id, result));
   conn_arm(srv, conn);
@@ -2258,10 +2348,17 @@ static int collect_attachment(void *ctx, uint64_t seq, cbor_item_t *event) {
   wd_uint_of(wd_get(payload, "size"), &size);
   if (name == NULL) return 0;
   char *path = wd_text_copy(wd_get(payload, "path"));
-  cbor_item_t *entry = wd_map(3);
+  char *hash = wd_text_copy(wd_get(payload, "hash"));
+  char *media_type = wd_text_copy(wd_get(payload, "media_type"));
+  cbor_item_t *entry = wd_map(5);
   wd_put(entry, "name", wd_text(name));
   wd_put(entry, "size", wd_uint(size));
   wd_put(entry, "path", wd_text(path != NULL ? path : ""));
+  wd_put(entry, "hash", wd_text(hash != NULL ? hash : ""));
+  wd_put(entry, "media_type",
+         wd_text(media_type != NULL ? media_type : ""));
+  free(media_type);
+  free(hash);
   free(path);
   free(name);
   if (list->len == list->cap) {

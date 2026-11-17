@@ -2630,3 +2630,12 @@ rows/cols/running and is followed by live output as before, `terminal.title` upd
 or unknown terminal answers not_found instead of pretending. The gate opens `sh` at 30x100, writes `exec cat` and a marker, sees the
 marker in the output, attaches and finds it in the snapshot with the right geometry, writes a live line, sets a title and sees it in
 `terminal.list`, then closes and proves a later write is an honest not_found. Suite green.
+
+Two-hundred-and-second: attachment references. An attachment is now more than a name, size and path: `attachment.add` computes a
+SHA-256 content hash and sniffs a media type (PNG/JPEG/GIF/WebP/PDF magic, extension fallback, application/octet-stream last), stores
+both in the durable `session.attachment` event, and `attachment.list` returns `{name, size, path, hash, media_type}` with old events
+replaying empty strings. The gate adds a PNG blob, a markdown file and the same PNG bytes under a second name: the hash is 64 hex
+characters, image/png and text/plain are recognised, the two identical blobs share a hash, sizes match, and `../escape` is refused with
+the list unchanged. The daemon writes the blob and emits the event directly because `wd_session_attach` still carries only three fields;
+making that helper canonical (hash and media_type parameters) is a clean follow-up. Provider image parts remain the open half of the
+attachment row.

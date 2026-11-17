@@ -221,8 +221,14 @@ fields stay the same when a real tokenizer replaces the estimate.
 
 **Attachments.** `attachment.add {id, name, data}` writes `data` (bytes or text, capped at
 4 MiB) to `<state>/<session>/attachments/<name>` — the name is refused if it holds `/` or `..`
-— appends a durable `session.attachment {name, size, path}` event and answers `{path, size}`.
-`attachment.list {id}` replays those events into `[{name, size, path}]`.
+— computes a lowercase hex SHA-256 of the bytes and a media type, appends a durable
+`session.attachment {name, size, path, hash, media_type}` event and answers
+`{path, size, hash, media_type}`. The media type sniffs the first bytes for PNG, JPEG, GIF,
+WebP and PDF, then falls back to the extension (`.png`/`.jpg`/`.jpeg`/`.gif`/`.webp` and
+`.pdf` as above, `.md`/`.txt`/`.log` -> `text/plain`, `.json` -> `application/json`,
+`.csv` -> `text/csv`), defaulting to `application/octet-stream`.
+`attachment.list {id}` replays those events into `[{name, size, path, hash, media_type}]`,
+answering `""` for the two identity fields on events recorded before they existed.
 `attachment.read_blob {id, name, offset, len}` answers `{path, offset, size, data}` with
 `data` as a CBOR byte string; it is rooted at the session's attachment directory, with the
 same 1 MiB per call and 4 MiB total caps as `session.file_read_blob`. The file lives in the
