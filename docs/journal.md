@@ -2614,3 +2614,11 @@ The lesson of the last two batches is now designed in: this landed behind `tests
 id after removing the first, steers it, denies the parked approval and sees the carried prompt, then exercises schedule update and delete.
 `gate_tool` is untouched, and the queue gate passes on its own. The monolithic gate's post-timeout hang was the reason the first attempt
 could not be verified, not a defect in this feature.
+
+Two-hundredth: the pre-header transport retry is not a one-line branch. The job child does write a four-byte zero status when curl fails
+before any header, but with a dropped connection the daemon never sees completion: no `http_done` with the marker, no `run_after` failure,
+so the turn simply waits and no `turn.retry` is emitted. Attempts at both layers failed the same way: a status-zero branch in `http_done`
+never fired (the 4-byte marker was never observed), and a `run_after` retry on a pre-header failure never ran because no failure was
+reported. `gate_net` was written to isolate it (warm the estate, drop the next connection, expect `turn.retry {status: 0}`) and it hangs
+waiting for the retry, which is the evidence. The next attempt starts at the job completion path: why an EOF on the job fd after the child
+writes the marker produces no epoll event or no second `http_done` when the connection is dropped before headers, unlike the 429 path.
