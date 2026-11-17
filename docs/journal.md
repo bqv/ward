@@ -2639,3 +2639,13 @@ characters, image/png and text/plain are recognised, the two identical blobs sha
 the list unchanged. The daemon writes the blob and emits the event directly because `wd_session_attach` still carries only three fields;
 making that helper canonical (hash and media_type parameters) is a clean follow-up. Provider image parts remain the open half of the
 attachment row.
+
+Two-hundred-and-third: where the multi-step tool loop has to go, before anyone tries again. Core already builds the provider payload (prompt
+plus history plus model) in `process_action` and merges `turn->history`; the driver asks the engine for the next action, and on a tool result
+the engine answers "done", which is why a turn ends after one tool call. The loop therefore cannot be bolted into core's HTTP path: it needs
+either the engine to emit a provider action carrying the tool result as the next prompt (with the driver forwarding it), or core to intercept
+a result that followed a model tool call and re-issue the provider request itself. The second is less invasive to the pure transition
+function but needs a marker for "this capability came from the model", which the turn does not carry yet. Neither route gives a conformant
+multi-step conversation by itself: history has role+text only, with no assistant tool_calls message and no role:tool/tool_call_id, so the
+model sees the result as plain text. That is the shape the next attempt should design first, because the compaction pruner and the
+repeat-tool reminder both assume a conversation in which tool rounds exist.
