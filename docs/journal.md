@@ -2690,3 +2690,12 @@ now counts identical capability+args pairs (eight-entry table, canonical CBOR ke
 turn free, and a ninth distinct pair is ignored. The fixture gained `WARD_FAKE_ALWAYS_TOOL`, which answers every provider request with the
 same native `fs.read note.txt` call, so `gate_repeat` drives the five-round cap: it asserts exactly one reminder with tool fs.read and
 count 3, three to four tool calls and results, and that the turn still ends. Suite green.
+
+Two-hundred-and-ninth: the pre-header retry works below the turn, and why it is not shipped yet. The daemon never observes a job that dies
+after a dropped connection, but the job child does see the failed `curl_easy_perform`, so retrying there is the right layer: three attempts
+with a `poll` backoff (300 ms, 600 ms) on GOT_NOTHING/connect/send/receive/timeout while no header has been sent, writing the zero marker
+only when every attempt fails, and deliberately no `turn.retry` event because the daemon cannot see it. `gate_net` proved it: warm estate,
+drop the next provider connection, two provider requests in the capture, the turn finishes with text and no error. The catch is the
+monolithic gate: the same change re-triggers its post-timeout hang, exactly like the earlier daemon-side attempts, so it was reverted to keep
+the suite green at 60. The next attempt should keep this http.c retry and, before landing, move the failing part of gate_tool (the section
+after its timeout test) into its own binary, which is now the established pattern for everything else.
