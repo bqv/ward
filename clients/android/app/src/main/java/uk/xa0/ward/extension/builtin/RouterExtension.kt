@@ -8,12 +8,23 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import org.json.JSONObject
 import uk.xa0.ward.extension.DshExtension
 import uk.xa0.ward.extension.EXTENSION_ABI_VERSION
 import uk.xa0.ward.extension.ExtensionBuilder
 import uk.xa0.ward.extension.ExtensionScope
 import uk.xa0.ward.extension.SessionTab
+import uk.xa0.ward.model.ESTATE_POLL_MS
+import uk.xa0.ward.model.ESTATE_STATUS_METHOD
+import uk.xa0.ward.model.EstateStatus
+import uk.xa0.ward.model.parseEstateStatus
+import uk.xa0.ward.ui.DemesneRouterTab
 import uk.xa0.ward.ui.RouterTab
 import uk.xa0.ward.ui.theme.DshSpacing
 import uk.xa0.ward.ui.theme.DshTheme
@@ -88,21 +99,58 @@ private fun RouterHost(scope: ExtensionScope) {
     val router by scope.router.collectAsState()
     val session = router
 
+    var status by remember { mutableStateOf<EstateStatus?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var updatedAtMillis by remember { mutableStateOf<Long?>(null) }
+    var hasEstate by remember { mutableStateOf(false) }
+
     LaunchedEffect(session?.target?.provider?.id, session?.target?.modelId, sessionId) {
         session?.check?.invoke()
     }
 
-    if (session == null) {
-        RouterUnavailable()
-        return
+    LaunchedEffect(sessionId) {
+        while (isActive) {
+            val reply = runCatching { scope.rpc(ESTATE_STATUS_METHOD, JSONObject()) }
+            val document = estateDocument(reply.getOrNull())
+            if (document != null) {
+                status = document
+                error = null
+                updatedAtMillis = System.currentTimeMillis()
+                hasEstate = true
+            } else {
+                status = null
+                error = reply.exceptionOrNull()?.message
+                updatedAtMillis = null
+                hasEstate = false
+            }
+            delay(ESTATE_POLL_MS)
+        }
     }
-    RouterTab(
-        target = session.target,
-        probe = session.probe,
-        effort = session.effort,
-        onCheck = session.check,
-        modifier = Modifier.fillMaxSize(),
-    )
+
+    when {
+        hasEstate -> DemesneRouterTab(
+            target = session?.target,
+            status = status,
+            error = error,
+            updatedAtMillis = updatedAtMillis,
+            modifier = Modifier.fillMaxSize(),
+        )
+        session != null -> RouterTab(
+            target = session.target,
+            probe = session.probe,
+            effort = session.effort,
+            onCheck = session.check,
+            modifier = Modifier.fillMaxSize(),
+        )
+        else -> RouterUnavailable()
+    }
+}
+
+private fun estateDocument(reply: Any?): EstateStatus? {
+    val document = reply as? JSONObject ?: return null
+    val known = listOf("version", "listen", "tenants", "slots", "health", "llm_health", "loads")
+    if (known.none { document.has(it) }) return null
+    return runCatching { parseEstateStatus(document) }.getOrNull()
 }
 
 @Composable

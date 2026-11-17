@@ -234,6 +234,7 @@ internal class FakeExtensionScope(
     localRoute: Boolean = false,
     routerSession: RouterSession? = null,
     sessionUsage: SessionUsage? = null,
+    private val rpcResult: Any? = null,
 ) : ExtensionScope {
     override val sessionId: StateFlow<String?> = MutableStateFlow(id)
     override val providerId: StateFlow<String?> = MutableStateFlow(provider)
@@ -242,7 +243,7 @@ internal class FakeExtensionScope(
     override val usage: StateFlow<SessionUsage?> = MutableStateFlow(sessionUsage)
 
     override suspend fun rpc(method: String, args: JSONObject): Any? =
-        JSONObject().put("method", method)
+        rpcResult ?: JSONObject().put("method", method)
 }
 
 /** Kept so the fake content type is exercised by the compiler in this source set. */

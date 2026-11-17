@@ -9,6 +9,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.json.JSONArray
+import org.json.JSONObject
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import uk.xa0.ward.extension.ExtensionBuilder
@@ -131,6 +133,31 @@ class RouterExtensionTest {
         rule.waitForIdle()
 
         rule.onNodeWithText("The router is not available for this route.").assertExists()
+    }
+
+    @Test
+    fun `an estate document renders the demesne router`() {
+        val tab = routerTab()
+        val estate = JSONObject()
+            .put("version", "test")
+            .put("listen", "127.0.0.1:55555")
+            .put("tenants", JSONArray())
+            .put("loads", JSONArray())
+        val scope = FakeExtensionScope(
+            id = "s1",
+            localRoute = true,
+            routerSession = routerSession,
+            rpcResult = estate,
+        )
+
+        rule.setContent {
+            DshTheme {
+                ExtensionBody(tab, scope)
+            }
+        }
+        rule.waitForIdle()
+
+        rule.onNodeWithText("demesne").assertExists()
     }
 
     @Composable
