@@ -323,6 +323,14 @@ static long proc_status_kb(pid_t pid, const char *key) {
 }
 
 
+static bool contains(const unsigned char *buf, size_t len, const char *needle) {
+  size_t want = strlen(needle);
+  if (want == 0 || len < want) return false;
+  for (size_t i = 0; i + want <= len; i++)
+    if (memcmp(buf + i, needle, want) == 0) return true;
+  return false;
+}
+
 static void seed_file(const char *path, const char *text) {
   int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
   assert(fd >= 0);
@@ -489,6 +497,32 @@ int main(void) {
   len = read(fd, text, sizeof(text) - 1);
   close(fd);
   assert(len > 0 && strstr(text, "hello") != NULL);
+  char secret_path[512];
+  snprintf(secret_path, sizeof(secret_path), "%s/secret.txt", root);
+  seed_file(secret_path,
+            "key sk-abcdefghijklmnop1234 and ghp_ABCDEFGHIJKLMNOPQRST end\n");
+  prompt_text(&a, session, "/read secret.txt");
+  bool saw_secret = false;
+  bool saw_mask = false;
+  for (;;) {
+    char *kind = NULL;
+    uint64_t seq = 0;
+    cbor_item_t *event = next_event(&a, &kind, &seq);
+    assert(event != NULL);
+    size_t raw_len = cbor_serialized_size(event);
+    unsigned char *raw = malloc(raw_len);
+    assert(raw != NULL);
+    assert(cbor_serialize(event, raw, raw_len) == raw_len);
+    if (contains(raw, raw_len, "sk-abcdefghijklmnop1234")) saw_secret = true;
+    if (contains(raw, raw_len, "[redacted]")) saw_mask = true;
+    free(raw);
+    bool done = kind != NULL && strcmp(kind, "turn.end") == 0;
+    free(kind);
+    wd_free(event);
+    if (done) break;
+  }
+  assert(!saw_secret);
+  assert(saw_mask);
   free(session);
   close(a.fd);
   kill(pid, SIGKILL);

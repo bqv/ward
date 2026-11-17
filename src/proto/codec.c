@@ -4,6 +4,7 @@
 
 #include "proto/codec.h"
 
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -532,4 +533,84 @@ size_t wd_json(cbor_item_t *item, char *out, size_t cap) {
   if (cap == 0) return 0;
   out[0] = '\0';
   return json_value(item, out, cap, 0);
+}
+
+static bool secret_prefix(const unsigned char *s, size_t len, size_t at,
+                          size_t *need) {
+  static const struct {
+    const char *prefix;
+    size_t length;
+  } prefixes[] = {{"sk-", 3}, {"ghp_", 4}, {"AKIA", 4}, {"Bearer ", 7}};
+  for (size_t i = 0; i < sizeof(prefixes) / sizeof(prefixes[0]); i++) {
+    if (at + prefixes[i].length > len) continue;
+    if (memcmp(s + at, prefixes[i].prefix, prefixes[i].length) == 0) {
+      *need = prefixes[i].length + 8;
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool token_char(unsigned char c) {
+  return isalnum(c) || strchr("-_.+=/", c) != NULL;
+}
+
+static char *masked_copy(const unsigned char *s, size_t len) {
+  char *out = malloc(len * 3 + 32);
+  if (out == NULL) return NULL;
+  size_t used = 0;
+  size_t at = 0;
+  while (at < len) {
+    size_t need = 0;
+    if (secret_prefix(s, len, at, &need) && at + need <= len) {
+      size_t end = at;
+      while (end < len && token_char(s[end])) end++;
+      if (end - at >= need) {
+        memcpy(out + used, "[redacted]", 10);
+        used += 10;
+        at = end;
+        continue;
+      }
+    }
+    out[used++] = (char)s[at++];
+  }
+  out[used] = '\0';
+  return out;
+}
+
+static void mask_slot(cbor_item_t **slot) {
+  cbor_item_t *item = *slot;
+  if (item == NULL) return;
+  if (cbor_isa_map(item)) {
+    size_t pairs = cbor_map_size(item);
+    struct cbor_pair *entries = cbor_map_handle(item);
+    for (size_t i = 0; i < pairs; i++) mask_slot(&entries[i].value);
+    return;
+  }
+  if (cbor_isa_array(item)) {
+    size_t count = cbor_array_size(item);
+    cbor_item_t **items = cbor_array_handle(item);
+    for (size_t i = 0; i < count; i++) mask_slot(&items[i]);
+    return;
+  }
+  if (!cbor_isa_string(item)) return;
+  size_t len = cbor_string_length(item);
+  if (len == 0) return;
+  const unsigned char *text = cbor_string_handle(item);
+  char *masked = masked_copy(text, len);
+  if (masked == NULL) return;
+  if (strlen(masked) == len && memcmp(masked, text, len) == 0) {
+    free(masked);
+    return;
+  }
+  cbor_item_t *replacement = cbor_build_string(masked);
+  free(masked);
+  if (replacement == NULL) return;
+  cbor_decref(slot);
+  *slot = replacement;
+}
+
+void wd_mask_secrets(cbor_item_t *item) {
+  if (item == NULL) return;
+  mask_slot(&item);
 }

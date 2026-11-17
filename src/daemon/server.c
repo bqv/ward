@@ -1228,24 +1228,25 @@ static int turn_emit(void *ctx, const char *event, cbor_item_t *payload,
     wd_run *streaming_run = run_find(tc->srv, tc->session->id);
     if (streaming_run != NULL && streaming_run->streamed > 0) return 0;
   }
-  if (tc->session != NULL &&
+  cbor_item_t *logged = payload != NULL ? dup_item(payload) : wd_map(0);
+  if (logged != NULL) wd_mask_secrets(logged);
+  if (tc->session != NULL && logged != NULL &&
       (strcmp(event, "text.delta") == 0 || strcmp(event, "text.final") == 0)) {
     wd_run *ringed = run_find(tc->srv, tc->session->id);
     if (ringed != NULL && ringed->ring != NULL) {
-      char *said = wd_text_copy(wd_get(payload, "text"));
+      char *said = wd_text_copy(wd_get(logged, "text"));
       if (said != NULL) {
         wd_jobring_append(ringed->ring, said, strlen(said));
         free(said);
       }
     }
   }
-  cbor_item_t *logged = payload != NULL ? dup_item(payload) : wd_map(0);
+  cbor_item_t *broadcast = logged != NULL ? dup_item(logged) : wd_map(0);
   uint64_t seq = 0;
   if (logged == NULL || wd_session_emit(tc->session, event, logged, &seq) != 0) {
     *err = strdup("cannot append the turn event");
     return -1;
   }
-  cbor_item_t *broadcast = payload != NULL ? dup_item(payload) : wd_map(0);
   if (broadcast != NULL)
     conn_broadcast(tc->srv, tc->session, event, seq, broadcast);
   if (strcmp(event, "turn.end") == 0) {
@@ -3290,11 +3291,13 @@ static void emit_turn_failure(wd_server *srv, wd_run *run,
   cbor_item_t *logged = wd_map(2);
   wd_put(logged, "name", wd_text("turn_failed"));
   wd_put(logged, "message", wd_text(message));
+  wd_mask_secrets(logged);
   uint64_t seq = 0;
   if (wd_session_emit(session, "error", logged, &seq) == 0) {
     cbor_item_t *out = wd_map(2);
     wd_put(out, "name", wd_text("turn_failed"));
     wd_put(out, "message", wd_text(message));
+    wd_mask_secrets(out);
     conn_broadcast(srv, session, "error", seq, out);
     wd_free(out);
   }
@@ -3303,6 +3306,7 @@ static void emit_turn_failure(wd_server *srv, wd_run *run,
   wd_put(end, "turn", wd_uint(wd_turn_id(run->turn)));
   wd_put(end, "aborted", cbor_build_bool(true));
   wd_put(end, "reason", wd_text(message));
+  wd_mask_secrets(end);
   uint64_t end_seq = 0;
   if (wd_session_emit(session, "turn.end", end, &end_seq) == 0) {
     cbor_item_t *out = wd_map(3);

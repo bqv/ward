@@ -2580,3 +2580,11 @@ the write is refused and the external text survives, re-read, write again and wa
 matches what was read; `wd_session_mark_observed_version` and `wd_session_observed_version` are the new core surface. `session_test`,
 `gate_tool` and the full suite are green at 53 with `gate_fs` in the list. The combined-change failures of the previous session did not
 reproduce: the daemon-side and session-side changes now stand on their own gates, which is the point of splitting them.
+
+Hundred-and-ninety-seventh: secret masking at the event boundary. `wd_mask_secrets` walks a CBOR tree and replaces credential-shaped runs
+(`sk-`, `ghp_`, `AKIA`, `Bearer ` followed by at least eight token characters) with `[redacted]`, in place, replacing string items under
+maps and arrays. `turn_emit` masks its copy of every event before it is logged and before the same masked copy is broadcast, and the
+live ring buffer is fed from that masked copy too; `emit_turn_failure` masks its error and turn.end payloads for the same reason. The
+gate reads a file containing fake `sk-` and `ghp_` tokens and scans every event of the turn: none carries the raw value and at least one
+carries `[redacted]`. It is a narrow pattern set, and it deliberately masks the transcript as well as the wire, so a leaked token never
+reaches either the client or the store.

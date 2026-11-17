@@ -51,6 +51,7 @@ cbor_item_t *wd_bool(bool v);
 void wd_put(cbor_item_t *map, const char *key, cbor_item_t *value);
 cbor_item_t *wd_get(cbor_item_t *map, const char *key);
 bool wd_uint_of(cbor_item_t *item, uint64_t *out);
+void wd_mask_secrets(cbor_item_t *item);
 bool wd_bool_of(cbor_item_t *item, bool *out);
 char *wd_text_copy(cbor_item_t *item);
 
