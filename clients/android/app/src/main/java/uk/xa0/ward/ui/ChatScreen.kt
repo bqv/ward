@@ -152,6 +152,7 @@ import uk.xa0.ward.ui.components.DotState
 import uk.xa0.ward.ui.components.DshMark
 import uk.xa0.ward.ui.components.ExplorerWiring
 import uk.xa0.ward.ui.components.FilesPanel
+import uk.xa0.ward.ui.components.WorkspaceFilesWiring
 import uk.xa0.ward.ui.components.GoalBar
 import uk.xa0.ward.ui.components.JobsSeat
 import uk.xa0.ward.ui.components.JobsSheet
@@ -258,6 +259,7 @@ fun ChatScreen(vm: DshViewModel) {
     // The Files panel's explorer half. A flow of its own, like the browser's: a
     // listing failure belongs to the panel, not to the session error banner.
     val workspaceExplorer by vm.workspaceExplorer.collectAsStateWithLifecycle()
+    val workspaceFiles by vm.workspaceFiles.collectAsStateWithLifecycle()
 
     // A live clock for the running turn's status line, ticked once a second. Gated
     // on the session's *own* turn (`ownTurnInFlight`) like the row it feeds, so a
@@ -1180,6 +1182,12 @@ fun ChatScreen(vm: DshViewModel) {
                         onList = vm::listWorkspaceDirectory,
                         onReload = vm::reloadWorkspaceExplorer,
                     ),
+                    workspace = WorkspaceFilesWiring(
+                        state = workspaceFiles,
+                        onRefresh = vm::refreshWorkspaceFiles,
+                        onEnter = vm::listWorkspaceFiles,
+                        onUp = vm::workspaceFilesUp,
+                    ),
                     // The downloader is session-scoped like the loader, and the panel
                     // decides whether to draw its control at all.
                     downloader = fileDownloader,
@@ -1187,6 +1195,7 @@ fun ChatScreen(vm: DshViewModel) {
                         // The tree is a per-open reading; leaving the cache up
                         // would show a stale directory the next time it opens.
                         vm.resetWorkspaceExplorer()
+                        vm.resetWorkspaceFiles()
                         showFiles = false
                     },
                     modifier = Modifier.weight(1f),
@@ -2519,6 +2528,7 @@ private fun FilesSurface(
      * is what it was before there was a tree to browse.
      */
     explorer: ExplorerWiring? = null,
+    workspace: WorkspaceFilesWiring? = null,
     /**
      * Reads a whole file, for the preview header's Download control. Wired from the
      * session scope like [loader]; without it the panel offers no download at all
@@ -2580,6 +2590,7 @@ private fun FilesSurface(
             downloader = downloader,
             initialPath = focus,
             explorer = explorer,
+            workspace = workspace,
             modifier = Modifier.weight(1f),
         )
     }

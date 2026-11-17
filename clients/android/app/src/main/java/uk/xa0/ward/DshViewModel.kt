@@ -88,6 +88,11 @@ import uk.xa0.ward.model.ExplorerState
 import uk.xa0.ward.model.WorkspaceEntry
 import uk.xa0.ward.model.WorkspaceEntryKind
 import uk.xa0.ward.model.WorkspaceListing
+import uk.xa0.ward.model.WorkspaceFileEntry
+import uk.xa0.ward.model.WorkspaceFileKind
+import uk.xa0.ward.model.WorkspaceFiles
+import uk.xa0.ward.model.WorkspaceFilesState
+import uk.xa0.ward.model.WorkspaceLevel
 import uk.xa0.ward.model.DownloadResult
 import uk.xa0.ward.model.FileDownloader
 import uk.xa0.ward.model.readWholeFile
@@ -1652,6 +1657,13 @@ class DshViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Bumped per request, so a superseded level cannot land after a newer one. */
     private var explorerGeneration = 0
+
+    private val _workspaceFiles = MutableStateFlow<WorkspaceFilesState>(WorkspaceFilesState.Idle)
+    val workspaceFiles: StateFlow<WorkspaceFilesState> = _workspaceFiles.asStateFlow()
+
+    private var workspaceFilesPath = ""
+    private var workspaceFilesGeneration = 0
+    private var workspaceFilesJob: Job? = null
 
     // --------------------------------------------------------------- terminal
 
@@ -5999,6 +6011,7 @@ class DshViewModel(application: Application) : AndroidViewModel(application) {
         // A listed level is a path inside one workspace root; carrying it to another
         // session would name a directory that session is not confined to.
         resetWorkspaceExplorer()
+        resetWorkspaceFiles()
         publishTranscript()
         _ui.value = _ui.value.copy(
             currentSessionId = null,
@@ -6606,6 +6619,121 @@ class DshViewModel(application: Application) : AndroidViewModel(application) {
         explorerLevels.clear()
         explorerPath = ""
         _workspaceExplorer.value = ExplorerState.Idle
+    }
+
+    fun listWorkspaceFiles(path: String = "") {
+        val requested = path.trim('/')
+        workspaceFilesPath = requested
+        workspaceFilesJob?.cancel()
+        val generation = ++workspaceFilesGeneration
+        val sessionId = _ui.value.currentSessionId
+        if (sessionId.isNullOrBlank()) {
+            _workspaceFiles.value = WorkspaceFilesState.Failed(requested, "No open session to list from.")
+            return
+        }
+        _workspaceFiles.value = WorkspaceFilesState.Loading(requested)
+        workspaceFilesJob = viewModelScope.launch {
+            val cwd = cwdOf(sessionId)
+            val mtimeOf: (String) -> Long? = { relative ->
+                cwd?.takeIf { it.isNotBlank() }?.let { root ->
+                    runCatching {
+                        val file = File(root, relative)
+                        if (file.exists()) file.lastModified().takeIf { it > 0 } else null
+                    }.getOrNull()
+                }
+            }
+            try {
+                if (requested.isEmpty()) {
+                    val root = fetchWorkspaceLevel(sessionId, "")
+                    val children = ArrayList<WorkspaceLevel>()
+                    for (directory in WorkspaceFiles.directories(root)) {
+                        if (!workspaceFilesCurrent(generation, sessionId)) return@launch
+                        try {
+                            children += fetchWorkspaceLevel(sessionId, directory)
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (auth: DshAuthException) {
+                            throw auth
+                        } catch (_: Throwable) {
+                        }
+                    }
+                    if (!workspaceFilesCurrent(generation, sessionId)) return@launch
+                    val flat = WorkspaceFiles.flatten(root, children, mtimeOf = mtimeOf)
+                    _workspaceFiles.value =
+                        WorkspaceFilesState.Ready("", flat.rows, flat.truncated)
+                } else {
+                    val level = fetchWorkspaceLevel(sessionId, requested)
+                    if (!workspaceFilesCurrent(generation, sessionId)) return@launch
+                    _workspaceFiles.value = WorkspaceFilesState.Ready(
+                        requested,
+                        WorkspaceFiles.rowsOf(level, mtimeOf),
+                        level.truncated,
+                    )
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                if (!workspaceFilesCurrent(generation, sessionId)) return@launch
+                if (error is DshAuthException) onAuthFailure("session.file_list", error)
+                _workspaceFiles.value = WorkspaceFilesState.Failed(
+                    requested,
+                    if (error is DshAuthException) AUTH_ERROR else describe(error),
+                )
+            }
+        }
+    }
+
+    fun refreshWorkspaceFiles() {
+        listWorkspaceFiles(workspaceFilesPath)
+    }
+
+    fun workspaceFilesUp() {
+        listWorkspaceFiles("")
+    }
+
+    fun resetWorkspaceFiles() {
+        workspaceFilesGeneration++
+        workspaceFilesJob?.cancel()
+        workspaceFilesJob = null
+        workspaceFilesPath = ""
+        _workspaceFiles.value = WorkspaceFilesState.Idle
+    }
+
+    private fun workspaceFilesCurrent(generation: Int, sessionId: String): Boolean =
+        generation == workspaceFilesGeneration && _ui.value.currentSessionId == sessionId
+
+    private suspend fun fetchWorkspaceLevel(sessionId: String, path: String): WorkspaceLevel {
+        val args = JSONObject()
+            .put("workspaceFileScopeId", sessionId)
+            .put("path", path)
+        val json = client.rpc("workspaceFiles/list", args)
+        return WorkspaceLevel(
+            path = json.str("path"),
+            entries = toWorkspaceFileEntries(json.arr("entries")),
+            truncated = json.optBoolean("truncated", false),
+        )
+    }
+
+    private fun toWorkspaceFileEntries(array: JSONArray?): List<WorkspaceFileEntry> {
+        if (array == null) return emptyList()
+        val result = ArrayList<WorkspaceFileEntry>(array.length())
+        for (i in 0 until array.length()) {
+            val item = array.optJSONObject(i) ?: continue
+            val name = item.str("name")
+            if (name.isEmpty()) continue
+            val kind = when (item.str("type")) {
+                "directory" -> WorkspaceFileKind.DIRECTORY
+                "file" -> WorkspaceFileKind.FILE
+                else -> WorkspaceFileKind.OTHER
+            }
+            val size = if (kind == WorkspaceFileKind.FILE && item.has("size")) {
+                item.optLong("size").takeIf { it >= 0 }
+            } else {
+                null
+            }
+            result += WorkspaceFileEntry(name, kind, size)
+        }
+        return result
     }
 
     /**
@@ -7629,6 +7757,7 @@ class DshViewModel(application: Application) : AndroidViewModel(application) {
         reducer.reset()
         // Same reason as `enterPendingSession`: a level is relative to one root.
         resetWorkspaceExplorer()
+        resetWorkspaceFiles()
         publishTranscript()
         Log.d(TAG, "openSession $sessionId")
         _ui.value = _ui.value.copy(

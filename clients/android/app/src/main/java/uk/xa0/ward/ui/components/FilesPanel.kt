@@ -76,6 +76,8 @@ import uk.xa0.ward.model.SessionFile
 import uk.xa0.ward.model.WorkspaceEntry
 import uk.xa0.ward.model.WorkspaceEntryKind
 import uk.xa0.ward.model.WorkspaceExplorer
+import uk.xa0.ward.model.WorkspaceFilesState
+import uk.xa0.ward.model.WorkspaceRow
 import uk.xa0.ward.model.formatSize
 import uk.xa0.ward.model.isMarkdownPath
 import uk.xa0.ward.model.previewFormatOf
@@ -110,6 +112,8 @@ data class ExplorerWiring(
     val onList: (String) -> Unit,
     val onReload: () -> Unit,
 )
+
+private enum class FilesMode { SESSION, BROWSE, WORKSPACE }
 
 /**
  * The session's Files panel: the files the transcript touched, and the workspace
@@ -195,15 +199,24 @@ fun FilesPanel(
     onSelect: ((SessionFile) -> Unit)? = null,
     /** The workspace listing, when the parent has a host to list with. */
     explorer: ExplorerWiring? = null,
+    workspace: WorkspaceFilesWiring? = null,
 ) {
     val colors = DshTheme.colors
     val canExplore = explorer != null && root != null
+    val canWorkspace = workspace != null && root != null
     // Which list is up. The workspace is the default — a panel derived only from
     // the session's own activity is what read as broken — but a caller that named
     // a file arrived from a card or a link, and the session list is the one whose
     // rows are addressed the way a card's path is, so that opens as it did.
-    var browse by rememberSaveable(initialPath, canExplore) {
-        mutableStateOf(canExplore && initialPath == null)
+    var mode by rememberSaveable(initialPath, canExplore, canWorkspace) {
+        mutableStateOf(
+            when {
+                initialPath != null -> FilesMode.SESSION
+                canWorkspace -> FilesMode.WORKSPACE
+                canExplore -> FilesMode.BROWSE
+                else -> FilesMode.SESSION
+            },
+        )
     }
     // The path on screen: [initialPath], or a row the reader tapped. A focus the
     // derivation has no row for is kept rather than discarded: such a path is a
@@ -221,8 +234,8 @@ fun FilesPanel(
     // The drop-on-reload guard belongs to the session list, and only to it: a
     // browse selection is a workspace path this list is not drawn from, and a mode
     // switch clears the selection outright.
-    LaunchedEffect(files, selected, browse) {
-        if (browse) return@LaunchedEffect
+    LaunchedEffect(files, selected, mode) {
+        if (mode != FilesMode.SESSION) return@LaunchedEffect
         val held = selected != null && files.any { it.path == selected }
         if (held) listed = true else if (listed) selected = null
     }
@@ -235,9 +248,9 @@ fun FilesPanel(
     // or a reset that arrives while Browse is already up would leave the pane
     // saying "Loading…" with nothing in flight.
     val explorerIdle = explorer?.state is ExplorerState.Idle
-    LaunchedEffect(browse, root, explorerIdle) {
+    LaunchedEffect(mode, root, explorerIdle) {
         val wiring = explorer
-        if (browse && explorerIdle && wiring != null && root != null) wiring.onList("")
+        if (mode == FilesMode.BROWSE && explorerIdle && wiring != null && root != null) wiring.onList("")
     }
 
     // Workspace reads are memoized for the panel's lifetime: re-selecting a file
@@ -283,7 +296,7 @@ fun FilesPanel(
     // an outside caller asked for goes on to the preview instead, which is the one
     // thing this panel can still show for a session whose derivation holds nothing.
     // Browse never takes this branch: its content is the tree, not the derivation.
-    if (files.isEmpty() && selected == null && !browse) {
+    if (files.isEmpty() && selected == null && mode == FilesMode.SESSION) {
         Box(modifier.fillMaxSize().background(colors.bgBase), contentAlignment = Alignment.Center) {
             FilesEmptyState()
         }
@@ -298,7 +311,7 @@ fun FilesPanel(
     val lightbox = LocalLightbox.current
     val openPicture: (String) -> Unit = { path ->
         if (lightbox != null) {
-            val set = picturePaths(browse, explorer?.state, files)
+            val set = picturePaths(mode, explorer?.state, workspace?.state, files)
             val paths = if (path in set) set else listOf(path)
             val pages = paths.map { sibling -> picturePage(sibling, cached, fetched, badges, loader) }
             val start = pages.indexOfFirst { it.key == picturePageKey(path) }.coerceAtLeast(0)
@@ -309,12 +322,14 @@ fun FilesPanel(
     BoxWithConstraints(modifier.fillMaxSize().background(colors.bgBase)) {
         val twoPane = maxWidth >= 720.dp
         Column(Modifier.fillMaxSize()) {
-            if (canExplore) {
+            if (canExplore || canWorkspace) {
                 FilesModeTabs(
-                    browse = browse,
-                    onBrowse = { next ->
-                        if (next != browse) {
-                            browse = next
+                    mode = mode,
+                    canBrowse = canExplore,
+                    canWorkspace = canWorkspace,
+                    onMode = { next ->
+                        if (next != mode) {
+                            mode = next
                             // The two lists address the same file under different
                             // spellings, so a selection made in one is not a
                             // selection in the other. `listed` is part of that
@@ -328,7 +343,7 @@ fun FilesPanel(
             }
             Box(Modifier.fillMaxWidth().weight(1f)) {
                 val list: @Composable (Modifier) -> Unit = { listModifier ->
-                    if (browse && explorer != null && root != null) {
+                    if (mode == FilesMode.BROWSE && explorer != null && root != null) {
                         ExplorerPane(
                             root = root,
                             state = explorer.state,
@@ -340,6 +355,14 @@ fun FilesPanel(
                                 selected = path
                                 badge?.let { onSelect?.invoke(it) }
                             },
+                            modifier = listModifier,
+                        )
+                    } else if (mode == FilesMode.WORKSPACE && workspace != null && root != null) {
+                        WorkspaceFilesPane(
+                            root = root,
+                            wiring = workspace,
+                            selectedPath = selected,
+                            onSelectFile = { path -> selected = path },
                             modifier = listModifier,
                         )
                     } else {
@@ -399,7 +422,12 @@ fun FilesPanel(
  * shape to read, not a hue.
  */
 @Composable
-private fun FilesModeTabs(browse: Boolean, onBrowse: (Boolean) -> Unit) {
+private fun FilesModeTabs(
+    mode: FilesMode,
+    canBrowse: Boolean,
+    canWorkspace: Boolean,
+    onMode: (FilesMode) -> Unit,
+) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -408,8 +436,19 @@ private fun FilesModeTabs(browse: Boolean, onBrowse: (Boolean) -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(DshSpacing.sm),
     ) {
-        ModeTab("This session", selected = !browse) { onBrowse(false) }
-        ModeTab("Browse", selected = browse) { onBrowse(true) }
+        ModeTab("This session", selected = mode == FilesMode.SESSION) {
+            onMode(FilesMode.SESSION)
+        }
+        if (canWorkspace) {
+            ModeTab("Workspace", selected = mode == FilesMode.WORKSPACE) {
+                onMode(FilesMode.WORKSPACE)
+            }
+        }
+        if (canBrowse) {
+            ModeTab("Browse", selected = mode == FilesMode.BROWSE) {
+                onMode(FilesMode.BROWSE)
+            }
+        }
     }
 }
 
@@ -1427,17 +1466,25 @@ private fun isRasterPicture(path: String): Boolean {
  * no set; the preview then opens on the one picture it knows.
  */
 private fun picturePaths(
-    browse: Boolean,
+    mode: FilesMode,
     explorer: ExplorerState?,
+    workspace: WorkspaceFilesState?,
     files: List<SessionFile>,
 ): List<String> {
-    val paths = if (browse) {
-        val listing = (explorer as? ExplorerState.Ready)?.listing ?: return emptyList()
-        listing.entries
-            .filter { it.kind == WorkspaceEntryKind.FILE && isRasterPicture(it.name) }
-            .map { listing.childPath(it) }
-    } else {
-        files.map { it.path }.filter { isRasterPicture(it) }
+    val paths = when (mode) {
+        FilesMode.BROWSE -> {
+            val listing = (explorer as? ExplorerState.Ready)?.listing ?: return emptyList()
+            listing.entries
+                .filter { it.kind == WorkspaceEntryKind.FILE && isRasterPicture(it.name) }
+                .map { listing.childPath(it) }
+        }
+
+        FilesMode.WORKSPACE -> {
+            val rows = (workspace as? WorkspaceFilesState.Ready)?.rows ?: return emptyList()
+            rows.filter { !it.directory && isRasterPicture(it.name) }.map(WorkspaceRow::path)
+        }
+
+        FilesMode.SESSION -> files.map { it.path }.filter { isRasterPicture(it) }
     }
     return paths.distinct()
 }
