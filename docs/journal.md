@@ -2709,3 +2709,11 @@ implementable honestly yet. History carries role+text only; tool results live in
 no tool message to prune. The existing byte-budget trim already keeps the newest and reports `omitted`; a real pruner needs the assistant
 tool-call and role:tool history shape first, which is also what a conformant multi-step conversation needs. (3) The 0.6.8 (17) APK is built;
 the phone is offline at 192.168.1.100:37131, so the install is pending reachability.
+
+Two-hundred-and-eleventh: the timeout section is its own gate, and the split alone is already worth it. `tests/gate_timeout` now owns the
+long-exec test (park /run tail -f /dev/null, approve, assert the exec.run result carries timed_out, then turn.end) and `gate_tool` no longer
+contains it: the big gate passes in about 314 s instead of brushing its watchdog, and the suite is green at 61. Re-applying the job-level
+transport retry on top still broke `gate_tool`, and this time the failure was visible: it hung on its very first plain prompt, after the ack,
+waiting for a turn that never ended, with the timeout test gone. That points away from the timeout section and at the fixture: its accept
+loop serves only eight connections in total, and the retry (plus the daemon's estate polling) can exhaust that before the provider request
+is ever accepted. The next attempt should lift the fixture's accept limit first, then re-apply the retry and `gate_net`.
