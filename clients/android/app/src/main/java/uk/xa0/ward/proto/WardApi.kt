@@ -141,6 +141,15 @@ class WardApi(private val connection: WardConnection) {
     suspend fun probeModel(id: String): Cbor =
         connection.call("model.probe", cborMap("id" to id.cbor()), 30_000)
 
+    suspend fun presetList(): Cbor.Map =
+        connection.call("preset.list", Cbor.Map(emptyList())).asMap()
+
+    suspend fun presetApply(session: String, name: String): Cbor.Map =
+        connection.call(
+            "preset.apply",
+            cborMap("id" to session.cbor(), "name" to name.cbor()),
+        ).asMap()
+
     // ---------------------------------------------------------------- approvals
 
     suspend fun respondApproval(session: String, call: Long, epoch: Long, allow: Boolean): Boolean =

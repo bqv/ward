@@ -806,18 +806,19 @@ fun PermissionSheet(
 }
 
 /**
- * Agent-preset picker for the blank session the hero is about to start.
+ * Agent-preset picker for the hero's pending session or the session on screen.
  *
- * Per-session by construction: the host composes a session's agent once, so a
- * preset can only change before the first turn (`agentPresets/select` refuses a
- * started session with `agent-preset/locked`). The web puts the same control on
- * the new-session screen, not in Settings.
+ * Per-session by construction: ward applies the choice to the followed session,
+ * while DSH composes a session's agent once and refuses a started one with
+ * `agent-preset/locked`. The web puts the same control on the new-session screen,
+ * not in Settings.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AgentPresetSheet(
     options: List<AgentPresetOption>,
     current: String,
+    sessionOpen: Boolean = false,
     onSelect: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -843,7 +844,11 @@ fun AgentPresetSheet(
             Spacer(Modifier.height(DshSpacing.sm))
             Text(
                 // Web copy, `seatHint`: the chip's own tooltip.
-                text = "Agent preset for the session you are about to start",
+                text = if (sessionOpen) {
+                    "Agent preset for this session"
+                } else {
+                    "Agent preset for the session you are about to start"
+                },
                 style = DshType.bodySmall,
                 color = colors.labelTertiary,
                 modifier = Modifier.padding(horizontal = DshSpacing.xxl),

@@ -881,6 +881,11 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
             m_accessNotice = text;
             emit accessNoticeChanged();
         }
+        if (method == QLatin1String("preset.list")
+            || method == QLatin1String("preset.apply")) {
+            m_agentPresetNotice = text;
+            emit agentPresetNoticeChanged();
+        }
         if (method == QLatin1String("settings.set")
             || method == QLatin1String("module.enable"))
             emit railNotice(text, true);
@@ -1146,6 +1151,36 @@ void WardClient::handleResponse(const QString &method, bool ok, const QVariant &
         }
     } else if (method == QLatin1String("policy.select")) {
         refreshPermissionPresets();
+    } else if (method == QLatin1String("preset.list")) {
+        const QVariantList presets = result.value(QStringLiteral("presets")).toList();
+        QVariantList mapped;
+        for (const QVariant &value : presets) {
+            const QVariantMap preset = value.toMap();
+            const QString name = preset.value(QStringLiteral("name")).toString();
+            if (name.isEmpty())
+                continue;
+            mapped.append(QVariantMap{
+                {QStringLiteral("name"), name},
+                {QStringLiteral("system"), preset.value(QStringLiteral("system"))},
+                {QStringLiteral("model"), preset.value(QStringLiteral("model"))}});
+        }
+        m_agentPresets = mapped;
+        m_agentPresetNotice.clear();
+        emit agentPresetsChanged();
+        emit agentPresetNoticeChanged();
+    } else if (method == QLatin1String("preset.apply")) {
+        const bool applied = result.value(QStringLiteral("applied")).toBool();
+        const QString name = result.value(QStringLiteral("name")).toString();
+        if (!applied) {
+            m_agentPresetNotice = QStringLiteral("the preset was not applied");
+        } else {
+            m_appliedAgentPreset = name;
+            m_agentPresetNotice = name.isEmpty()
+                ? QStringLiteral("preset applied")
+                : QStringLiteral("preset \"%1\" applied").arg(name);
+            emit appliedAgentPresetChanged();
+        }
+        emit agentPresetNoticeChanged();
     } else if (method == QLatin1String("model.list")) {
         const QVariantList models = result.value(QStringLiteral("models")).toList();
         QString previous;
@@ -2580,6 +2615,26 @@ void WardClient::refreshModelCatalog()
     refreshConfigOptions();
 }
 
+void WardClient::refreshAgentPresets()
+{
+    if (m_fd < 0)
+        return;
+    sendRequest(QStringLiteral("preset.list"));
+}
+
+void WardClient::applyAgentPreset(const QString &name)
+{
+    if (name.isEmpty())
+        return;
+    if (m_sessionId.isEmpty()) {
+        m_agentPresetNotice = QStringLiteral("no session to apply a preset to");
+        emit agentPresetNoticeChanged();
+        return;
+    }
+    sendRequest(QStringLiteral("preset.apply"),
+                {{QStringLiteral("id"), m_sessionId}, {QStringLiteral("name"), name}});
+}
+
 void WardClient::setPermissionPreset(const QString &value)
 {
     if (value.isEmpty())
@@ -3207,6 +3262,9 @@ QStringList WardClient::protocolMethods() const
             QStringLiteral("session.checkpoint"),
             QStringLiteral("model.list"), QStringLiteral("model.select"),
             QStringLiteral("policy.list"), QStringLiteral("policy.select"),
+            QStringLiteral("preset.list"), QStringLiteral("preset.get"),
+            QStringLiteral("preset.save"), QStringLiteral("preset.delete"),
+            QStringLiteral("preset.apply"),
             QStringLiteral("model.probe"), QStringLiteral("approval.list"),
             QStringLiteral("approval.respond"),
             QStringLiteral("subagent.prompt"), QStringLiteral("subagent.interrupt"),

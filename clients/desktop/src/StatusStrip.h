@@ -83,22 +83,22 @@ private slots:
 
 private:
 
-    // ---- the three chip menus (plan §5 stage 1: "QMenu for the three strip
-    // chips") -------------------------------------------------------------
+    // ---- the chip menus ----------------------------------------------------
     //
-    // One per chip that has a popover in `qml/main.qml`: the model, the effort
-    // and the access chip. Each builds its QMenu on the opening, because the
-    // catalog behind it is a live surface and a QMenu holds the actions it was
-    // built with. The context chip has no menu in the QML — it is a ring and a
-    // tooltip — and the jobs chip's roster is not this slice; neither is wired
-    // here, which is why the comment on `ChipCell` names the three that are.
+    // One per chip that has a popover: the model, the effort, the access chip and
+    // the ward agent-preset chip. Each builds its QMenu on the opening, because
+    // the catalog behind it is a live surface and a QMenu holds the actions it
+    // was built with. The context chip has no menu — it is a ring and a tooltip —
+    // and the jobs chip's roster is not this slice.
     void openModelMenu();
     void openEffortMenu();
     void openAccessMenu();
     void openEstateMenu();
+    void openAgentPresetMenu();
     int fillModelMenu();
     void fitModelBodies();
     int fillAccessMenu();
+    int fillAgentPresetMenu();
     void chooseModel(const QString &value);
 
     // ---- derived values, mirroring main.qml's statusBar ---------------------
@@ -133,6 +133,7 @@ private:
     HoverCell *m_parent;
     PlainCell *m_status;
     ChipCell *m_access;
+    ChipCell *m_presets;
     SessionIdCell *m_session;
     ChipCell *m_load;
     ChipCell *m_model;
@@ -149,4 +150,6 @@ private:
     QString m_modelConfigId;
     QPointer<QMenu> m_accessMenu;
     QPointer<QActionGroup> m_accessGroup;
+    QPointer<QMenu> m_agentPresetMenu;
+    QPointer<QActionGroup> m_agentPresetGroup;
 };

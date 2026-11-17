@@ -348,6 +348,20 @@ public:
     Q_PROPERTY(QString modelNotice READ modelNotice NOTIFY modelNoticeChanged)
     QString modelNotice() const { return readString(QStringLiteral("modelNotice")); }
 
+    Q_PROPERTY(QVariantList agentPresets READ agentPresets NOTIFY agentPresetsChanged)
+    QVariantList agentPresets() const { return readList(QStringLiteral("agentPresets")); }
+
+    Q_PROPERTY(QString agentPresetNotice READ agentPresetNotice NOTIFY agentPresetNoticeChanged)
+    QString agentPresetNotice() const
+    { return readString(QStringLiteral("agentPresetNotice")); }
+
+    Q_PROPERTY(QString appliedAgentPreset READ appliedAgentPreset NOTIFY appliedAgentPresetChanged)
+    QString appliedAgentPreset() const
+    { return readString(QStringLiteral("appliedAgentPreset")); }
+
+    Q_PROPERTY(bool hasAgentPresets READ hasAgentPresets CONSTANT)
+    bool hasAgentPresets() const { return m_hasAgentPresets; }
+
     Q_PROPERTY(QVariantList modelLoads READ modelLoads NOTIFY modelLoadsChanged)
     QVariantList modelLoads() const { return readList(QStringLiteral("modelLoads")); }
 
@@ -503,6 +517,8 @@ public:
     void setConfigOption(const QString &configId, const QString &value);
     void refreshPermissionPresets();
     void refreshModelCatalog();
+    void refreshAgentPresets();
+    void applyAgentPreset(const QString &name);
     void setPermissionPreset(const QString &value);
     void updateQueueItem(const QString &itemId, const QString &kind);
     void clearPendingAttachments();
@@ -603,6 +619,9 @@ signals:
     void accessNoticeChanged();
     void configOptionsChanged();
     void modelNoticeChanged();
+    void agentPresetsChanged();
+    void agentPresetNoticeChanged();
+    void appliedAgentPresetChanged();
     void modelLoadsChanged();
     void contextChanged();
     void contextSizeChanged();
@@ -720,6 +739,7 @@ private:
     bool m_hasSessionList = false;
     bool m_hasWorkspaces = false;
     bool m_hasPermissionCatalog = false;
+    bool m_hasAgentPresets = false;
     bool m_hasAttachmentStaging = false;
     bool m_hasFileSurface = false;
     bool m_hasTrajectory = false;

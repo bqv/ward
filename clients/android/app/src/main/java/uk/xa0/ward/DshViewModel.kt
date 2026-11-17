@@ -9012,11 +9012,11 @@ class DshViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * Applies one preset to the current blank session.
      *
-     * The choice is per-session and only valid before the session has produced
-     * anything: the host refuses to recompose an agent whose history exists
-     * (`agent-preset/locked`), which is exactly why this control lives on the
-     * hero rather than in Settings. On the wire the session is named `agentId`,
-     * the name the host resolves its live agent from; the preset is `agentPreset`.
+     * The choice is per-session: ward applies it to the followed session, while
+     * DSH refuses to recompose an agent whose history exists
+     * (`agent-preset/locked`) and surfaces that refusal here. On the wire the
+     * session is named `agentId`, the name the host resolves its live agent from;
+     * the preset is `agentPreset`.
      */
     fun selectAgentPreset(id: String) {
         // On the pending seat there is no agent to select for: the choice is
@@ -9033,13 +9033,7 @@ class DshViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         val sessionId = _ui.value.currentSessionId ?: return
-        val blank = _ui.value.sessions.firstOrNull { it.id == sessionId }?.blank == true
-        if (!blank) {
-            // The chip is only offered while blank, so this only fires if the first
-            // turn landed between the tap and the call.
-            _ui.value = _ui.value.copy(error = "This session has already started; its agent preset is fixed.")
-            return
-        }
+        val name = _ui.value.agentPresetOptions.firstOrNull { it.id == id }?.name ?: id
         viewModelScope.launch {
             runCatching {
                 client.rpc(
@@ -9048,6 +9042,7 @@ class DshViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }.onSuccess {
                 _ui.value = _ui.value.copy(currentAgentPreset = id, error = null, errorNeedsSignIn = false)
+                refreshAgentPresets()
             }.onFailure { error ->
                 if (error is DshAuthException) {
                     onAuthFailure("agentPresets/select", error)
@@ -9057,7 +9052,6 @@ class DshViewModel(application: Application) : AndroidViewModel(application) {
                 // in the roster's own framing (which already names the preset), while
                 // a `reason` detail holds the bare cause. Prefer the detail, as the
                 // web chip does.
-                val name = _ui.value.agentPresetOptions.firstOrNull { it.id == id }?.name ?: id
                 val reason = (error as? DshRpcException)?.details?.str("reason").orEmpty()
                 _ui.value = _ui.value.copy(
                     error = "Could not switch to $name: ${reason.ifEmpty { describe(error) }}",

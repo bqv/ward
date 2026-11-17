@@ -108,7 +108,8 @@ The client speaks ward's method names and event kinds, not an adapter vocabulary
 | trajectory | `turn.*`, `session.prompted`, `text.delta`, `tool.call/result` |
 | workspaces | `host.list` for the Add workspace folder chooser; synthetic cwd groups with locally persisted rename/delete (delete moves the sessions to Ungrouped) |
 | links | Markdown anchors in the transcript, ACP and headless prose open the link dialog: browser, this window, copy |
-| presets | `policy.list` / `policy.select`; chip normalises `id` to `value`; full-access requires the warning confirmation and marks the chip |
+| access presets | `policy.list` / `policy.select`; chip normalises `id` to `value`; full-access requires the warning confirmation and marks the chip |
+| agent presets | `preset.list` fills the strip's Presets menu with the daemon's names; `preset.apply {id, name}` applies the choice to the followed session and reports the applied name or the daemon's own error; disabled with no session |
 | search | `session.search_text` paging; Search messages dialog, no replay |
 | ACP | `ward-acp`, JSON-RPC 2.0 over stdio: initialize, session/new, session/prompt, session/cancel, session/update, request_permission |
 | jobs | `job.list`, `job.follow` retained output and `job.kill`; the jobs chip opens the viewer |

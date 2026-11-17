@@ -65,6 +65,9 @@ public:
     Q_PROPERTY(QString accessNotice READ accessNotice NOTIFY accessNoticeChanged)
     Q_PROPERTY(QVariantList configOptions READ configOptions NOTIFY configOptionsChanged)
     Q_PROPERTY(QString modelNotice READ modelNotice NOTIFY modelNoticeChanged)
+    Q_PROPERTY(QVariantList agentPresets READ agentPresets NOTIFY agentPresetsChanged)
+    Q_PROPERTY(QString agentPresetNotice READ agentPresetNotice NOTIFY agentPresetNoticeChanged)
+    Q_PROPERTY(QString appliedAgentPreset READ appliedAgentPreset NOTIFY appliedAgentPresetChanged)
     Q_PROPERTY(QVariantList modelLoads READ modelLoads NOTIFY modelLoadsChanged)
     Q_PROPERTY(int contextUsed READ contextUsed NOTIFY contextChanged)
     Q_PROPERTY(int contextSize READ contextSize NOTIFY contextSizeChanged)
@@ -146,6 +149,9 @@ public:
     QString accessNotice() const { return m_accessNotice; }
     QVariantList configOptions() const { return m_configOptions; }
     QString modelNotice() const { return m_modelNotice; }
+    QVariantList agentPresets() const { return m_agentPresets; }
+    QString agentPresetNotice() const { return m_agentPresetNotice; }
+    QString appliedAgentPreset() const { return m_appliedAgentPreset; }
     QVariantList modelLoads() const { return m_modelLoads; }
     int contextUsed() const { return m_contextUsed; }
     int contextSize() const { return m_contextSize; }
@@ -216,6 +222,8 @@ public:
     Q_INVOKABLE void refreshConfigOptions();
     Q_INVOKABLE void refreshPermissionPresets();
     Q_INVOKABLE void refreshModelCatalog();
+    Q_INVOKABLE void refreshAgentPresets();
+    Q_INVOKABLE void applyAgentPreset(const QString &name);
     Q_INVOKABLE void setPermissionPreset(const QString &value);
     Q_INVOKABLE void confirmPermissionPreset(const QString &value);
     Q_INVOKABLE void setConfigOption(const QString &configId, const QString &value);
@@ -299,6 +307,9 @@ signals:
     void accessNoticeChanged();
     void configOptionsChanged();
     void modelNoticeChanged();
+    void agentPresetsChanged();
+    void agentPresetNoticeChanged();
+    void appliedAgentPresetChanged();
     void modelLoadsChanged();
     void contextChanged();
     void contextSizeChanged();
@@ -446,6 +457,9 @@ private:
     QString m_accessNotice;
     QVariantList m_configOptions;
     QString m_modelNotice;
+    QVariantList m_agentPresets;
+    QString m_agentPresetNotice;
+    QString m_appliedAgentPreset;
     QVariantList m_modelLoads;
     int m_contextUsed = 0;
     int m_contextSize = 0;

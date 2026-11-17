@@ -48,7 +48,7 @@ int cellHeight()
     return theme->fontData() + 2 * theme->space2();
 }
 
-// The three chip menus are built with the shell's shared helpers
+// The chip menus are built with the shell's shared helpers
 // (ShellChrome.h's `Chrome::shellMenu`, `Chrome::popupMenuAt` and friends):
 // a QMenu is a shell surface, and the rail's two menus use the same vocabulary.
 
@@ -572,12 +572,11 @@ private:
 // ---- a bordered chip -------------------------------------------------------
 //
 // The access level, the model, the effort and the job count are chips: a hairline
-// border, transparent fill, one or two runs of 12 px text. Three of them open a
-// menu — the model, the effort and the access chip, the three popovers the QML
-// gives this strip — and those three light under the pointer and wear the accent
-// border while their list is open, as the QML's chips do. The jobs chip has no
-// activation in this slice, so it keeps the quiet surface: a hover fill that opens
-// nothing is worse than none.
+// border, transparent fill, one or two runs of 12 px text. The model, the effort,
+// the access chip and the ward agent-preset chip open a menu, and those four light
+// under the pointer and wear the accent border while their list is open, as the
+// QML's chips do. The jobs chip has no activation in this slice, so it keeps the
+// quiet surface: a hover fill that opens nothing is worse than none.
 class StatusStrip::ChipCell : public QWidget
 {
 public:
@@ -588,7 +587,7 @@ public:
         setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
     }
 
-    /// Makes the chip a trigger. Called only for the three chips with a menu;
+    /// Makes the chip a trigger. Called only for the chips with a menu;
     /// the pointer and the hover fill follow from having one.
     void setActivated(std::function<void()> activated)
     {
@@ -898,6 +897,10 @@ StatusStrip::StatusStrip(ClientFacade *facade, QWidget *parent)
     m_access->setObjectName(QStringLiteral("accessChip"));
     row->addCell(m_access, CellRow::Fixed);
 
+    m_presets = new ChipCell(this);
+    m_presets->setObjectName(QStringLiteral("agentPresetChip"));
+    row->addCell(m_presets, CellRow::Fixed);
+
     m_session = new SessionIdCell(this);
     m_session->setObjectName(QStringLiteral("sessionIdChip"));
     row->addCell(m_session, CellRow::Flexible);
@@ -922,9 +925,9 @@ StatusStrip::StatusStrip(ClientFacade *facade, QWidget *parent)
     m_jobs->setObjectName(QStringLiteral("jobsChip"));
     row->addCell(m_jobs, CellRow::Fixed);
 
-    // The three chips with a popover in the QML get one here. The context cell
-    // is a ring and a tooltip and the jobs chip's roster is a later slice; both
-    // stay inert rather than opening an empty menu.
+    // The chips with a popover get one here. The context cell is a ring and a
+    // tooltip and the jobs chip's roster is a later slice; both stay inert rather
+    // than opening an empty menu.
     m_access->setActivated([this]() { openAccessMenu(); });
     m_jobs->setActivated([this]() {
         auto *dialog = new JobsDialog(m_facade, this);
@@ -939,6 +942,7 @@ StatusStrip::StatusStrip(ClientFacade *facade, QWidget *parent)
     m_model->setActivated([this]() { openModelMenu(); });
     m_load->setActivated([this]() { openEstateMenu(); });
     m_effort->setActivated([this]() { openEffortMenu(); });
+    m_presets->setActivated([this]() { openAgentPresetMenu(); });
 
     // One recompute for every fact the strip draws. A derived label (the model's
     // name, the access level's name) can move on any of these notifies, and the
@@ -952,6 +956,9 @@ StatusStrip::StatusStrip(ClientFacade *facade, QWidget *parent)
     QObject::connect(facade, &ClientFacade::accessNoticeChanged, this, relayout);
     QObject::connect(facade, &ClientFacade::configOptionsChanged, this, relayout);
     QObject::connect(facade, &ClientFacade::modelNoticeChanged, this, relayout);
+    QObject::connect(facade, &ClientFacade::agentPresetsChanged, this, relayout);
+    QObject::connect(facade, &ClientFacade::agentPresetNoticeChanged, this, relayout);
+    QObject::connect(facade, &ClientFacade::appliedAgentPresetChanged, this, relayout);
     QObject::connect(facade, &ClientFacade::modelLoadsChanged, this, relayout);
     QObject::connect(facade, &ClientFacade::contextChanged, this, relayout);
     QObject::connect(facade, &ClientFacade::contextSizeChanged, this, relayout);
@@ -966,6 +973,16 @@ StatusStrip::StatusStrip(ClientFacade *facade, QWidget *parent)
     QObject::connect(facade, &ClientFacade::configOptionsChanged, this, [this]() {
         if (m_modelMenu != nullptr && m_modelMenu->isVisible())
             fillModelMenu();
+    });
+
+    QObject::connect(facade, &ClientFacade::agentPresetsChanged, this, [this]() {
+        if (m_agentPresetMenu != nullptr && m_agentPresetMenu->isVisible())
+            fillAgentPresetMenu();
+    });
+
+    QObject::connect(facade, &ClientFacade::agentPresetNoticeChanged, this, [this]() {
+        if (m_agentPresetMenu != nullptr && m_agentPresetMenu->isVisible())
+            fillAgentPresetMenu();
     });
 
     QObject::connect(facade, &ClientFacade::stateChanged, this, [facade]() {
@@ -1007,6 +1024,23 @@ void StatusStrip::refresh()
     m_session->setVisible(!id.isEmpty());
     m_session->setId(id);
 
+    const bool hasAgentPresets = m_facade->hasAgentPresets();
+    m_presets->setVisible(hasAgentPresets);
+    if (hasAgentPresets) {
+        const bool ready = !id.isEmpty();
+        const QString appliedPreset = m_facade->appliedAgentPreset();
+        const QString notice = m_facade->agentPresetNotice();
+        m_presets->setEnabled(ready);
+        m_presets->setValue(QStringLiteral("presets"),
+                            appliedPreset.isEmpty() ? QStringLiteral("choose") : appliedPreset,
+                            ready ? theme->fg() : theme->dim(), 12 * theme->space6());
+        m_presets->setToolTip(!ready
+                                  ? QStringLiteral("No session open; presets apply to the followed session")
+                                  : (!notice.isEmpty()
+                                         ? notice
+                                         : QStringLiteral("Agent preset for this session")));
+    }
+
     // ---- trailing: model, effort, context, jobs ----------------------------
     const QString model = modelName();
     m_model->setVisible(!model.isEmpty());
@@ -1045,7 +1079,7 @@ void StatusStrip::refresh()
     const QString loadWord = modelPhase(activeLoad);
     const QString shown =
         QStringLiteral("parent=%1 status=\"%2\" access=%3 session=%4 model=%5"
-                       " effort=%6 context=%7/%8 jobs=%9 load=%10")
+                       " effort=%6 context=%7/%8 jobs=%9 load=%10 preset=%11")
             .arg(parentId.isEmpty() ? QStringLiteral("-") : parentId)
             .arg(m_facade->status())
             .arg(access.isEmpty() ? QStringLiteral("-") : access)
@@ -1055,14 +1089,18 @@ void StatusStrip::refresh()
             .arg(m_facade->contextUsed())
             .arg(m_facade->contextSize())
             .arg(jobCount > 0 ? jobText() : QStringLiteral("-"))
-            .arg(loadWord.isEmpty() ? QStringLiteral("-") : loadWord);
+            .arg(loadWord.isEmpty() ? QStringLiteral("-") : loadWord)
+            .arg(hasAgentPresets
+                     ? (m_facade->appliedAgentPreset().isEmpty()
+                            ? QStringLiteral("-") : m_facade->appliedAgentPreset())
+                     : QStringLiteral("-"));
     if (shown != m_loggedLine) {
         m_loggedLine = shown;
         qInfo().nospace() << "status strip: " << shown;
     }
 }
 
-// ---- the three chip menus --------------------------------------------------
+// ---- the chip menus --------------------------------------------------------
 
 void StatusStrip::openModelMenu()
 {
@@ -1676,6 +1714,94 @@ int StatusStrip::fillAccessMenu()
     if (live) {
         menu->adjustSize();
         qInfo().nospace() << "status menu: access filled while open (" << rows
+                          << " presets)";
+    }
+    return rows;
+}
+
+void StatusStrip::openAgentPresetMenu()
+{
+    if (!m_facade->hasAgentPresets() || m_facade->sessionId().isEmpty())
+        return;
+
+    m_facade->refreshAgentPresets();
+
+    QMenu *menu = Chrome::shellMenu(this);
+    Chrome::deleteOnHide(menu);
+    auto *group = new QActionGroup(menu);
+    group->setExclusive(true);
+
+    m_agentPresetMenu = menu;
+    m_agentPresetGroup = group;
+
+    const int rows = fillAgentPresetMenu();
+
+    qInfo().nospace() << "status menu: agent presets open (" << rows << " presets)";
+
+    connect(menu, &QMenu::aboutToShow, m_presets, [this]() { m_presets->setOpen(true); });
+    connect(menu, &QMenu::aboutToHide, m_presets, [this]() { m_presets->setOpen(false); });
+    connect(menu, &QMenu::aboutToHide, this, [this]() {
+        m_agentPresetMenu = nullptr;
+        m_agentPresetGroup = nullptr;
+    });
+
+    Chrome::popupMenuAt(QRect(m_presets->mapToGlobal(QPoint(0, 0)), m_presets->size()),
+                        menu, true);
+}
+
+int StatusStrip::fillAgentPresetMenu()
+{
+    QMenu *menu = m_agentPresetMenu.data();
+    QActionGroup *group = m_agentPresetGroup.data();
+    if (menu == nullptr || group == nullptr)
+        return 0;
+
+    const bool live = menu->isVisible();
+    const QList<QAction *> previous = group->actions();
+    for (QAction *action : previous) {
+        menu->removeAction(action);
+        group->removeAction(action);
+        delete action;
+    }
+    menu->clear();
+
+    Chrome::addCaption(menu, QStringLiteral("Agent presets"));
+
+    const QString applied = m_facade->appliedAgentPreset();
+    const QVariantList presets = m_facade->agentPresets();
+    int rows = 0;
+    for (const QVariant &entry : presets) {
+        const QVariantMap preset = entry.toMap();
+        const QString name = preset.value(QStringLiteral("name")).toString();
+        if (name.isEmpty())
+            continue;
+
+        QStringList detail;
+        const QString model = preset.value(QStringLiteral("model")).toString();
+        if (!model.isEmpty())
+            detail.append(QStringLiteral("model: ") + model);
+        if (!preset.value(QStringLiteral("system")).toString().isEmpty())
+            detail.append(QStringLiteral("custom system prompt"));
+
+        QAction *action = addChoice(menu, group, name, name, name == applied,
+                                    detail.join(QStringLiteral("\n")));
+        connect(action, &QAction::triggered, this, [this, name, menu]() {
+            menu->close();
+            m_facade->applyAgentPreset(name);
+        });
+        ++rows;
+    }
+
+    if (rows == 0)
+        Chrome::addEmptyRow(menu, QStringLiteral("No agent presets on this daemon"));
+
+    const QString notice = m_facade->agentPresetNotice();
+    if (!notice.isEmpty())
+        Chrome::addCaption(menu, notice);
+
+    if (live) {
+        menu->adjustSize();
+        qInfo().nospace() << "status menu: agent presets filled while open (" << rows
                           << " presets)";
     }
     return rows;

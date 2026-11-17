@@ -907,11 +907,12 @@ fun ChatScreen(vm: DshViewModel) {
         ?: (ui.pendingSession?.preset ?: ui.currentAgentPreset).takeIf { it.isNotBlank() }
         ?: ui.agentPresetOptions.firstOrNull { it.isDefault }?.name
         ?: ui.agentPresetOptions.firstOrNull()?.name
-    val openPresetLabel = current?.agentPreset?.takeIf { it.isNotBlank() }?.let { id ->
+    val openPresetLabel = (current?.agentPreset?.takeIf { it.isNotBlank() }
+        ?: ui.currentAgentPreset.takeIf { it.isNotBlank() })?.let { id ->
         ui.agentPresetOptions.firstOrNull { it.id == id }
             ?.let { agentPresetLabel(it.id, it.name) }
             ?: agentPresetLabel(id, "")
-    }
+    } ?: "Presets"
     val showPresetChip = isHero && blankSeat && presetLabel != null
     // A one-shot subagent's inbox is not its own to mutate — the web's
     // `queueMutable = subagent === null || mode === 'continuable'`.
@@ -1119,6 +1120,10 @@ fun ChatScreen(vm: DshViewModel) {
                 tabs = tabItems,
                 showTabs = !isHero || extensionTabs.isNotEmpty(),
                 presetLabel = openPresetLabel.takeIf { !isHero },
+                onPresetClick = {
+                    vm.refreshAgentPresets()
+                    showPresets = true
+                },
                 filesOpen = showFiles,
                 // The Files panel resolves every path against a session
                 // (`agentId`), so on the pending seat there is nothing to list. The
@@ -2096,6 +2101,7 @@ fun ChatScreen(vm: DshViewModel) {
         AgentPresetSheet(
             options = ui.agentPresetOptions,
             current = ui.currentAgentPreset,
+            sessionOpen = ui.currentSessionId != null,
             onSelect = {
                 vm.selectAgentPreset(it)
                 showPresets = false
@@ -2346,6 +2352,7 @@ private fun ChatHeader(
     parent: SubagentParent? = null,
     onParent: () -> Unit = {},
     presetLabel: String? = null,
+    onPresetClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val colors = DshTheme.colors
@@ -2435,7 +2442,7 @@ private fun ChatHeader(
                 Spacer(Modifier.width(HEADER_SEAT_GAP))
             }
             if (presetLabel != null) {
-                AgentPresetChip(label = presetLabel, onClick = null)
+                AgentPresetChip(label = presetLabel, onClick = onPresetClick)
                 Spacer(Modifier.width(HEADER_SEAT_GAP))
             }
             // The right panel's seat, which on the web is a header utility. It

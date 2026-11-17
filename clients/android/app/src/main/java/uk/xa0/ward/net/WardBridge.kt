@@ -9,6 +9,8 @@ import org.json.JSONObject
 import uk.xa0.ward.data.LocalWorkspaceStore
 import uk.xa0.ward.model.QUEUE_ACTION_REMOVE
 import uk.xa0.ward.model.QUEUE_ACTION_STEER
+import uk.xa0.ward.model.agentPresetOutcome
+import uk.xa0.ward.model.parseAgentPresets
 import uk.xa0.ward.model.queueActionConfirmed
 import uk.xa0.ward.proto.Cbor
 import uk.xa0.ward.proto.WardApi
@@ -187,6 +189,16 @@ class WardBridge(
                     cwd = request.optString("cwd").takeIf { it.isNotBlank() },
                     model = route,
                 )
+                val preset = request.optString("agentPreset")
+                if (preset.isNotEmpty()) {
+                    val outcome = agentPresetOutcome(
+                        preset,
+                        api.presetApply(session.id, preset).toJson() as? JSONObject,
+                    )
+                    if (outcome.error) {
+                        throw DshRpcException("preset-not-applied", outcome.message, null)
+                    }
+                }
                 JSONObject().put("sessionId", session.id)
             }
 
@@ -358,7 +370,8 @@ class WardBridge(
                 }
             }
             "commands/list" -> wardCommands()
-            "agentPresets/list" -> JSONArray()
+            "agentPresets/list" -> agentPresets()
+            "agentPresets/select" -> selectAgentPreset(request)
             "permissionPresets/catalog" -> permissionCatalog()
             "commands/execute" -> runCommand(args)
             "directoryPicker/list" -> JSONObject()
@@ -555,6 +568,44 @@ class WardBridge(
         api.setModel(session, catalogId)
         return JSONObject()
             .put("selected", JSONObject().put("provider", provider).put("model", model))
+    }
+
+    private suspend fun agentPresets(): JSONObject {
+        val value = api.presetList().toJson() as? JSONObject
+        val presets = parseAgentPresets(value)
+        val rows = JSONArray()
+        for (preset in presets) {
+            val description = buildList {
+                if (preset.model.isNotEmpty()) add("model: ${preset.model}")
+                if (preset.system.isNotEmpty()) add("custom system prompt")
+            }.joinToString("\n")
+            rows.put(JSONObject()
+                .put("id", preset.name)
+                .put("name", preset.name)
+                .put("description", description)
+                .put("isDefault", false)
+                .put("broken", false))
+        }
+        return JSONObject().put("presets", rows)
+    }
+
+    private suspend fun selectAgentPreset(request: JSONObject): JSONObject {
+        val session = request.optString("agentId").ifEmpty { request.optString("sessionId") }
+        val name = request.optString("agentPreset").ifEmpty { request.optString("name") }
+        if (session.isEmpty() || name.isEmpty()) {
+            throw DshRpcException(
+                "invalid_params",
+                "the session and preset are required",
+                null,
+            )
+        }
+        val outcome = agentPresetOutcome(name, api.presetApply(session, name).toJson() as? JSONObject)
+        if (outcome.error) {
+            throw DshRpcException("preset-not-applied", outcome.message, null)
+        }
+        return JSONObject()
+            .put("applied", true)
+            .put("name", outcome.appliedName ?: name)
     }
 
     /**

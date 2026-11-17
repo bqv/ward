@@ -174,6 +174,7 @@ ClientFacade::ClientFacade(QObject *transport, QObject *parent)
                    || m_transportName == QLatin1String("ward");
     m_hasPermissionCatalog = m_transportName == QLatin1String("dsh")
                           || m_transportName == QLatin1String("ward");
+    m_hasAgentPresets = m_transportName == QLatin1String("ward");
     m_hasAttachmentStaging = m_transportName == QLatin1String("dsh")
                           || m_transportName == QLatin1String("ward");
     m_hasFileSurface = m_transportName == QLatin1String("dsh")
@@ -239,6 +240,12 @@ void ClientFacade::bindAll()
 {
     for (const Binding &binding : kBindings)
         bind(binding.property, binding.signal, binding.slot);
+
+    if (m_hasAgentPresets) {
+        bind("agentPresets", "agentPresetsChanged", nullptr);
+        bind("agentPresetNotice", "agentPresetNoticeChanged", nullptr);
+        bind("appliedAgentPreset", "appliedAgentPresetChanged", nullptr);
+    }
 
     if (!m_missing.isEmpty()) {
         qWarning().noquote()
@@ -680,6 +687,20 @@ void ClientFacade::refreshPermissionPresets()
 void ClientFacade::refreshModelCatalog()
 {
     call("refreshConfigOptions()");
+}
+
+void ClientFacade::refreshAgentPresets()
+{
+    if (!m_hasAgentPresets)
+        return;
+    call("refreshAgentPresets()");
+}
+
+void ClientFacade::applyAgentPreset(const QString &name)
+{
+    if (!m_hasAgentPresets)
+        return;
+    call("applyAgentPreset(QString)", QGenericReturnArgument(), stringArg(name));
 }
 
 void ClientFacade::setPermissionPreset(const QString &value)
