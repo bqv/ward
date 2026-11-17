@@ -41,7 +41,23 @@ if ! flock -n 9; then
     flock 9
 fi
 
+aapt2_path=$(find "$GRADLE_USER_HOME/caches/transforms-4" -path "*aapt2-*-linux/aapt2" -type f 2>/dev/null | head -1)
+aapt2_override=""
+case " $* " in
+    *android.aapt2FromMavenOverride*) ;;
+    *)
+        if [ -n "$aapt2_path" ]; then
+            aapt2_dir="${TMPDIR:-/tmp}/ward-aapt2-$$"
+            mkdir -p "$aapt2_dir"
+            cp "$aapt2_path" "$aapt2_dir/aapt2"
+            chmod 755 "$aapt2_dir/aapt2"
+            aapt2_override="-Pandroid.aapt2FromMavenOverride=$aapt2_dir/aapt2"
+        fi
+        ;;
+esac
+
 exec "$ROOT/.toolchain/gradle-8.7/bin/gradle" \
     -g "$GRADLE_USER_HOME" \
     --no-daemon \
+    $aapt2_override \
     "$@"
