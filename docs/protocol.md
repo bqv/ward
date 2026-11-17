@@ -49,9 +49,30 @@ being the offset to ask from again and `dropped` the bytes lost off the front.
 Once the run is freed the method answers a not-found error rather than an empty
 stream; the transcript is the durable source then.
 
-`session.queue {id}` answers `{session, items: [{text, ahead}]}` — the prompts the
-daemon itself holds for that session, in order, so one client can see another
-client's queued prompts rather than each mirroring its own.
+`session.queue {id}` answers `{session, items: [{item, text, ahead}]}` — the
+prompts the daemon itself holds for that session, in order, so one client can
+see another client's queued prompts rather than each mirroring its own. `item`
+is a numeric id that is stable for the queued item's lifetime and increases
+monotonically per daemon; removing an earlier row never renumbers the rows that
+survive.
+
+`session.prompt` takes an optional `queue` bool. By default a second prompt for
+a session that already has a queued item answers `busy` with "the session is
+already queued"; `queue: true` explicitly appends the new prompt behind the
+existing one, up to the eight-deep limit.
+
+`session.queue.remove {id, item}` removes that still-queued item and answers
+`{removed: true}`. An item id the session's queue does not hold answers
+`not_found` and leaves the queue alone.
+
+`session.queue.steer {id, item}` removes the item and inserts its text as the
+next steer on that session's running turn, through the same path
+`session.prompt` with `steer: true` uses: the text is appended to the next
+provider request and a `session.prompted` event records it. It answers
+`{session, item, steered: true}`. A session with no running turn, or a turn
+already holding eight steers, answers `busy` and leaves the item queued. A steer
+the turn never delivers is carried into the queue as its own prompt when the
+turn ends, exactly as an ordinary steer is.
 
 `session.prompt {id, text, steer: true}` answers `{session, steered: true}` when a
 turn is running: the text is appended to that turn's next provider request, in
@@ -269,7 +290,17 @@ into the next fire time (cron fields, or `@every <ms>` for an interval), core st
 and appends `schedule.updated {schedule, state, next_ms}`. Answers `{schedule, next_ms}`. When
 it is due the daemon forks the session, runs `text` as a turn in the child and appends
 `schedule.fired {schedule, session}` before re-arming. `schedule.list` answers
-`{schedules: [...]}` and `schedule.delete` answers `{deleted}`.
+`{schedules: [{schedule, session, cron, title, prompt, active, next_ms}]}` and
+`schedule.delete` answers `{deleted}`.
+
+**`schedule.update`** — params `{id, title?, rrule?, prompt?, active?}`. Edits that schedule
+in place and answers `{schedule, title, rrule, prompt, active, next_ms}`. `rrule` is validated
+exactly as `schedule.set` validates `cron`; an expression that does not parse is
+`invalid_params` and no field is changed. Changing `active` to false pauses the schedule
+(`active: false`, `next_ms: 0`, and it does not fire); true re-arms it from its `rrule`.
+An unknown id is `not_found`. `schedule.list` reports the same `title`, `prompt` and
+`active` fields. An update appends a durable `schedule.updated {schedule, state: "updated",
+next_ms}` event to the session that owns the schedule.
 
 **`goal.set`** — params `{session, text}`. Appends a durable `goal.set {text}` and answers
 `{goal}`; `goal.clear` appends `goal.cleared`. The active goal is prepended to the history
@@ -437,7 +468,7 @@ tool.{list}
 approval.{respond}
 subagent.{prompt,interrupt}
 job.{list,kill}
-schedule.{list,set,delete}
+schedule.{list,set,update,delete}
 goal.{set,clear}
 settings.{get,set}
 terminal.{open,write,resize,close}

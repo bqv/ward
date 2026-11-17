@@ -2600,3 +2600,17 @@ DemesneRouterTab, and otherwise falls back to the terminal RouterTab or the unav
 gap. The fake extension scope's rpc result had to be a private constructor property, because a plain primary-constructor parameter is not
 visible inside a member function. The unit tests pass, the release APK is rebuilt, and the phone was offline (`No route to host`) at
 install time, so 0.6.7/16 remains installed until it returns.
+
+Hundred-and-ninety-ninth: queue ids, row steer and schedule.update, behind their own gate. Queued prompts now carry a daemon-wide monotonic
+`item` id (never renumbered by removals) in `session.queue` as `{item, text, ahead}`; `session.queue.remove {id, item}` deletes one and
+`session.queue.steer {id, item}` promotes one into the running turn through the same `steer_turn` path as `session.prompt {steer:true}`.
+Duplicate queueing is explicit: a second prompt for a session is refused with `busy` unless it carries `queue: true`, which is also what
+the late-steer carry-over passes internally. `schedule.update {id, title?, rrule?, prompt?, active?}` edits a schedule in place, validates
+the rrule exactly as `schedule.set` does, answers the updated schedule and emits `schedule.updated`; `schedule.list` gained title and
+active additively.
+
+The lesson of the last two batches is now designed in: this landed behind `tests/gate_queue`, a small binary with its own daemon
+(`WARD_MAX_RUNS=1`) that parks a run, queues two prompts with `queue:true`, checks the ids, the not_found on a wrong remove, the survivor's
+id after removing the first, steers it, denies the parked approval and sees the carried prompt, then exercises schedule update and delete.
+`gate_tool` is untouched, and the queue gate passes on its own. The monolithic gate's post-timeout hang was the reason the first attempt
+could not be verified, not a defect in this feature.

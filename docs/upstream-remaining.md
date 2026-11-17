@@ -11,7 +11,7 @@ Sources: dsh-linux `30981c4..954e32d` (plus `7ebbdfe`) and dsh-android
 | upstream | what it does | ward equivalent | state |
 |---|---|---|---|
 | dsh-linux 04e06d1, d58a511 | rename or unregister a workspace from the rail | workspaces are cwd groups; store a client-side title alias and a hidden set, clear a hidden group's sessions into the ungrouped bucket | in progress |
-| dsh-linux 96da4a4, 1f32f6d | steer a queued message from its own row | row-level steer once queue items carry ids (see daemon rows) | blocked on queue ids |
+| dsh-linux 96da4a4, 1f32f6d | steer a queued message from its own row | row-level steer once queue items carry ids (see daemon rows) | daemon ready: ids and `session.queue.steer` exist |
 | dsh-linux 91ebfbf, 4d31c1d, bfe2bed, 039482f, 9a07a9e, 6f79f12, b3003fe, 0d03e30 | two-column model menu with captions and scrolling | group `model.list` by its `provider` field and adopt the popup geometry fixes | in progress |
 | dsh-linux 63ae930, ce2bad3 | keep the last roster painted while the list loads | cache the roster keyed by endpoint, paint on startup | in progress |
 | dsh-linux 8753fd3, f6b53ce | explain a failed turn at its end | add the refusal/failure reason to the turn-end row, not just the prompt hand-back | in progress |
@@ -26,12 +26,12 @@ Sources: dsh-linux `30981c4..954e32d` (plus `7ebbdfe`) and dsh-android
 | upstream | what it does | ward prerequisite | state |
 |---|---|---|---|
 | dsh-linux f009200, 3c0f0f2, 89a8c1a, cd78395; dsh-android estate and tenant clusters | estate/model-load chips, tenant cards, load progress, router tab | `estate.status` now serves demesne's live `/status` as `{json}`; the Android chips/cards and the desktop local-engine chip are ported. Outstanding: wiring the Android Router tab to the estate document (its host renders empty under test, so the terminal readout stays), and the DSH metrics view, which the payload does not carry | partially done |
-| dsh-linux 96da4a4 queue steer | addressable queued messages | `session.queue` items need stable ids and a `session.unqueue`/steer verb | queued |
+| dsh-linux 96da4a4 queue steer | addressable queued messages | `session.queue` items now carry stable ids, with `session.queue.remove` and `session.queue.steer` | done |
 | dsh-linux 105bb10 picker create-folder | create a directory from the picker | `host.mkdir` in core and the daemon, with the picker calling it and refreshing; containment checks the parent directory | done |
 | dsh-linux d7b6d30, 56b548d | one-stream terminal attach, uplink, honest failures, title | terminal attach stream (snapshot + output + writable) in core, daemon and protocol | queued |
 | dsh-linux 4dc7504, 7e2e09d, ed3b7c0, 34fde91 | agent presets: read, choose, strip | an agent-preset concept in ward (session preset: system prompt, tool set, model defaults) plus protocol and storage | queued |
-| dsh-linux 788246f, 176f55d; dsh-android e975536 | attachment references, image content; DSH 0.2.2 schedule verbs | attachment reference model (path + hash + media type) and provider image parts; `schedule.update` | queued |
-| dsh-linux c581446, 05cd5fa | schedule edit and target | `schedule.update` in core and protocol | queued |
+| dsh-linux 788246f, 176f55d; dsh-android e975536 | attachment references, image content; DSH 0.2.2 schedule verbs | attachment reference model (path + hash + media type) and provider image parts; `schedule.update` now exists, the attachment model does not | partially done |
+| dsh-linux c581446, 05cd5fa | schedule edit and target | `schedule.update` in core and protocol | done |
 | dsh-linux 5776d71 | workspaceFiles/settings renamed calls | the desktop FilesDock now shows a workspace listing from `session.file_list` (cwd plus one level, sizes, best-effort mtime, refresh, open); `settings.get/set` already exist | done (desktop view) |
 
 ## Not applicable, with the reason kept on the record

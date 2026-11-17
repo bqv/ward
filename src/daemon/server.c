@@ -79,6 +79,7 @@ typedef struct wd_queue {
   char session[WD_ID_LEN];
   char *text;
   char job[WD_ID_LEN];
+  uint64_t id;
 } wd_queue;
 
 typedef struct wd_sched {
@@ -87,6 +88,8 @@ typedef struct wd_sched {
   char session[WD_ID_LEN];
   char *cron;
   char *text;
+  char *title;
+  bool active;
   uint64_t next_ms;
 } wd_sched;
 
@@ -185,6 +188,7 @@ typedef struct {
   wd_scheduler *scheduler;
   wd_sched *schedules;
   wd_queue *queue;
+  uint64_t next_queue_id;
   struct {
     char name[32];
     int slots;
@@ -1540,22 +1544,26 @@ static void drain_queue(wd_server *srv) {
 }
 
 static bool enqueue_turn(wd_server *srv, wd_session *session, const char *text,
-                         const char *job);
+                         const char *job, bool allow_duplicate);
 
 static bool enqueue_prompt(wd_server *srv, wd_session *session,
-                           const char *text) {
-  if (!enqueue_turn(srv, session, text, NULL)) return false;
+                           const char *text, bool allow_duplicate) {
+  if (!enqueue_turn(srv, session, text, NULL, allow_duplicate)) return false;
   for (wd_queue *at = srv->queue; at != NULL; at = at->next)
     if (strcmp(at->session, session->id) == 0) at->announced = true;
   return true;
 }
 
 static bool enqueue_turn(wd_server *srv, wd_session *session, const char *text,
-                         const char *job) {
-  for (wd_queue *at = srv->queue; at != NULL; at = at->next)
-    if (strcmp(at->session, session->id) == 0) return false;
+                         const char *job, bool allow_duplicate) {
+  if (!allow_duplicate) {
+    for (wd_queue *at = srv->queue; at != NULL; at = at->next)
+      if (strcmp(at->session, session->id) == 0) return false;
+  }
   wd_queue *item = calloc(1, sizeof(*item));
   if (item == NULL) return false;
+  if (srv->next_queue_id == 0) srv->next_queue_id = 1;
+  item->id = srv->next_queue_id++;
   snprintf(item->session, sizeof(item->session), "%s", session->id);
   snprintf(item->job, sizeof(item->job), "%s", job != NULL ? job : session->id);
   item->text = strdup(text);
@@ -1609,7 +1617,7 @@ static void handle_subagent_prompt(wd_server *srv, wd_conn *conn, uint64_t id,
   }
   free(parent_id);
   if (srv->max_runs != 0 && active_runs(srv) >= srv->max_runs &&
-      enqueue_turn(srv, child, text, child->id)) {
+      enqueue_turn(srv, child, text, child->id, false)) {
     cbor_item_t *queued = wd_map(3);
     wd_put(queued, "session", wd_text(child->id));
     wd_put(queued, "queued", cbor_build_bool(true));
@@ -2376,7 +2384,8 @@ static void handle_session_queue(wd_server *srv, wd_conn *conn, uint64_t id,
   size_t ahead = 0;
   for (wd_queue *at = srv->queue; at != NULL; at = at->next) {
     if (strcmp(at->session, session_id) != 0) continue;
-    cbor_item_t *item = wd_map(2);
+    cbor_item_t *item = wd_map(3);
+    wd_put(item, "item", wd_uint(at->id));
     wd_put(item, "text", wd_text(at->text != NULL ? at->text : ""));
     wd_put(item, "ahead", wd_uint(ahead));
     bool pushed = cbor_array_push(items, item);
@@ -2388,6 +2397,107 @@ static void handle_session_queue(wd_server *srv, wd_conn *conn, uint64_t id,
   wd_put(result, "session", wd_text(session_id));
   wd_put(result, "items", items);
   free(session_id);
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
+static int steer_turn(wd_server *srv, wd_session *session, const char *text) {
+  wd_run *running = run_find(srv, session->id);
+  if (running == NULL) return -1;
+  if (wd_turn_steer(running->turn, text) != 0) return -2;
+  cbor_item_t *asked = wd_map(1);
+  wd_put(asked, "text", wd_text(text));
+  cbor_item_t *event = wd_map(1);
+  wd_put(event, "text", wd_text(text));
+  uint64_t seq = 0;
+  if (wd_session_emit(session, "session.prompted", asked, &seq) == 0) {
+    index_text(srv, session->id, seq, "user", text);
+    conn_broadcast(srv, session, "session.prompted", seq, event);
+  }
+  return 0;
+}
+
+static void handle_session_queue_remove(wd_server *srv, wd_conn *conn,
+                                        uint64_t id, cbor_item_t *params) {
+  char *session_id = wd_text_copy(wd_get(params, "id"));
+  uint64_t item_id = 0;
+  if (session_id == NULL ||
+      !wd_uint_of(wd_get(params, "item"), &item_id)) {
+    free(session_id);
+    conn_send_error(conn, id, WD_ERR_INVALID_PARAMS,
+                    "id and item are required");
+    conn_arm(srv, conn);
+    return;
+  }
+  bool removed = false;
+  for (wd_queue **at = &srv->queue; *at != NULL; at = &(*at)->next) {
+    wd_queue *item = *at;
+    if (strcmp(item->session, session_id) != 0 || item->id != item_id) continue;
+    *at = item->next;
+    free(item->text);
+    free(item);
+    removed = true;
+    break;
+  }
+  free(session_id);
+  if (!removed) {
+    conn_send_error(conn, id, WD_ERR_NOT_FOUND, "no such queue item");
+    conn_arm(srv, conn);
+    return;
+  }
+  cbor_item_t *result = wd_map(1);
+  wd_put(result, "removed", cbor_build_bool(true));
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
+static void handle_session_queue_steer(wd_server *srv, wd_conn *conn,
+                                       uint64_t id, cbor_item_t *params) {
+  char *session_id = wd_text_copy(wd_get(params, "id"));
+  uint64_t item_id = 0;
+  if (session_id == NULL ||
+      !wd_uint_of(wd_get(params, "item"), &item_id)) {
+    free(session_id);
+    conn_send_error(conn, id, WD_ERR_INVALID_PARAMS,
+                    "id and item are required");
+    conn_arm(srv, conn);
+    return;
+  }
+  wd_session *session = wd_session_find(&srv->store, session_id);
+  free(session_id);
+  if (session == NULL) {
+    conn_send_error(conn, id, WD_ERR_NOT_FOUND, "no such session");
+    conn_arm(srv, conn);
+    return;
+  }
+  wd_queue **found = NULL;
+  for (wd_queue **at = &srv->queue; *at != NULL; at = &(*at)->next) {
+    if (strcmp((*at)->session, session->id) == 0 && (*at)->id == item_id) {
+      found = at;
+      break;
+    }
+  }
+  if (found == NULL) {
+    conn_send_error(conn, id, WD_ERR_NOT_FOUND, "no such queue item");
+    conn_arm(srv, conn);
+    return;
+  }
+  wd_queue *item = *found;
+  int rc = steer_turn(srv, session, item->text);
+  if (rc != 0) {
+    conn_send_error(conn, id, WD_ERR_BUSY,
+                    rc == -2 ? "too many steers for this turn"
+                             : "no turn is running for this session");
+    conn_arm(srv, conn);
+    return;
+  }
+  *found = item->next;
+  free(item->text);
+  free(item);
+  cbor_item_t *result = wd_map(3);
+  wd_put(result, "session", wd_text(session->id));
+  wd_put(result, "item", wd_uint(item_id));
+  wd_put(result, "steered", cbor_build_bool(true));
   conn_send_cached(conn, id, wd_response_ok(id, result));
   conn_arm(srv, conn);
 }
@@ -2859,6 +2969,8 @@ static void handle_schedule_set(wd_server *srv, wd_conn *conn, uint64_t id,
   snprintf(entry->session, sizeof(entry->session), "%s", session->id);
   entry->cron = cron;
   entry->text = text;
+  entry->title = NULL;
+  entry->active = true;
   entry->next_ms = next_ms;
   entry->next = srv->schedules;
   srv->schedules = entry;
@@ -2870,16 +2982,126 @@ static void handle_schedule_set(wd_server *srv, wd_conn *conn, uint64_t id,
   conn_arm(srv, conn);
 }
 
+static void handle_schedule_update(wd_server *srv, wd_conn *conn, uint64_t id,
+                                   cbor_item_t *params) {
+  char *want = wd_text_copy(wd_get(params, "schedule"));
+  if (want == NULL) want = wd_text_copy(wd_get(params, "id"));
+  if (want == NULL) {
+    conn_send_error(conn, id, WD_ERR_INVALID_PARAMS, "id is required");
+    conn_arm(srv, conn);
+    return;
+  }
+  wd_sched *entry = NULL;
+  for (wd_sched *at = srv->schedules; at != NULL; at = at->next)
+    if (strcmp(at->id, want) == 0) entry = at;
+  free(want);
+  if (entry == NULL) {
+    conn_send_error(conn, id, WD_ERR_NOT_FOUND, "no such schedule");
+    conn_arm(srv, conn);
+    return;
+  }
+  char *title = wd_text_copy(wd_get(params, "title"));
+  char *rrule = wd_text_copy(wd_get(params, "rrule"));
+  if (rrule == NULL) rrule = wd_text_copy(wd_get(params, "cron"));
+  char *prompt = wd_text_copy(wd_get(params, "prompt"));
+  if (prompt == NULL) prompt = wd_text_copy(wd_get(params, "text"));
+  cbor_item_t *active_item = wd_get(params, "active");
+  bool active = false;
+  bool has_active = active_item != NULL && wd_bool_of(active_item, &active);
+  if (prompt != NULL && prompt[0] == '\0') {
+    free(title);
+    free(rrule);
+    free(prompt);
+    conn_send_error(conn, id, WD_ERR_INVALID_PARAMS, "prompt is empty");
+    conn_arm(srv, conn);
+    return;
+  }
+  uint64_t next_ms = entry->next_ms;
+  if (rrule != NULL) {
+    if (srv->scheduler == NULL) {
+      free(title);
+      free(rrule);
+      free(prompt);
+      conn_send_error(conn, id, WD_ERR_NOT_SUPPORTED, "schedules are disabled");
+      conn_arm(srv, conn);
+      return;
+    }
+    char *err = NULL;
+    if (wd_scheduler_next(srv->scheduler, rrule, wd_now_ms(), &next_ms,
+                          &err) != 0 ||
+        next_ms == 0) {
+      free(err);
+      free(title);
+      free(rrule);
+      free(prompt);
+      conn_send_error(conn, id, WD_ERR_INVALID_PARAMS,
+                      "the cron expression does not parse");
+      conn_arm(srv, conn);
+      return;
+    }
+    free(err);
+  }
+  if (has_active) {
+    if (!active) {
+      next_ms = 0;
+    } else if (!entry->active) {
+      char *err = NULL;
+      if (srv->scheduler == NULL ||
+          wd_scheduler_next(srv->scheduler, rrule != NULL ? rrule : entry->cron,
+                            wd_now_ms(), &next_ms, &err) != 0 ||
+          next_ms == 0) {
+        free(err);
+        free(title);
+        free(rrule);
+        free(prompt);
+        conn_send_error(conn, id, WD_ERR_INVALID_PARAMS,
+                        "the cron expression does not parse");
+        conn_arm(srv, conn);
+        return;
+      }
+      free(err);
+    }
+  }
+  if (title != NULL) {
+    free(entry->title);
+    entry->title = title;
+  }
+  if (rrule != NULL) {
+    free(entry->cron);
+    entry->cron = rrule;
+  }
+  if (prompt != NULL) {
+    free(entry->text);
+    entry->text = prompt;
+  }
+  if (has_active) entry->active = active;
+  entry->next_ms = next_ms;
+  wd_session *session = wd_session_find(&srv->store, entry->session);
+  if (session != NULL) sched_emit(srv, session, entry->id, "updated", next_ms);
+  cbor_item_t *result = wd_map(6);
+  wd_put(result, "schedule", wd_text(entry->id));
+  wd_put(result, "title", wd_text(entry->title != NULL ? entry->title : ""));
+  wd_put(result, "rrule", wd_text(entry->cron));
+  wd_put(result, "prompt", wd_text(entry->text));
+  wd_put(result, "active", cbor_build_bool(entry->active));
+  wd_put(result, "next_ms", wd_uint(entry->next_ms));
+  conn_send_cached(conn, id, wd_response_ok(id, result));
+  conn_arm(srv, conn);
+}
+
 static void handle_schedule_list(wd_server *srv, wd_conn *conn, uint64_t id) {
   size_t count = 0;
   for (wd_sched *entry = srv->schedules; entry != NULL; entry = entry->next)
     count++;
   cbor_item_t *list = wd_array(count);
   for (wd_sched *entry = srv->schedules; entry != NULL; entry = entry->next) {
-    cbor_item_t *item = wd_map(4);
+    cbor_item_t *item = wd_map(7);
     wd_put(item, "schedule", wd_text(entry->id));
     wd_put(item, "session", wd_text(entry->session));
     wd_put(item, "cron", wd_text(entry->cron));
+    wd_put(item, "title", wd_text(entry->title != NULL ? entry->title : ""));
+    wd_put(item, "prompt", wd_text(entry->text));
+    wd_put(item, "active", cbor_build_bool(entry->active));
     wd_put(item, "next_ms", wd_uint(entry->next_ms));
     bool pushed = cbor_array_push(list, item);
     cbor_decref(&item);
@@ -2903,6 +3125,7 @@ static void handle_schedule_delete(wd_server *srv, wd_conn *conn, uint64_t id,
       if (session != NULL) sched_emit(srv, session, entry->id, "deleted", 0);
       free(entry->cron);
       free(entry->text);
+      free(entry->title);
       free(entry);
       removed = true;
       break;
@@ -3201,7 +3424,7 @@ static void run_free(wd_server *srv, wd_run *run) {
     wd_session *owner = wd_session_find(&srv->store, run->session_id);
     char *late = NULL;
     while (owner != NULL && (late = wd_turn_steer_pop(run->turn)) != NULL) {
-      if (!enqueue_turn(srv, owner, late, NULL))
+      if (!enqueue_turn(srv, owner, late, NULL, true))
         fprintf(stderr, "ward: a late steer was dropped for %s\n",
                 run->session_id);
       free(late);
@@ -3398,23 +3621,16 @@ static void handle_session_prompt(wd_server *srv, wd_conn *conn, uint64_t id,
   }
   bool steer = false;
   wd_bool_of(wd_get(params, "steer"), &steer);
+  bool queue = false;
+  wd_bool_of(wd_get(params, "queue"), &queue);
   if (steer && run_find(srv, session->id) != NULL) {
-    wd_run *running = run_find(srv, session->id);
-    if (wd_turn_steer(running->turn, text) != 0) {
+    int rc = steer_turn(srv, session, text);
+    if (rc != 0) {
       free(session_id);
       free(text);
       conn_send_error(conn, id, WD_ERR_BUSY, "too many steers for this turn");
       conn_arm(srv, conn);
       return;
-    }
-    cbor_item_t *asked = wd_map(1);
-    wd_put(asked, "text", wd_text(text));
-    cbor_item_t *asked_event = wd_map(1);
-    wd_put(asked_event, "text", wd_text(text));
-    uint64_t asked_seq = 0;
-    if (wd_session_emit(session, "session.prompted", asked, &asked_seq) == 0) {
-      index_text(srv, session->id, asked_seq, "user", text);
-      conn_broadcast(srv, session, "session.prompted", asked_seq, asked_event);
     }
     cbor_item_t *result = wd_map(2);
     wd_put(result, "session", wd_text(session->id));
@@ -3459,7 +3675,21 @@ static void handle_session_prompt(wd_server *srv, wd_conn *conn, uint64_t id,
     size_t ahead = 0;
     for (wd_queue *at = srv->queue; at != NULL; at = at->next)
       if (strcmp(at->session, session->id) == 0) ahead++;
-    if (ahead >= 8 || !enqueue_prompt(srv, session, text)) {
+    if (ahead >= 8) {
+      free(session_id);
+      free(text);
+      conn_send_error(conn, id, WD_ERR_BUSY, "the queue is full");
+      conn_arm(srv, conn);
+      return;
+    }
+    if (ahead > 0 && !queue) {
+      free(session_id);
+      free(text);
+      conn_send_error(conn, id, WD_ERR_BUSY, "the session is already queued");
+      conn_arm(srv, conn);
+      return;
+    }
+    if (!enqueue_prompt(srv, session, text, queue)) {
       free(session_id);
       free(text);
       conn_send_error(conn, id, WD_ERR_BUSY, "the queue is full");
@@ -3494,7 +3724,7 @@ static void handle_session_prompt(wd_server *srv, wd_conn *conn, uint64_t id,
     return;
   }
   if (!device_free(srv, session)) {
-    if (!enqueue_turn(srv, session, text, NULL)) {
+    if (!enqueue_turn(srv, session, text, NULL, queue)) {
       free(session_id);
       free(text);
       conn_send_error(conn, id, WD_ERR_BUSY, "the session is already queued");
@@ -3614,7 +3844,7 @@ static void handle_session_prompt(wd_server *srv, wd_conn *conn, uint64_t id,
 
 static void drain_schedules(wd_server *srv, uint64_t now) {
   for (wd_sched *entry = srv->schedules; entry != NULL; entry = entry->next) {
-    if (entry->next_ms == 0 || entry->next_ms > now) continue;
+    if (!entry->active || entry->next_ms == 0 || entry->next_ms > now) continue;
     wd_session *session = wd_session_find(&srv->store, entry->session);
     if (session != NULL) {
       wd_session *child = NULL;
@@ -4153,6 +4383,8 @@ static void handle_request(wd_server *srv, wd_conn *conn, uint64_t id,
     handle_goal_clear(srv, conn, id, params);
   } else if (strcmp(method, "schedule.set") == 0) {
     handle_schedule_set(srv, conn, id, params);
+  } else if (strcmp(method, "schedule.update") == 0) {
+    handle_schedule_update(srv, conn, id, params);
   } else if (strcmp(method, "schedule.list") == 0) {
     handle_schedule_list(srv, conn, id);
   } else if (strcmp(method, "schedule.delete") == 0) {
@@ -4225,6 +4457,10 @@ static void handle_request(wd_server *srv, wd_conn *conn, uint64_t id,
     handle_job_follow(srv, conn, id, params);
   } else if (strcmp(method, "session.queue") == 0) {
     handle_session_queue(srv, conn, id, params);
+  } else if (strcmp(method, "session.queue.remove") == 0) {
+    handle_session_queue_remove(srv, conn, id, params);
+  } else if (strcmp(method, "session.queue.steer") == 0) {
+    handle_session_queue_steer(srv, conn, id, params);
   } else if (strcmp(method, "approval.list") == 0) {
     handle_approval_list(srv, conn, id);
   } else if (strcmp(method, "session.file_read_blob") == 0) {
@@ -5037,6 +5273,7 @@ cleanup:
     srv.schedules = entry->next;
     free(entry->cron);
     free(entry->text);
+    free(entry->title);
     free(entry);
   }
   wd_scheduler_free(srv.scheduler);
