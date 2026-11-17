@@ -101,6 +101,7 @@ struct wd_turn {
   char *steers[8];
   size_t steer_count;
   uint64_t epoch;
+  bool history_pruned;
   wd_tool_repeat repeats[WD_TURN_REPEATS];
   size_t repeat_count;
 };
@@ -113,6 +114,9 @@ static const wd_limits PYTHON_LIMITS = {.fuel = 1000000000ull,
                                        .max_memory = 256 * 1024 * 1024,
                                        .max_instances = 8};
 
+#define WD_HISTORY_MAX 16
+#define WD_HISTORY_HEAD 2
+#define WD_HISTORY_TAIL 8
 #define WD_TOOL_MAX (64u * 1024u)
 #define WD_TOOL_SHOWN (256u)
 #define WD_SPILL_MAX (4u * 1024u * 1024u)
@@ -2058,8 +2062,42 @@ static int net_submit(wd_turn *turn, cbor_item_t *reply, char **err) {
   return 1;
 }
 
+static cbor_item_t *payload_history(wd_turn *turn, wd_turn_emit emit,
+                                    void *ctx) {
+  if (turn->history == NULL) return NULL;
+  size_t total = cbor_array_size(turn->history);
+  if (total <= WD_HISTORY_MAX) {
+    if (!cbor_incref(turn->history)) return NULL;
+    return turn->history;
+  }
+  size_t kept = WD_HISTORY_HEAD + WD_HISTORY_TAIL;
+  cbor_item_t *pruned = wd_array(kept);
+  if (pruned == NULL) return NULL;
+  cbor_item_t **items = cbor_array_handle(turn->history);
+  bool ok = true;
+  for (size_t i = 0; ok && i < WD_HISTORY_HEAD; i++)
+    ok = cbor_array_push(pruned, items[i]);
+  for (size_t i = total - WD_HISTORY_TAIL; ok && i < total; i++)
+    ok = cbor_array_push(pruned, items[i]);
+  if (!ok) {
+    wd_free(pruned);
+    return NULL;
+  }
+  if (!turn->history_pruned) {
+    turn->history_pruned = true;
+    cbor_item_t *notice = wd_map(2);
+    wd_put(notice, "dropped", wd_uint(total - kept));
+    wd_put(notice, "kept", wd_uint(kept));
+    char *notice_err = NULL;
+    (void)emit(ctx, "history.pruned", notice, &notice_err);
+    free(notice_err);
+    wd_free(notice);
+  }
+  return pruned;
+}
+
 static int model_continue(wd_turn *turn, cbor_item_t *result, const char *tool,
-                          char **err) {
+                          wd_turn_emit emit, void *ctx, char **err) {
   if (!turn->model_tool) return 0;
   turn->model_tool = false;
   if (turn->provider_rounds >= WD_TURN_ROUNDS) return 0;
@@ -2081,10 +2119,8 @@ static int model_continue(wd_turn *turn, cbor_item_t *result, const char *tool,
     return -1;
   }
   wd_put(merged, "prompt", wd_text(prompt));
-  if (turn->history != NULL) {
-    cbor_item_t *shared = turn->history;
-    if (cbor_incref(shared)) wd_put(merged, "history", shared);
-  }
+  cbor_item_t *history = payload_history(turn, emit, ctx);
+  if (history != NULL) wd_put(merged, "history", history);
   if (named) wd_put(merged, "model", wd_text(turn->model_name));
   if (images != NULL) wd_put(merged, "images", images);
   cbor_item_t *request = NULL;
@@ -2265,10 +2301,8 @@ static int process_action(wd_turn *turn, cbor_item_t *action, wd_turn_emit emit,
                                    (named ? 1 : 0) + (images != NULL ? 1 : 0));
       wd_put(merged, "prompt", wd_text(text != NULL ? text : ""));
       free(text);
-      if (turn->history != NULL) {
-        cbor_item_t *shared = turn->history;
-        if (cbor_incref(shared)) wd_put(merged, "history", shared);
-      }
+      cbor_item_t *history = payload_history(turn, emit, ctx);
+      if (history != NULL) wd_put(merged, "history", history);
       if (named) wd_put(merged, "model", wd_text(turn->model_name));
       if (images != NULL) wd_put(merged, "images", images);
       rc = provider_phase(turn, merged, &request, err);
@@ -2354,7 +2388,8 @@ static int process_action(wd_turn *turn, cbor_item_t *action, wd_turn_emit emit,
           wd_free(done);
         }
         if (rc == 0 && !*pending) {
-          int continued = model_continue(turn, result, capability, err);
+          int continued =
+              model_continue(turn, result, capability, emit, ctx, err);
           if (continued < 0) {
             if (result != NULL) wd_free(result);
             rc = -1;
@@ -2499,6 +2534,7 @@ int wd_turn_prompt(wd_turn *turn, const char *text, wd_turn_emit emit, void *ctx
                    char **err) {
   turn->id = next_turn_id();
   turn->history = history_with_head(turn->history, turn->head);
+  turn->history_pruned = false;
   turn->model_tool = false;
   turn->provider_rounds = 0;
   repeats_clear(turn);
@@ -2617,7 +2653,7 @@ int wd_turn_resume_tool(wd_turn *turn, wd_turn_emit emit, void *ctx,
     const char *used = turn->park_capability[0] != '\0'
                            ? turn->park_capability
                            : "exec.run";
-    int continued = model_continue(turn, reply, used, err);
+    int continued = model_continue(turn, reply, used, emit, ctx, err);
     if (continued != 0) {
       wd_free(message);
       wd_free(reply);
