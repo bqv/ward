@@ -2699,3 +2699,13 @@ drop the next provider connection, two provider requests in the capture, the tur
 monolithic gate: the same change re-triggers its post-timeout hang, exactly like the earlier daemon-side attempts, so it was reverted to keep
 the suite green at 60. The next attempt should keep this http.c retry and, before landing, move the failing part of gate_tool (the section
 after its timeout test) into its own binary, which is now the established pattern for everything else.
+
+Two-hundred-and-tenth: the remaining three items, with the next move written down. (1) Pre-header transport retry: the http.c child loop
+is the working design (three attempts, poll backoff, only before headers are sent, zero marker only when all fail) and gate_net proved it;
+it must land together with moving gate_tool's timeout section into gate_timeout, because that section is what turns every daemon-side
+change into the post-timeout hang. The move is mechanical: the timeout test is self-contained (park /run, approve, expect the timeout
+outcome and turn.end) and its own binary removes the state that poisons the rest of gate_tool. (2) Compaction tool-result pruner: not
+implementable honestly yet. History carries role+text only; tool results live in the continuation prompt and are never persisted, so there is
+no tool message to prune. The existing byte-budget trim already keeps the newest and reports `omitted`; a real pruner needs the assistant
+tool-call and role:tool history shape first, which is also what a conformant multi-step conversation needs. (3) The 0.6.8 (17) APK is built;
+the phone is offline at 192.168.1.100:37131, so the install is pending reachability.
