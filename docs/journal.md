@@ -2726,3 +2726,8 @@ pre-header retry that was reverted three times now lands, `gate_net` passes, and
 brushing a five-minute watchdog. The retry itself is the http.c child loop: three attempts with a `poll` backoff on GOT_NOTHING, connect,
 send, receive or timeout while no header has been sent, with the zero marker only when every attempt fails; no `turn.retry` event exists for
 this class because the daemon cannot see it, and the reliability row says so.
+
+Two-hundred-and-thirteenth: the daily phone is on 0.6.8 (17). Its wireless-debugging port had changed to 38789 (192.168.1.100), which is why
+both the old 37131 and the stale 192.168.1.106 address in the keepalive log refused or had no route; after connecting to the current port,
+`adb install -r -d` succeeded and `dumpsys package uk.xa0.ward` reports versionCode 17 and versionName 0.6.8. The build carries the estate
+cards, the Router tab, workspace files, queue row actions and the preset surfaces.
