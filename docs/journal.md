@@ -2588,3 +2588,15 @@ live ring buffer is fed from that masked copy too; `emit_turn_failure` masks its
 gate reads a file containing fake `sk-` and `ghp_` tokens and scans every event of the turn: none carries the raw value and at least one
 carries `[redacted]`. It is a narrow pattern set, and it deliberately masks the transcript as well as the wire, so a leaked token never
 reaches either the client or the store.
+
+Hundred-and-ninety-eighth: the Android toolchain, finally. `:app:processReleaseResources` had been dying with `AAPT2 ... Daemon startup
+failed`; the `--debug` log carried the real cause underneath: `java.io.IOException: Cannot run program .../aapt2: error=13, Permission
+denied` when the Gradle daemon spawns the binary from the workspace, while a shell can execute it and the same binary runs from `/tmp`.
+`build.sh` now copies the extracted aapt2 into a private tmpfs directory and passes `-Pandroid.aapt2FromMavenOverride`, which builds
+uk.xa0.ward 0.6.8 (17) reliably.
+
+The Router tab followed: RouterHost polls `estate.status` while composed, accepts a reply only when it carries estate keys, renders
+DemesneRouterTab, and otherwise falls back to the terminal RouterTab or the unavailable state; the earlier empty tree was a first-frame
+gap. The fake extension scope's rpc result had to be a private constructor property, because a plain primary-constructor parameter is not
+visible inside a member function. The unit tests pass, the release APK is rebuilt, and the phone was offline (`No route to host`) at
+install time, so 0.6.7/16 remains installed until it returns.
