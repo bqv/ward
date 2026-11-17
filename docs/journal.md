@@ -2672,3 +2672,14 @@ string. The JSON buffer is now 2 MiB (reply 2 MiB + 8 KiB) and the guest heap 2 
 oversized requests still fail cleanly rather than truncating. The fixture can append raw requests to `WARD_FAKE_CAPTURE_FILE`, and
 `gate_image` asserts a PNG attachment produces `image_url` / `data:image/png;base64,` / `iVBORw0KGgo` and a session without attachments
 produces none.
+
+Two-hundred-and-seventh: the model tool loop. A turn no longer ends after one tool call. `wd_turn` carries a `model_tool` marker and a
+`provider_rounds` counter (cap four); the marker is set only where a provider reply carrying a non-empty `tool` is turned into the driver's
+`{kind:"tool"}` message, so slash-command calls never set it. When a model-originated tool result returns, `model_continue` builds a
+bounded prompt ("The tool <name> returned: ..." truncated to the visible limit) with the same history/model/images payload as a normal
+provider round and submits it, and the result never reaches the driver's engine path. The interception is in both the synchronous tools
+branch (before the result message) and `wd_turn_resume_tool` for async exec. At the fifth would-be round the marker is cleared and the
+result falls through to the driver as before, so a provider that keeps asking for tools still ends. `gate_loop` proves a plain prompt
+makes exactly one provider request with no tool, and "use a tool now" produces one fs.read call, one result, a second provider request
+whose body contains "fs.read returned", and a final text delta. Known limits: a denied approval still ends the turn without feeding the
+denial back to the model, and the fourth tool still executes before the fall-through end.

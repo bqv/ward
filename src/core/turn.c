@@ -33,6 +33,7 @@ static int invoke(wd_instance *instance, cbor_item_t *payload,
 #define WD_TURN_DEPTH 8
 #define WD_TURN_FUEL 50000000ull
 #define WD_TURN_MEMORY (16 * 1024 * 1024)
+#define WD_TURN_ROUNDS 4
 
 struct wd_turn {
   wd_engine *engine;
@@ -81,6 +82,8 @@ struct wd_turn {
   wd_instance *skills;
   int pending_kind;
   int repair_tried;
+  bool model_tool;
+  int provider_rounds;
   cbor_item_t *parked;
   uint64_t park_call;
   uint64_t park_epoch;
@@ -1985,9 +1988,48 @@ static int net_submit(wd_turn *turn, cbor_item_t *reply, char **err) {
   turn->http_key = strdup(turn->api_key);
   turn->http_attempts = 0;
   free(body);
+  turn->provider_rounds++;
   turn->pending_kind = 3;
   if (turn->http_url == NULL || turn->http_body == NULL) return -1;
   return 1;
+}
+
+static int model_continue(wd_turn *turn, cbor_item_t *result, const char *tool,
+                          char **err) {
+  if (!turn->model_tool) return 0;
+  turn->model_tool = false;
+  if (turn->provider_rounds >= WD_TURN_ROUNDS) return 0;
+  char *text = wd_text_copy(wd_get(result, "text"));
+  if (text == NULL) text = wd_text_copy(wd_get(result, "error"));
+  if (text == NULL) text = strdup("");
+  char prompt[WD_TOOL_SHOWN + 160];
+  snprintf(prompt, sizeof(prompt), "The tool %s returned:\n%.*s",
+           tool != NULL ? tool : "tool", (int)WD_TOOL_SHOWN,
+           text != NULL ? text : "");
+  free(text);
+  bool named = turn->model_name[0] != '\0';
+  cbor_item_t *images = provider_images(turn);
+  cbor_item_t *merged = wd_map(1 + (turn->history != NULL ? 1 : 0) +
+                               (named ? 1 : 0) + (images != NULL ? 1 : 0));
+  if (merged == NULL) {
+    if (images != NULL) cbor_decref(&images);
+    *err = strdup("cannot build the provider payload");
+    return -1;
+  }
+  wd_put(merged, "prompt", wd_text(prompt));
+  if (turn->history != NULL) {
+    cbor_item_t *shared = turn->history;
+    if (cbor_incref(shared)) wd_put(merged, "history", shared);
+  }
+  if (named) wd_put(merged, "model", wd_text(turn->model_name));
+  if (images != NULL) wd_put(merged, "images", images);
+  cbor_item_t *request = NULL;
+  int rc = provider_phase(turn, merged, &request, err);
+  wd_free(merged);
+  if (rc != 0) return -1;
+  int parked = net_submit(turn, request, err);
+  wd_free(request);
+  return parked == 1 ? 1 : -1;
 }
 
 bool wd_turn_retry_ready(wd_turn *turn) {
@@ -2246,14 +2288,22 @@ static int process_action(wd_turn *turn, cbor_item_t *action, wd_turn_emit emit,
           free(done_err);
           wd_free(done);
         }
+        if (rc == 0 && !*pending) {
+          int continued = model_continue(turn, result, capability, err);
+          if (continued < 0) {
+            if (result != NULL) wd_free(result);
+            rc = -1;
+          } else if (continued == 1) {
+            *pending = true;
+          } else {
+            cbor_item_t *message = wd_map(2);
+            wd_put(message, "kind", wd_text("result"));
+            wd_put(message, "payload", result);
+            *next = message;
+          }
+        }
         free(capability);
         wd_free(request);
-        if (rc == 0 && !*pending) {
-          cbor_item_t *message = wd_map(2);
-          wd_put(message, "kind", wd_text("result"));
-          wd_put(message, "payload", result);
-          *next = message;
-        }
       }
     } else {
       cbor_item_t *result = NULL;
@@ -2384,6 +2434,8 @@ int wd_turn_prompt(wd_turn *turn, const char *text, wd_turn_emit emit, void *ctx
                    char **err) {
   turn->id = next_turn_id();
   turn->history = history_with_head(turn->history, turn->head);
+  turn->model_tool = false;
+  turn->provider_rounds = 0;
   cbor_item_t *message = wd_map(2);
   if (message == NULL) {
     *err = strdup("out of memory");
@@ -2493,6 +2545,17 @@ int wd_turn_resume_tool(wd_turn *turn, wd_turn_emit emit, void *ctx,
       wd_put(timing, "cache_n", wd_uint(cache_n));
       (void)emit(ctx, "turn.timings", timing, err);
       wd_free(timing);
+    }
+  }
+  if (turn->model_tool) {
+    const char *used = turn->park_capability[0] != '\0'
+                           ? turn->park_capability
+                           : "exec.run";
+    int continued = model_continue(turn, reply, used, err);
+    if (continued != 0) {
+      wd_free(message);
+      wd_free(reply);
+      return continued == 1 ? WD_TURN_PENDING : -1;
     }
   }
   char *tool = wd_text_copy(wd_get(reply, "tool"));
@@ -2684,6 +2747,7 @@ int wd_turn_resume_http_body(wd_turn *turn, long status, const char *body,
     tool = NULL;
   }
   if (tool != NULL && tool[0] != '\0') {
+    turn->model_tool = true;
     char *arguments = wd_text_copy(wd_get(reply, "arguments"));
     wd_free(message);
     message = wd_map(2);

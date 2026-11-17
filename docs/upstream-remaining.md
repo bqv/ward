@@ -41,3 +41,10 @@ Sources: dsh-linux `30981c4..954e32d` (plus `7ebbdfe`) and dsh-android
 - The DSH `session/attachment` and `directoryPicker/list` protocol shapes and the
   web UI are DSH's own contracts; ward's equivalents are `attachment.*`,
   `host.list` and its own clients.
+
+## Limitations closed since this list
+
+- The turn no longer ends after one model tool call. Core marks a provider reply that carries a tool call,
+  intercepts the resulting tool result, submits it back to the provider as another round, and stops after four
+  provider rounds; slash-command tool calls still finish in one step. `gate_loop` asserts the model tool's
+  `tool.call` and `tool.result`, a second provider request carrying the result, and a final `text.delta`.
