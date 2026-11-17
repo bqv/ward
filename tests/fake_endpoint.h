@@ -80,6 +80,15 @@ static void serve(int fd) {
     }
   }
   request[len] = '\0';
+  const char *capture = getenv("WARD_FAKE_CAPTURE_FILE");
+  if (capture != NULL) {
+    int fd = open(capture, O_WRONLY | O_CREAT | O_APPEND, 0600);
+    if (fd >= 0) {
+      ssize_t written = write(fd, request, len);
+      (void)written;
+      close(fd);
+    }
+  }
   const char *slow = getenv("WARD_FAKE_429_FILE");
   if (slow != NULL && access(slow, F_OK) == 0) {
     unlink(slow);

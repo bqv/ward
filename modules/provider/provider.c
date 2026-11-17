@@ -6,13 +6,14 @@
 
 #include "wd_abi.h"
 
-#define HEAP_SIZE (1024u * 1024u)
+#define HEAP_SIZE (2u * 1024u * 1024u)
 #define TEXT_SIZE 2048u
-#define JSON_SIZE 65536u
+#define JSON_SIZE (2u * 1024u * 1024u)
 #define REPLY_SIZE (JSON_SIZE + 8192u)
 #define CALL_SIZE 8192u
 #define TOOL_SIZE 128u
 #define ARG_SIZE 8192u
+#define IMAGE_MAX 2u
 
 static uint8_t heap[HEAP_SIZE];
 static uint32_t heap_at;
@@ -140,6 +141,48 @@ static void json_add_escaped(json_builder *b, const uint8_t *in, uint32_t len) {
     }
     json_add(b, tmp, n);
   }
+}
+
+static void json_add_base64(json_builder *b, const uint8_t *in, uint32_t len) {
+  static const char alphabet[] =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  char chunk[4];
+  uint32_t i = 0;
+  for (; i + 3 <= len; i += 3) {
+    uint32_t v = ((uint32_t)in[i] << 16) | ((uint32_t)in[i + 1] << 8) |
+                 (uint32_t)in[i + 2];
+    chunk[0] = alphabet[(v >> 18) & 0x3f];
+    chunk[1] = alphabet[(v >> 12) & 0x3f];
+    chunk[2] = alphabet[(v >> 6) & 0x3f];
+    chunk[3] = alphabet[v & 0x3f];
+    json_add(b, chunk, 4);
+  }
+  if (i < len) {
+    uint32_t v = (uint32_t)in[i] << 16;
+    if (i + 1 < len) v |= (uint32_t)in[i + 1] << 8;
+    chunk[0] = alphabet[(v >> 18) & 0x3f];
+    chunk[1] = alphabet[(v >> 12) & 0x3f];
+    chunk[2] = i + 1 < len ? alphabet[(v >> 6) & 0x3f] : '=';
+    chunk[3] = '=';
+    json_add(b, chunk, 4);
+  }
+}
+
+static int wd_r_bytes_ptr(wd_r *r, const uint8_t **p, uint32_t *n) {
+  uint8_t major = 0;
+  uint32_t len = 0;
+  if (wd_r_head(r, &major, &len) != 0 || major != 2) {
+    r->failed = 1;
+    return -1;
+  }
+  if (r->at > r->len || len > r->len - r->at) {
+    r->failed = 1;
+    return -1;
+  }
+  *p = r->buf + r->at;
+  *n = len;
+  r->at += len;
+  return 0;
 }
 
 static void append_text(uint32_t *at, const uint8_t *p, uint32_t n) {
@@ -681,6 +724,11 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
   const uint8_t *hist_role[32];
   uint32_t hist_role_len[32];
   uint32_t hist_count = 0;
+  const uint8_t *image_data[IMAGE_MAX];
+  uint32_t image_data_len[IMAGE_MAX];
+  const uint8_t *image_type[IMAGE_MAX];
+  uint32_t image_type_len[IMAGE_MAX];
+  uint32_t image_count = 0;
   if (wd_r_map(&r, &n) != 0) return;
   for (uint32_t i = 0; i < n; i++) {
     const uint8_t *kp = 0;
@@ -734,6 +782,36 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
           hist_role_len[hist_count] = rn;
           hist_count++;
         }
+      }
+    } else if (wd_key_eq(kp, kn, "images")) {
+      uint32_t in = 0;
+      if (wd_r_array(&r, &in) != 0) return;
+      for (uint32_t e = 0; e < in; e++) {
+        uint32_t mn = 0;
+        if (wd_r_map(&r, &mn) != 0) return;
+        const uint8_t *dp = 0;
+        uint32_t dn = 0;
+        const uint8_t *mp = 0;
+        uint32_t mlen = 0;
+        for (uint32_t k = 0; k < mn; k++) {
+          const uint8_t *hk = 0;
+          uint32_t hl = 0;
+          if (wd_r_text_ptr(&r, &hk, &hl) != 0) return;
+          if (wd_key_eq(hk, hl, "media_type")) {
+            if (wd_r_text_ptr(&r, &mp, &mlen) != 0) return;
+          } else if (wd_key_eq(hk, hl, "data")) {
+            if (wd_r_bytes_ptr(&r, &dp, &dn) != 0) return;
+          } else if (wd_r_skip(&r) != 0) {
+            return;
+          }
+        }
+        if (dp == 0 || mp == 0 || mlen == 0 || image_count == IMAGE_MAX)
+          continue;
+        image_data[image_count] = dp;
+        image_data_len[image_count] = dn;
+        image_type[image_count] = mp;
+        image_type_len[image_count] = mlen;
+        image_count++;
       }
     } else if (wd_key_eq(kp, kn, "status")) {
       uint32_t value = 0;
@@ -880,9 +958,28 @@ void ward_call(uint32_t at, uint32_t len, uint32_t out) {
   {
     static const char user_open[] = "{\"role\":\"user\",\"content\":\"";
     static const char suffix[] = "\"}]}";
-    json_addz(&jb, user_open);
-    json_add_escaped(&jb, prompt, prompt_len);
-    json_addz(&jb, suffix);
+    if (image_count == 0) {
+      json_addz(&jb, user_open);
+      json_add_escaped(&jb, prompt, prompt_len);
+      json_addz(&jb, suffix);
+    } else {
+      static const char text_open[] =
+          "{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"";
+      static const char text_close[] = "\"}";
+      static const char image_open[] =
+          ",{\"type\":\"image_url\",\"image_url\":{\"url\":\"data:";
+      json_addz(&jb, text_open);
+      json_add_escaped(&jb, prompt, prompt_len);
+      json_addz(&jb, text_close);
+      for (uint32_t i = 0; i < image_count; i++) {
+        json_addz(&jb, image_open);
+        json_add(&jb, (const char *)image_type[i], image_type_len[i]);
+        json_addz(&jb, ";base64,");
+        json_add_base64(&jb, image_data[i], image_data_len[i]);
+        json_addz(&jb, "\"}}");
+      }
+      json_addz(&jb, "]}]}");
+    }
   }
   if (jb.overflow || jb.len + 128 > REPLY_SIZE) {
     emit_buffer_error(out);

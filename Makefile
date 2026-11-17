@@ -146,6 +146,9 @@ $(BUILDDIR)/gate_term: tests/gate_term.c $(CLIENT_OBJ) $(CORE_LIB)
 $(BUILDDIR)/gate_attach: tests/gate_attach.c $(CLIENT_OBJ) $(CORE_LIB)
 	$(CC) $(CFLAGS) -Wno-unused-function $< $(CLIENT_OBJ) $(CORE_LIB) $(LDFLAGS) $(PKG_LIBS) -o $@
 
+$(BUILDDIR)/gate_image: tests/gate_image.c $(CLIENT_OBJ) $(CORE_LIB)
+	$(CC) $(CFLAGS) -Wno-unused-function $< $(CLIENT_OBJ) $(CORE_LIB) $(LDFLAGS) $(PKG_LIBS) -o $@
+
 $(BUILDDIR)/gate_preset: tests/gate_preset.c $(CLIENT_OBJ) $(CORE_LIB)
 	$(CC) $(CFLAGS) -Wno-unused-function $< $(CLIENT_OBJ) $(CORE_LIB) $(LDFLAGS) $(PKG_LIBS) -o $@
 

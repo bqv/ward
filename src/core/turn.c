@@ -1868,6 +1868,59 @@ static int provider_phase(wd_turn *turn, cbor_item_t *payload,
 
 static int net_submit(wd_turn *turn, cbor_item_t *reply, char **err);
 
+#define WD_IMAGE_MAX 2
+#define WD_IMAGE_BYTES (512u * 1024u)
+
+static cbor_item_t *provider_images(wd_turn *turn) {
+  const wd_attachment *items = NULL;
+  size_t count = wd_session_attachments(turn->session, &items);
+  cbor_item_t *images = NULL;
+  size_t added = 0;
+  for (size_t i = 0; i < count && added < WD_IMAGE_MAX; i++) {
+    const wd_attachment *att = &items[i];
+    if (strncmp(att->media_type, "image/", 6) != 0) continue;
+    if (att->size > WD_IMAGE_BYTES) continue;
+    int fd = open(att->path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) continue;
+    struct stat sb;
+    if (fstat(fd, &sb) != 0 || !S_ISREG(sb.st_mode) ||
+        sb.st_size > (off_t)WD_IMAGE_BYTES) {
+      close(fd);
+      continue;
+    }
+    size_t len = (size_t)sb.st_size;
+    uint8_t *bytes = malloc(len > 0 ? len : 1);
+    if (bytes == NULL) {
+      close(fd);
+      continue;
+    }
+    size_t got = 0;
+    while (got < len) {
+      ssize_t n = read(fd, bytes + got, len - got);
+      if (n <= 0) break;
+      got += (size_t)n;
+    }
+    close(fd);
+    if (got != len) {
+      free(bytes);
+      continue;
+    }
+    cbor_item_t *entry = wd_map(2);
+    wd_put(entry, "media_type", wd_text(att->media_type));
+    wd_put(entry, "data", cbor_build_bytestring(bytes, len));
+    free(bytes);
+    if (images == NULL) images = wd_array(WD_IMAGE_MAX);
+    bool pushed = images != NULL && cbor_array_push(images, entry);
+    cbor_decref(&entry);
+    if (!pushed) {
+      if (images != NULL) cbor_decref(&images);
+      return NULL;
+    }
+    added++;
+  }
+  return images;
+}
+
 static bool tool_attempt(const char *text) {
   if (text == NULL) return false;
   return strstr(text, "\"tool\"") != NULL || strstr(text, "tool_calls") != NULL;
@@ -2101,8 +2154,9 @@ static int process_action(wd_turn *turn, cbor_item_t *action, wd_turn_emit emit,
       cbor_item_t *request = NULL;
       char *text = wd_text_copy(wd_get(payload, "prompt"));
       bool named = turn->model_name[0] != '\0';
-      cbor_item_t *merged =
-          wd_map(1 + (turn->history != NULL ? 1 : 0) + (named ? 1 : 0));
+      cbor_item_t *images = provider_images(turn);
+      cbor_item_t *merged = wd_map(1 + (turn->history != NULL ? 1 : 0) +
+                                   (named ? 1 : 0) + (images != NULL ? 1 : 0));
       wd_put(merged, "prompt", wd_text(text != NULL ? text : ""));
       free(text);
       if (turn->history != NULL) {
@@ -2110,6 +2164,7 @@ static int process_action(wd_turn *turn, cbor_item_t *action, wd_turn_emit emit,
         if (cbor_incref(shared)) wd_put(merged, "history", shared);
       }
       if (named) wd_put(merged, "model", wd_text(turn->model_name));
+      if (images != NULL) wd_put(merged, "images", images);
       rc = provider_phase(turn, merged, &request, err);
       wd_free(merged);
       if (rc == 0) {

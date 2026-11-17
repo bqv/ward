@@ -69,6 +69,7 @@ static void session_free(wd_session *s) {
   free(s->observed);
   free(s->observed_mtime);
   free(s->observed_size);
+  for (size_t i = 0; i < s->attachments_len; i++) free(s->attachments[i].path);
   free(s);
 }
 
@@ -149,6 +150,51 @@ static int apply_observed(void *ctx, uint64_t seq, cbor_item_t *event) {
   }
   free(kind);
   return 0;
+}
+
+static bool attachment_add(wd_session *s, cbor_item_t *payload) {
+  if (s == NULL || payload == NULL) return false;
+  if (s->attachments_len >= WD_ATTACHMENT_MAX) return false;
+  char *name = wd_text_copy(wd_get(payload, "name"));
+  char *path = wd_text_copy(wd_get(payload, "path"));
+  char *media_type = wd_text_copy(wd_get(payload, "media_type"));
+  uint64_t size = 0;
+  (void)wd_uint_of(wd_get(payload, "size"), &size);
+  if (name == NULL || path == NULL) {
+    free(name);
+    free(path);
+    free(media_type);
+    return false;
+  }
+  wd_attachment *att = &s->attachments[s->attachments_len];
+  snprintf(att->name, sizeof(att->name), "%s", name);
+  snprintf(att->media_type, sizeof(att->media_type), "%s",
+           media_type != NULL ? media_type : "");
+  att->path = path;
+  att->size = size;
+  s->attachments_len++;
+  free(name);
+  free(media_type);
+  return true;
+}
+
+static int apply_attachments(void *ctx, uint64_t seq, cbor_item_t *event) {
+  wd_session *s = ctx;
+  (void)seq;
+  char *kind = wd_text_copy(wd_get(event, "kind"));
+  if (kind != NULL && strcmp(kind, "session.attachment") == 0)
+    (void)attachment_add(s, wd_get(event, "payload"));
+  free(kind);
+  return 0;
+}
+
+size_t wd_session_attachments(const wd_session *s, const wd_attachment **out) {
+  if (s == NULL) {
+    if (out != NULL) *out = NULL;
+    return 0;
+  }
+  if (out != NULL) *out = s->attachments;
+  return s->attachments_len;
 }
 
 bool wd_session_observed(const wd_session *s, const char *path) {
@@ -338,6 +384,7 @@ static int session_load(const char *root, const char *id, wd_session **out) {
   if (wd_session_replay(s, 0, apply_pins, s) < 0) goto fail;
   if (wd_session_replay(s, 0, apply_upgrade, s) < 0) goto fail;
   if (wd_session_replay(s, 0, apply_observed, s) < 0) goto fail;
+  if (wd_session_replay(s, 0, apply_attachments, s) < 0) goto fail;
   *out = s;
   return 0;
 fail:
@@ -485,16 +532,30 @@ cbor_item_t *wd_session_to_cbor(const wd_session *s) {
 int wd_session_emit(wd_session *s, const char *kind, cbor_item_t *payload,
             uint64_t *seq_out) {
   uint64_t seq = s->last_seq + 1;
+  cbor_item_t *attachment = NULL;
+  if (strcmp(kind, "session.attachment") == 0 && payload != NULL &&
+      cbor_incref(payload))
+    attachment = payload;
   cbor_item_t *record = wd_map(3);
   wd_put(record, "seq", wd_uint(seq));
   wd_put(record, "kind", wd_text(kind));
   wd_put(record, "payload", payload != NULL ? payload : wd_map(0));
   size_t len = 0;
   uint8_t *bytes = wd_encode(record, &len);
-  if (bytes == NULL) return -1;
+  if (bytes == NULL) {
+    if (attachment != NULL) cbor_decref(&attachment);
+    return -1;
+  }
   int rc = hlog_append(&s->log, bytes, len);
   free(bytes);
-  if (rc != 0) return -1;
+  if (rc != 0) {
+    if (attachment != NULL) cbor_decref(&attachment);
+    return -1;
+  }
+  if (attachment != NULL) {
+    (void)attachment_add(s, attachment);
+    cbor_decref(&attachment);
+  }
   s->last_seq = seq;
   if (seq_out != NULL) *seq_out = seq;
   return 0;

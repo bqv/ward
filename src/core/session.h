@@ -13,11 +13,21 @@
 #include "core/log.h"
 
 #define WD_PIN_MAX 12
+#define WD_ATTACHMENT_MAX 32
+#define WD_ATTACHMENT_NAME 129
+#define WD_ATTACHMENT_TYPE 64
 
 typedef struct {
   char name[32];
   char version[16];
 } wd_pin;
+
+typedef struct {
+  char name[WD_ATTACHMENT_NAME];
+  char *path;
+  uint64_t size;
+  char media_type[WD_ATTACHMENT_TYPE];
+} wd_attachment;
 
 typedef struct {
   char id[WD_ID_LEN];
@@ -32,6 +42,8 @@ typedef struct {
   hlog log;
   wd_pin pins[WD_PIN_MAX];
   size_t pins_len;
+  wd_attachment attachments[WD_ATTACHMENT_MAX];
+  size_t attachments_len;
   char **observed;
   uint64_t *observed_mtime;
   uint64_t *observed_size;
@@ -56,6 +68,7 @@ int wd_session_emit(wd_session *s, const char *kind, cbor_item_t *payload,
             uint64_t *seq_out);
 int wd_session_attach(wd_session *s, const char *name, const uint8_t *data,
                       size_t len, char **path_out, char **err);
+size_t wd_session_attachments(const wd_session *s, const wd_attachment **out);
 int wd_session_upgrade(wd_session *s, const char *name, const char *version,
                       uint64_t *seq_out);
 int wd_session_note_migration(wd_session *s, const char *name,

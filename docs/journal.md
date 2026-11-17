@@ -2663,3 +2663,12 @@ Two-hundred-and-fifth: preset surfaces in both clients. The desktop status strip
 recording the daemon-returned name and showing a refusal without pretending. Android wires `agentPresets/list` and `agentPresets/select`
 to `preset.list`/`preset.apply`, parses the roster and the applied result, opens the existing preset sheet from the header chip and
 surfaces failures in the banner; a pending preset is applied after session creation. gate_desktop and the Android unit suite pass.
+
+Two-hundred-and-sixth: image attachments reach the provider as image parts. The session replays `session.attachment` events into a bounded
+32-entry table (name, path, size, media_type) and live attachments append to it after a successful log append. The provider payload gains an
+optional `images` array of `{media_type, data}` for image attachments at most 512 KiB each, at most two; the provider guest base64-encodes
+them and turns the last user message into a content array with a text part and `image_url` data parts, leaving text-only prompts as a plain
+string. The JSON buffer is now 2 MiB (reply 2 MiB + 8 KiB) and the guest heap 2 MiB, roughly 10 MiB static against the 16 MiB turn cap;
+oversized requests still fail cleanly rather than truncating. The fixture can append raw requests to `WARD_FAKE_CAPTURE_FILE`, and
+`gate_image` asserts a PNG attachment produces `image_url` / `data:image/png;base64,` / `iVBORw0KGgo` and a session without attachments
+produces none.
