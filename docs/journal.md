@@ -2731,3 +2731,10 @@ Two-hundred-and-thirteenth: the daily phone is on 0.6.8 (17). Its wireless-debug
 both the old 37131 and the stale 192.168.1.106 address in the keepalive log refused or had no route; after connecting to the current port,
 `adb install -r -d` succeeded and `dumpsys package uk.xa0.ward` reports versionCode 17 and versionName 0.6.8. The build carries the estate
 cards, the Router tab, workspace files, queue row actions and the preset surfaces.
+
+Two-hundred-and-fourteenth: the goal closed out. The daily phone is back on wireless debugging; adbtrack found the new port by itself
+(37647) and the refreshed 0.6.8 (17) APK is installed and verified — this one carries the Android files view, queue row actions and preset
+surfaces on top of the estate cards and Router tab. The daemon was restarted on the newest binary and answers `session list` over the
+socket. The full suite is green at 63, with gate_fs (observed version), gate_repeat, gate_queue, gate_term, gate_attach, gate_image,
+gate_preset, gate_prune, gate_net and gate_timeout all part of it, and the reliability and upstream worklists were corrected to say what
+actually landed.
